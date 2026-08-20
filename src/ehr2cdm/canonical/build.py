@@ -100,18 +100,40 @@ def plan_stage(cfg: DatasetConfig, layout: WorkLayout) -> list[StageTask]:
         raise RuntimeError(f"no ingest manifest at {manifest_path}; run ingest first")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
+    # The manifest can also be stale: it survives a code-version bump that invalidated
+    # the very files it names. Checking each recorded output against the address the
+    # current code would give it turns the version guard from advisory into enforced.
+    from ehr2cdm.ingest import plan_ingest
+
+    expected = {
+        (t.partition_id, t.source_id, t.file_path, t.sheet or ""): t
+        for t in plan_ingest(cfg, layout)
+    }
+
     by_source: dict[tuple[str, str], list[str]] = {}
     missing: list[str] = []
+    stale: list[str] = []
     for unit in manifest["inputs"]:
         path = Path(unit["output_path"])
         if not path.exists():
             missing.append(unit["output_path"])
+            continue
+        task = expected.get(
+            (unit["partition_id"], unit["source_id"], unit["file_path"], unit["sheet"] or "")
+        )
+        if task is not None and path.stem != task.digest(unit["file_sha256"]):
+            stale.append(f"{unit['partition_id']}/{unit['source_id']}")
             continue
         by_source.setdefault((unit["partition_id"], unit["source_id"]), []).append(str(path))
     if missing:
         raise RuntimeError(
             f"{len(missing)} source files named by the manifest are gone (first: "
             f"{missing[0]}); re-run ingest"
+        )
+    if stale:
+        raise RuntimeError(
+            f"{len(stale)} source files were produced by a different code or config "
+            f"version (first: {stale[0]}); re-run ingest before canonical"
         )
 
     tasks = [

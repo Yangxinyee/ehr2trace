@@ -228,3 +228,23 @@ def test_staging_refuses_to_run_without_a_manifest(tmp_path_factory):
     (layout.manifest_dir / "inputs.json").unlink()
     with pytest.raises(RuntimeError, match="run ingest first"):
         plan_stage(cfg, layout)
+
+
+def test_staging_refuses_a_manifest_from_a_different_code_version(tmp_path_factory, monkeypatch):
+    """The version guard is enforced, not advisory.
+
+    A manifest outlives the code version that produced it. Running canonical against
+    source files the current code would address differently is exactly the situation
+    content addressing exists to catch, so it stops rather than proceeding.
+    """
+    from ehr2cdm.canonical.build import plan_stage
+
+    root = tmp_path_factory.mktemp("versioned")
+    layout = run_pipeline(root, workers=1)
+    os.environ["GENERIC_EHR_ROOT"] = str(FIXTURE)
+    cfg = load_dataset_config(CONFIG)
+    assert plan_stage(cfg, layout)
+
+    monkeypatch.setattr("ehr2cdm.ingest.CODE_VERSION", "99.0.0")
+    with pytest.raises(RuntimeError, match="different code or config version"):
+        plan_stage(cfg, layout)
