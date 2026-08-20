@@ -55,9 +55,15 @@ the lineage checks in `src/ehr2cdm/validate.py`, and
 ### 1. Environment
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.lock -e ".[dev]"
 cp .env.example .env    # then edit it
 ```
+
+`requirements.lock` is the exact resolved environment. The MEDS pin is the one that
+matters most: its schema is a data contract, and tracking `main` would mean the
+definition of a valid output could change under a rerun that is supposed to be
+byte-identical.
 
 `EHR_DATA_ROOT` is the read-only raw export. `EHR_WORK_ROOT` is where everything is
 written; it holds PHI and must live outside this repository. Reserve 5–10× the raw
