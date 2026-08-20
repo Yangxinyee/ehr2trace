@@ -488,6 +488,8 @@ def clean(
 @app.command()
 def measure(
     dataset: str = DatasetOpt,
+    kind: str = typer.Option("terminology", "--kind", help="terminology | columns"),
+    limit: int = typer.Option(0, "--limit", help="score at most this many items (0 = all)"),
     gold: Optional[Path] = typer.Option(None, "--gold", help="gold set CSV; defaults to review/gold.csv"),
     from_decisions: bool = typer.Option(False, "--from-decisions", help="build the gold set from accepted review decisions first"),
     use_llm: bool = typer.Option(True, "--llm/--no-llm"),
@@ -495,10 +497,28 @@ def measure(
     as_json: bool = JsonOpt,
 ) -> None:
     """Measure whether the model actually helps, and say so plainly (checklist P4-4)."""
-    from ehr2cdm.measure import gold_from_decisions, measure as run_measure
+    from ehr2cdm.measure import gold_from_decisions, measure as run_measure, measure_columns
 
     cfg, _path = _load(dataset)
     layout = _layout(cfg)
+
+    if kind == "columns":
+        # The answer key is the dataset YAML: someone decided what every column means,
+        # and reproducing that decision is exactly what the model is being asked to do.
+        result = measure_columns(cfg, layout, use_llm=use_llm, limit=limit)
+        if as_json:
+            _echo_json(result)
+        else:
+            typer.echo(f"columns scored: {result['columns_scored']}  key: {result['answer_key']}")
+            for arm in result["arms"]:
+                typer.echo(
+                    f"  {arm['arm']:<22} top1 {arm['top1_accuracy']:.1%}  "
+                    f"{arm['seconds_per_item']:.2f}s/item"
+                    + (f"  schema failures {arm['schema_failures']}" if arm["schema_failures"] else "")
+                )
+            typer.echo(f"\nverdict: {result['verdict']}")
+        raise typer.Exit(code=0)
+
     gold_path = gold or (layout.review_dir / "gold.csv")
     if from_decisions:
         n = gold_from_decisions(layout, gold_path)

@@ -1,19 +1,28 @@
 """Does the model actually help? (checklist P4-4)
 
 The honest way to keep an LLM in a pipeline is to be able to remove it. This module
-compares three configurations against the same human-labelled gold set:
+measures both of its uses against a human-labelled answer key.
+
+**Terminology ranking** compares three configurations:
 
 1. deterministic lookup only -- vocabulary code match plus approved mappings;
 2. plus lexical candidate recall -- did the right concept even make the shortlist?
 3. plus model ranking -- did it put the right concept first?
 
-The metric that matters is **top-1 accuracy against what a human accepted**, because
-that is what a reviewer's time is actually spent on. Recall@k is reported too, since a
-recall step that never surfaces the answer cannot be rescued by any ranker.
+**Column semantics** compares two, against the dataset YAML as the answer key. Someone
+sat down and decided what every column means; that decision is exactly what the model
+is being asked to reproduce, so it is the right thing to score against.
 
-If configuration 3 does not beat configuration 2 by enough to be worth the latency and
-the failure modes, the design says to delete the ranking step. This module exists to
-make that a measurement rather than an argument.
+1. name matching -- a generic synonym table over the column name alone;
+2. the model, given the column name plus a de-identified profile.
+
+The metric that matters is **top-1 accuracy**, because that is what a reviewer's time is
+actually spent on. Recall@k is reported for terminology too, since a recall step that
+never surfaces the answer cannot be rescued by any ranker.
+
+If the model does not beat the deterministic arm by enough to be worth the latency and
+the failure modes, the design says to delete the step. This module exists to make that a
+measurement rather than an argument.
 """
 
 from __future__ import annotations
@@ -255,4 +264,232 @@ def _verdict(lexical: ArmResult, ranked: ArmResult, ran_llm: bool) -> str:
     return (
         f"the ranking step gained {gain:+.1%} top-1 against a recall ceiling of "
         f"{ceiling:.1%}. Worth keeping while the ceiling holds."
+    )
+
+
+# --------------------------------------------------------------------------------
+# column semantics (checklist P4-2 use 1, measured against the dataset config)
+# --------------------------------------------------------------------------------
+
+#: Generic clinical-English synonyms for the deterministic arm. Deliberately contains
+#: nothing dataset-specific: the point of this baseline is that a name-matching
+#: heuristic knows what "sex" means and cannot know what a particular hospital's
+#: patient-key abbreviation means. Where the model earns its place, if it does, is
+#: exactly there.
+ROLE_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "person_id": ("patient", "patient id", "patient ref", "subject", "subject id", "person", "person id"),
+    "encounter_id": ("encounter", "encounter id", "visit", "visit id", "visit ref", "contact"),
+    "event_time": ("event time", "datetime", "date", "time", "performed", "collected", "collection time", "recorded"),
+    "available_time": ("result time", "resulted", "released", "reported", "available"),
+    "end_time": ("end time", "end date", "stop", "discharge", "discharged"),
+    "anchor_time": ("anchor", "anchor time", "index date", "reference date"),
+    "anchor_rank": ("rank", "closest", "nearest", "order"),
+    "source_code": ("code", "concept code", "component", "analyte", "test code", "base name"),
+    "source_name": ("name", "description", "label", "display", "test name"),
+    "display_name": ("study", "study name", "procedure", "procedure name", "exam", "description"),
+    "result_category": ("result type", "category", "kind", "type"),
+    "value": ("value", "result", "result value", "measurement", "reading"),
+    "unit": ("unit", "units", "uom"),
+    "value_low": ("low", "lower", "range low", "minimum"),
+    "value_high": ("high", "upper", "range high", "maximum"),
+    "status": ("status", "state", "order status", "disposition"),
+    "route": ("route", "administration route"),
+    "dose": ("dose", "dosage", "amount", "quantity", "strength"),
+    "text": ("text", "narrative", "note", "comment", "report text", "line text"),
+    "text_line": ("line", "line number", "sequence", "line no"),
+    "text_title": ("title", "heading", "subject line"),
+    "age": ("age", "years old", "age years"),
+    "birth_date": ("birth date", "date of birth", "dob", "born"),
+    "gender": ("gender", "sex", "birth sex"),
+    "race": ("race", "ancestry"),
+    "ethnicity": ("ethnicity", "ethnic group", "ethnic"),
+    "vital_status": ("vital status", "alive", "deceased flag", "living status"),
+    "death_time": ("death date", "died", "deceased", "date of death", "death"),
+    "visit_type": ("visit type", "encounter type", "visit class", "admission type"),
+    "length_of_stay": ("length of stay", "stay days", "los", "days"),
+    "duration_masked": ("time difference", "duration", "elapsed"),
+    "sequence_number": ("sequence", "row number", "index", "seq"),
+}
+
+
+@dataclass
+class ColumnItem:
+    """One column whose role a human already decided, in the dataset YAML."""
+
+    source_id: str
+    column: str
+    role: str
+    profile: dict[str, Any]
+
+
+def _normalize_column(name: str) -> str:
+    return " ".join(name.replace("_", " ").replace("-", " ").lower().split())
+
+
+def name_match_role(column: str) -> str:
+    """The deterministic arm: what the column name alone says, and nothing else."""
+    normalized = _normalize_column(column)
+    best, best_score = "unknown", 0.0
+    for role, synonyms in ROLE_SYNONYMS.items():
+        for candidate in (_normalize_column(role), *synonyms):
+            if normalized == candidate:
+                score = 1.0
+            elif normalized.startswith(candidate) or normalized.endswith(candidate):
+                score = 0.8
+            elif candidate in normalized:
+                score = 0.6
+            else:
+                continue
+            # Ties break toward the longer synonym: "result time" should beat "time".
+            score += len(candidate) / 1000.0
+            if score > best_score:
+                best, best_score = role, score
+    return best
+
+
+def collect_column_items(cfg: DatasetConfig, layout: WorkLayout, limit_per_source: int = 0) -> list[ColumnItem]:
+    """Every column the dataset YAML assigns a role, with a profile from the source layer.
+
+    The answer key is the config, so this deliberately looks only at columns a human
+    already decided about. Columns nobody has classified are what `propose` is for.
+    """
+    import polars as pl
+
+    from ehr2cdm.canonical.normalize import COL_PREFIX
+    from ehr2cdm.review import _profile
+
+    items: list[ColumnItem] = []
+    for part in cfg.partitions:
+        for source_id, spec in cfg.sources_for(part.id).items():
+            if any(item.source_id == source_id for item in items):
+                continue
+            files = sorted((layout.source_dir / part.id / source_id).glob("*.parquet"))
+            if not files:
+                continue
+            frame = pl.read_parquet(files[0], n_rows=500)
+            available = {c[len(COL_PREFIX):].strip().lower(): c for c in frame.columns if c.startswith(COL_PREFIX)}
+            for role, field_spec in spec.fields.items():
+                for alias in field_spec.from_:
+                    column = available.get(alias.strip().lower())
+                    if column is None:
+                        continue
+                    items.append(
+                        ColumnItem(
+                            source_id=source_id,
+                            column=alias,
+                            role=role,
+                            profile=_profile(frame, column),
+                        )
+                    )
+                    break
+    return items
+
+
+def measure_columns(
+    cfg: DatasetConfig, layout: WorkLayout, use_llm: bool = True, limit: int = 0
+) -> dict[str, Any]:
+    """Score both arms of the column-semantics use against the dataset YAML."""
+    items = collect_column_items(cfg, layout)
+    if limit:
+        items = items[:limit]
+    if not items:
+        raise ValueError("no assigned columns found; run ingest first")
+
+    heuristic = ArmResult("column_name_matching")
+    model = ArmResult("model_proposal")
+    client = None
+    if use_llm:
+        from ehr2cdm.llm import LlmClient
+
+        client = LlmClient.from_env()
+        client.probe()
+
+    details: list[dict[str, Any]] = []
+    for item in items:
+        started = time.perf_counter()
+        guessed = name_match_role(item.column)
+        heuristic.n += 1
+        heuristic.seconds += time.perf_counter() - started
+        heuristic_hit = guessed == item.role
+        heuristic.top1 += int(heuristic_hit)
+
+        proposed, confidence, rationale = None, None, ""
+        model_hit = None
+        if client is not None:
+            started = time.perf_counter()
+            proposal = client.propose_column_role(item.source_id, item.column, item.profile)
+            model.n += 1
+            model.seconds += time.perf_counter() - started
+            if proposal is None:
+                model.schema_failures += 1
+            else:
+                proposed = proposal.role.strip()
+                confidence = proposal.confidence
+                rationale = proposal.rationale
+                model_hit = proposed == item.role
+                model.top1 += int(model_hit)
+
+        details.append(
+            {
+                "source": item.source_id,
+                "column": item.column,
+                "expected_role": item.role,
+                "name_matching": guessed,
+                "name_matching_correct": heuristic_hit,
+                "model": proposed,
+                "model_correct": model_hit,
+                "model_confidence": confidence,
+                "model_rationale": rationale,
+            }
+        )
+
+    arms = [heuristic.as_dict()]
+    if client is not None:
+        arms.append(model.as_dict())
+        model.retries = client.usage_summary()["retried"]
+
+    result = {
+        "dataset": cfg.dataset_id,
+        "columns_scored": len(items),
+        "answer_key": "the field roles declared in the dataset YAML",
+        "arms": arms,
+        "llm": client.usage_summary() if client is not None else None,
+        "verdict": _column_verdict(heuristic, model, client is not None),
+        "details": details,
+    }
+    path = layout.runs_dir / "llm_benefit_columns.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(result, indent=2, sort_keys=True, default=str), encoding="utf-8")
+    return result
+
+
+def _column_verdict(heuristic: ArmResult, model: ArmResult, ran_llm: bool) -> str:
+    if not ran_llm or not model.n:
+        return (
+            "not measured: no model was available. Column roles come from the dataset YAML "
+            "either way; the question is only whether a model shortens writing the next one."
+        )
+    base = heuristic.top1 / heuristic.n if heuristic.n else 0.0
+    with_model = model.top1 / model.n
+    gain = with_model - base
+    if model.schema_failures:
+        note = f" ({model.schema_failures} replies failed schema validation and were not counted as hits)"
+    else:
+        note = ""
+    if gain <= 0:
+        return (
+            f"name matching alone scores {base:.1%} and the model {with_model:.1%}{note}. "
+            "The model is not earning its place on this dataset; onboarding by hand is "
+            "cheaper than reviewing its proposals."
+        )
+    if gain < 0.10:
+        return (
+            f"the model gains {gain:+.1%} over name matching ({base:.1%} to {with_model:.1%}){note}. "
+            "Real but small: worth it only if a human reviews every proposal anyway, which "
+            "they do."
+        )
+    return (
+        f"the model gains {gain:+.1%} over name matching ({base:.1%} to {with_model:.1%}){note}, "
+        "which is where a name-matching heuristic cannot help: institution-specific "
+        "abbreviations. Worth keeping for onboarding."
     )

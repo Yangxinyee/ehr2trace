@@ -21,3 +21,4 @@ dist/
 *.safetensors
 vocab/
 docs/standards/*.pdf
+.venv-llm/
