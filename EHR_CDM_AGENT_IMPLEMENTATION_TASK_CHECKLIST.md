@@ -152,7 +152,7 @@ These must be answered by the data owner. They cannot be guessed, and the LLM mu
 
 ### P0 exit criteria
 
-- [ ] `ehr2cdm inspect --dataset ctpe` runs and passes every baseline assertion.
+- [x] `ehr2cdm inspect --dataset ctpe` runs and passes every baseline assertion.
 - [x] Contracts (config model, canonical schema, hashing rules) are frozen.
 - [!] The blocker list has been sent to the data owner.
       - **[!] blocked**: a human action. `ehr2cdm inspect` prints the list and exits non-zero while any remain open.
@@ -252,13 +252,16 @@ These must be answered by the data owner. They cannot be guessed, and the LLM mu
       (`29_has`: 5,727+379 / 4,243+206 / 377+22; `29b_has`: 6,095+11 / 6,162+1 / 398+1; `29b_no`: 2,529+206).
 - [x] **Test**: the three patients' canonical event counts after anchor deduplication are stable (freeze as expectations after the first run).
 - [x] **Test**: the three patients' anchor sets match P1-5.
-- [ ] The full dataset completes; record wall time and peak memory.
+- [x] The full dataset completes; record wall time and peak memory.
 
 ### P1 exit criteria
 
 - [x] The three-patient and partition-overlap fixtures all pass.
 - [x] Determinism tests pass.
-- [ ] The full reconciliation report has been generated and reviewed by a human.
+- [!] The full reconciliation report has been generated and reviewed by a human.
+      - Generated: `work/ctpe/runs/*/report.json` and `work/ctpe/runs/validation.json`, with
+        wall time and peak memory per stage. **The human review is outstanding** — it is the
+        one part of this line nobody but the data owner can do.
 
 ---
 
@@ -446,13 +449,13 @@ These must be answered by the data owner. They cannot be guessed, and the LLM mu
 
 The overall delivery is complete when:
 
-- [ ] All 4 partitions, 25 files, and 40 sources are processed with a complete reconciliation report.
-- [ ] All 30 checks in design §10.2 pass.
+- [x] All 4 partitions, 25 files, and 40 sources are processed with a complete reconciliation report.
+- [x] All 30 checks in design §10.2 pass.
 - [x] The three-patient and partition-overlap fixtures pass.
-- [ ] Every OMOP row is traceable and the MEDS validator passes.
+- [x] Every OMOP row is traceable and the MEDS validator passes.
 - [x] `--workers 1` and `--workers N` agree; reruns are idempotent.
 - [x] The synthetic `generic_ehr` fixture passes using only a new YAML.
-- [ ] Unresolved blockers are listed explicitly in the publication report, not hidden as assumptions.
+- [x] Unresolved blockers are listed explicitly in the publication report, not hidden as assumptions.
 - [x] The README explains how to reproduce a full run from scratch.
 - [x] The repository contains no PHI.
 
