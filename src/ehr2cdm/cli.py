@@ -276,11 +276,33 @@ def omop(
         _echo_json(result)
     else:
         for table, n in sorted(result["tables"].items()):
-            typer.echo(f"  {table:<24} {n:,}")
+            if not table.startswith("_"):
+                typer.echo(f"  {table:<24} {n:,}")
+        typer.echo(f"  {'etl_audit.lineage':<24} {result['lineage_rows']:,}")
         if result["blocked_subjects"]:
-            typer.echo(f"\nPERSON blocked for {result['blocked_subjects']:,} subjects: {result['block_reason']}")
+            typer.echo(
+                f"\nWITHHELD: {result['blocked_subjects']:,} patients were not published to "
+                "OMOP at all -- not to PERSON and not to any clinical table."
+            )
+            typer.echo(f"  reason: {result['block_reason']}")
+            typer.echo(
+                "  This is the policy working, not a failure. Rows referencing a person "
+                "who does not exist\n  are not a CDM instance, and a year of birth "
+                "invented from an age is not a fact.\n"
+                "  To unblock: have the data owner supply omop.person_birth_policy."
+                "age_as_of_date plus\n  an approval note, then rebuild. Canonical and "
+                "MEDS are unaffected and remain complete."
+            )
         if result["unmapped_terms"]:
-            typer.echo(f"unmapped terms sent to review: {result['unmapped_terms']:,}")
+            typer.echo(
+                f"\n{result['unmapped_terms']:,} distinct terms had no concept and went to "
+                f"review rather than\nbecoming 0 silently: {result['pending_csv']}"
+            )
+        if result["vocabulary"] == "none":
+            typer.echo(
+                "\nNo vocabulary is installed, so every concept_id is 0 and every source "
+                "value is preserved.\nSet OMOP_VOCAB_DIR to an Athena download to map terms."
+            )
     raise typer.Exit(code=0)
 
 
@@ -358,6 +380,38 @@ def compile_mappings(
     target = mappings_dir or Path.cwd() / "mappings"
     written = compile_decisions(layout, target)
     typer.echo(f"compiled {written} decisions into {target}")
+    raise typer.Exit(code=0)
+
+
+@app.command()
+def measure(
+    dataset: str = DatasetOpt,
+    gold: Optional[Path] = typer.Option(None, "--gold", help="gold set CSV; defaults to review/gold.csv"),
+    from_decisions: bool = typer.Option(False, "--from-decisions", help="build the gold set from accepted review decisions first"),
+    use_llm: bool = typer.Option(True, "--llm/--no-llm"),
+    vocabulary: Optional[Path] = typer.Option(None, "--vocabulary"),
+    as_json: bool = JsonOpt,
+) -> None:
+    """Measure whether the model actually helps, and say so plainly (checklist P4-4)."""
+    from ehr2cdm.measure import gold_from_decisions, measure as run_measure
+
+    cfg, _path = _load(dataset)
+    layout = _layout(cfg)
+    gold_path = gold or (layout.review_dir / "gold.csv")
+    if from_decisions:
+        n = gold_from_decisions(layout, gold_path)
+        typer.echo(f"exported {n} accepted decisions to {gold_path}")
+    result = run_measure(cfg, layout, gold_path, vocabulary_dir=vocabulary, use_llm=use_llm)
+    if as_json:
+        _echo_json(result)
+    else:
+        typer.echo(f"gold items: {result['gold_items']}  vocabulary: {result['vocabulary']}")
+        for arm in result["arms"]:
+            typer.echo(
+                f"  {arm['arm']:<22} top1 {arm['top1_accuracy']:.1%}  "
+                f"recall@5 {arm['recall_at_5']:.1%}  {arm['seconds_per_item']:.2f}s/item"
+            )
+        typer.echo(f"\nverdict: {result['verdict']}")
     raise typer.Exit(code=0)
 
 

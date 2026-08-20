@@ -491,6 +491,89 @@ def _omop_concepts(l: Layers) -> CheckResult:
         con.close()
 
 
+@check("OMOP_REFERENTIAL_INTEGRITY")
+def _omop_foreign_keys(l: Layers) -> CheckResult:
+    """No clinical row may reference a person or visit that was never published.
+
+    This is the check that catches a birth-year policy applied to PERSON only: the
+    database would happily hold thirty million rows pointing at nobody.
+    """
+    con = _omop_connection(l)
+    if con is None:
+        return _skip("OMOP not built")
+    try:
+        dangling: dict[str, int] = {}
+        for table in (
+            "visit_occurrence",
+            "condition_occurrence",
+            "drug_exposure",
+            "procedure_occurrence",
+            "measurement",
+            "note",
+            "death",
+            "observation_period",
+        ):
+            n = con.execute(
+                f"SELECT count(*) FROM {table} t "
+                "WHERE NOT EXISTS (SELECT 1 FROM person p WHERE p.person_id = t.person_id)"
+            ).fetchone()[0]
+            if n:
+                dangling[f"{table}.person_id"] = int(n)
+        for table in ("condition_occurrence", "drug_exposure", "procedure_occurrence", "measurement", "note"):
+            n = con.execute(
+                f"SELECT count(*) FROM {table} t WHERE t.visit_occurrence_id IS NOT NULL "
+                "AND NOT EXISTS (SELECT 1 FROM visit_occurrence v "
+                "WHERE v.visit_occurrence_id = t.visit_occurrence_id)"
+            ).fetchone()[0]
+            if n:
+                dangling[f"{table}.visit_occurrence_id"] = int(n)
+        people = con.execute("SELECT count(*) FROM person").fetchone()[0]
+        return CheckResult(
+            "",
+            not dangling,
+            f"every clinical row resolves to one of the {people:,} published persons"
+            if not dangling
+            else f"dangling references: {dangling}",
+            {"person": int(people)},
+        )
+    finally:
+        con.close()
+
+
+@check("OMOP_PRIMARY_KEYS_UNIQUE")
+def _omop_primary_keys(l: Layers) -> CheckResult:
+    con = _omop_connection(l)
+    if con is None:
+        return _skip("OMOP not built")
+    try:
+        duplicates: dict[str, int] = {}
+        for table, pk in (
+            ("person", "person_id"),
+            ("visit_occurrence", "visit_occurrence_id"),
+            ("condition_occurrence", "condition_occurrence_id"),
+            ("drug_exposure", "drug_exposure_id"),
+            ("procedure_occurrence", "procedure_occurrence_id"),
+            ("measurement", "measurement_id"),
+            ("note", "note_id"),
+            ("death", "person_id"),
+            ("observation_period", "observation_period_id"),
+        ):
+            n = con.execute(
+                f"SELECT count(*) - count(DISTINCT {pk}) FROM {table}"
+            ).fetchone()[0]
+            if n:
+                duplicates[table] = int(n)
+        return CheckResult(
+            "",
+            not duplicates,
+            "primary keys are unique in every table"
+            if not duplicates
+            else f"duplicate keys: {duplicates}",
+        )
+    finally:
+        con.close()
+
+
 @check("OMOP_BIRTH_POLICY_ENFORCED")
 def _omop_birth_policy(l: Layers) -> CheckResult:
     con = _omop_connection(l)

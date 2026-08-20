@@ -9,9 +9,11 @@ Ground rules, in the order they matter:
   that exist in the local vocabulary with a compatible domain, and 0 otherwise --
   0 plus a preserved source value plus a review entry, never an invented id;
 * the birth-year policy cannot be bypassed. Under ``strict`` a patient with no
-  derivable year of birth is not published to PERSON at all and is counted in the
-  blocker report. Canonical and MEDS are unaffected, because they can state an age
-  honestly and OMOP cannot.
+  derivable year of birth is not published **at all** -- not to PERSON and not to any
+  clinical table, because rows referencing a person who does not exist are not a CDM
+  instance. Canonical and MEDS are unaffected, because they can state an age honestly
+  and OMOP cannot. If that leaves the OMOP layer empty, that is the accurate report of
+  what this export supports, and the blocker names what would change it.
 
 The transformation runs as SQL inside the target database rather than as Python over
 materialized rows. That is not a micro-optimization: the measurement table alone is
@@ -492,6 +494,10 @@ def _visit_sql(con) -> str:
                e.event_id
         FROM evt e
         JOIN pmap p ON p.subject_id = e.subject_id
+        -- A patient withheld from PERSON is withheld entirely: clinical rows
+        -- pointing at a person who was never published are not a CDM instance,
+        -- they are dangling references with a patient's data attached.
+        JOIN person pr ON pr.person_id = p.person_id
         LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
         WHERE e.event_kind = '{EventKind.visit}'
     """
@@ -520,6 +526,10 @@ def _condition_sql(con) -> str:
                e.event_id
         FROM evt e
         JOIN pmap p ON p.subject_id = e.subject_id
+        -- A patient withheld from PERSON is withheld entirely: clinical rows
+        -- pointing at a person who was never published are not a CDM instance,
+        -- they are dangling references with a patient's data attached.
+        JOIN person pr ON pr.person_id = p.person_id
         LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
         LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
         WHERE e.event_kind = '{EventKind.condition}'
@@ -562,6 +572,10 @@ def _drug_sql(con) -> str:
                e.event_id
         FROM evt e
         JOIN pmap p ON p.subject_id = e.subject_id
+        -- A patient withheld from PERSON is withheld entirely: clinical rows
+        -- pointing at a person who was never published are not a CDM instance,
+        -- they are dangling references with a patient's data attached.
+        JOIN person pr ON pr.person_id = p.person_id
         LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
         LEFT JOIN dose_map d ON d.dose_source = e.dose_source
         LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
@@ -590,6 +604,10 @@ def _procedure_sql(con) -> str:
                e.event_id
         FROM evt e
         JOIN pmap p ON p.subject_id = e.subject_id
+        -- A patient withheld from PERSON is withheld entirely: clinical rows
+        -- pointing at a person who was never published are not a CDM instance,
+        -- they are dangling references with a patient's data attached.
+        JOIN person pr ON pr.person_id = p.person_id
         LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
         LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
         WHERE e.event_kind = '{EventKind.procedure}'
@@ -652,6 +670,10 @@ def _measurement_sql(con, cfg: DatasetConfig) -> str:
                e.event_id
         FROM evt e
         JOIN pmap p ON p.subject_id = e.subject_id
+        -- A patient withheld from PERSON is withheld entirely: clinical rows
+        -- pointing at a person who was never published are not a CDM instance,
+        -- they are dangling references with a patient's data attached.
+        JOIN person pr ON pr.person_id = p.person_id
         LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
         LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
         WHERE e.event_kind = '{EventKind.measurement}'
@@ -681,6 +703,10 @@ def _note_sql(con) -> str:
                e.event_id
         FROM evt e
         JOIN pmap p ON p.subject_id = e.subject_id
+        -- A patient withheld from PERSON is withheld entirely: clinical rows
+        -- pointing at a person who was never published are not a CDM instance,
+        -- they are dangling references with a patient's data attached.
+        JOIN person pr ON pr.person_id = p.person_id
         LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
         WHERE e.event_kind = '{EventKind.note}'
     """
@@ -759,6 +785,9 @@ def _publish_observation_periods(con) -> int:
                {_type_id(con, 'observation_period')}
         FROM evt e
         JOIN pmap p ON p.subject_id = e.subject_id
+        -- A patient withheld from PERSON is withheld entirely: clinical rows
+        -- pointing at a person who was never published are not a CDM instance,
+        -- they are dangling references with a patient's data attached.
         JOIN person pr ON pr.person_id = p.person_id
         WHERE e.event_time IS NOT NULL
           AND NOT list_contains(e.quality_flags, '{QualityFlag.RECORDED_AFTER_DEATH}')

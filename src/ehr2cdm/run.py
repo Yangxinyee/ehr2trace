@@ -15,6 +15,8 @@ import json
 import multiprocessing as mp
 import os
 import platform
+import resource
+import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
@@ -75,6 +77,7 @@ class RunReport:
     blockers: list[dict[str, Any]] = field(default_factory=list)
     assumptions: list[dict[str, Any]] = field(default_factory=list)
     quality_summary: dict[str, Any] = field(default_factory=dict)
+    _started_monotonic: float = field(default_factory=time.monotonic, repr=False)
 
     def stage(self, name: str, counts: dict[str, Any], details: Iterable[Any] = ()) -> None:
         now = _now()
@@ -98,6 +101,10 @@ class RunReport:
             "python": platform.python_version(),
             "platform": platform.platform(),
             "cpu_count": os.cpu_count(),
+            # Wall time and peak memory are part of the report because "does this fit
+            # on one machine" is a claim this project makes and should have to defend.
+            "wall_seconds": round(time.monotonic() - self._started_monotonic, 1),
+            "peak_rss_gb": _peak_rss_gb(),
         }
         path = layout.runs_dir / self.run_id / "report.json"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -105,6 +112,14 @@ class RunReport:
         tmp.write_text(json.dumps(_as_dict(self), indent=2, sort_keys=True, default=str), encoding="utf-8")
         tmp.replace(path)
         return path
+
+
+def _peak_rss_gb() -> float:
+    """Peak resident memory of this process and every worker it waited on."""
+    usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    children = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
+    # Linux reports kilobytes.
+    return round(max(usage, children) / (1024 * 1024), 2)
 
 
 def new_run_id(prefix: str = "run") -> str:
@@ -117,7 +132,7 @@ def _now() -> str:
 
 def _as_dict(obj: Any) -> Any:
     if is_dataclass(obj) and not isinstance(obj, type):
-        return {k: _as_dict(v) for k, v in asdict(obj).items()}
+        return {k: _as_dict(v) for k, v in asdict(obj).items() if not k.startswith("_")}
     if isinstance(obj, dict):
         return {k: _as_dict(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
