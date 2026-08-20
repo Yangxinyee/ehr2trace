@@ -267,6 +267,72 @@ def _fan_out(l: Layers) -> CheckResult:
 # --------------------------------------------------------------------------------
 
 
+@check("SOURCE_ROWS_ACCOUNTED")
+def _rows_accounted(l: Layers) -> CheckResult:
+    """Where every parsed source row ended up.
+
+    A row is allowed to produce no event: a demographics row carrying nothing but a
+    patient key states no fact, and inventing one would be worse. What is not allowed
+    is for that to be invisible. This reports the destinations, so a shape that
+    silently drops rows shows up as a number that moved rather than as nothing at all.
+
+    The destinations overlap, which is the subtlety. One demographics row can yield a
+    gender event *and* have its untimed body-mass index withheld, so it is both linked
+    and quarantined. Counting the two separately and subtracting would claim more rows
+    were accounted for than existed -- which is how this check failed the first time it
+    ran.
+    """
+    if l.manifest is None or l.links is None:
+        return _skip("canonical layer not built")
+    parsed = sum(i["rows_parsed"] for i in l.manifest["inputs"])
+    if not parsed:
+        return _skip("nothing ingested")
+
+    import duckdb
+
+    links_path = l.layout.canonical_path("event_source")
+    quarantine_path = l.layout.canonical_path("quarantine")
+    con = duckdb.connect()
+    try:
+        con.execute("PRAGMA preserve_insertion_order = false")
+        con.execute(f"CREATE VIEW lnk AS SELECT * FROM read_parquet('{links_path}')")
+        if quarantine_path.exists():
+            con.execute(f"CREATE VIEW qtn AS SELECT * FROM read_parquet('{quarantine_path}')")
+        else:
+            con.execute("CREATE VIEW qtn AS SELECT NULL AS source_row_id WHERE false")
+        linked, quarantined, both, accounted = con.execute(
+            """
+            WITH l AS (SELECT DISTINCT source_row_id FROM lnk),
+                 q AS (SELECT DISTINCT source_row_id FROM qtn WHERE source_row_id IS NOT NULL)
+            SELECT (SELECT count(*) FROM l),
+                   (SELECT count(*) FROM q),
+                   (SELECT count(*) FROM l SEMI JOIN q USING (source_row_id)),
+                   (SELECT count(*) FROM (SELECT source_row_id FROM l
+                                          UNION SELECT source_row_id FROM q))
+            """
+        ).fetchone()
+    finally:
+        con.close()
+
+    carried_nothing = parsed - int(accounted)
+    return CheckResult(
+        "",
+        carried_nothing >= 0,
+        f"{int(linked):,} rows became events, {int(quarantined):,} were quarantined with a "
+        f"reason ({int(both):,} both), {carried_nothing:,} carried no fact "
+        f"({carried_nothing / parsed:.4%} of parsed)"
+        if carried_nothing >= 0
+        else f"more rows accounted for ({int(accounted):,}) than were parsed ({parsed:,})",
+        {
+            "parsed": parsed,
+            "became_events": int(linked),
+            "quarantined": int(quarantined),
+            "both": int(both),
+            "carried_no_fact": int(carried_nothing),
+        },
+    )
+
+
 @check("ANCHOR_NEVER_AN_EVENT_TIME")
 def _anchor_not_event_time(l: Layers) -> CheckResult:
     """Structural, not statistical: no source may wire an anchor column to a time role."""
