@@ -1,0 +1,10 @@
+# Contains real MRNs and patient-level dates. Never commit.
+tools/baselines.local.json
+*.local.json
+*_mrn_map*
+
+# Environment and outputs
+.env
+work/
+__pycache__/
+*.pyc
