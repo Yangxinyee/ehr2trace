@@ -85,8 +85,8 @@ def canonical_cell(value: object, null_literals: Sequence[str] = DEFAULT_NULL_LI
         if math.isinf(value):
             return "inf" if value > 0 else "-inf"
         if value.is_integer():
-            # 5.0 and 5 must be indistinguishable: Outcome.Length_of_stay_days is int
-            # in three partitions and str in the fourth.
+            # 5.0 and 5 must be indistinguishable: a length-of-stay column can be
+            # typed as an integer in three partitions and as text in the fourth.
             return str(int(value))
         return repr(value)
     if isinstance(value, Decimal):
@@ -162,12 +162,12 @@ def file_sha256(path: str | Path, chunk: int = 1 << 20) -> str:
 
 
 def subject_id_from_person_key(dataset_id: str, person_source_id: str, salt: str = "") -> int:
-    """MRN -> int64 subject id: stable, dataset-scoped, irreversible.
+    """Patient key -> int64 subject id: stable, dataset-scoped, irreversible.
 
-    Stable means a given MRN yields the same subject id on any machine and in any run
-    order, so no global sort or counter is needed. Irreversible means the MRN cannot be
+    Stable means a given key yields the same subject id on any machine and in any run
+    order, so no global sort or counter is needed. Irreversible means the key cannot be
     recovered from the id; with ``salt`` set it cannot be confirmed by guessing either.
-    The MRN never leaves the protected mapping table.
+    The key itself never leaves the protected mapping table.
     """
     digest = hashlib.sha256(
         FIELD_SEP.join([salt, dataset_id, person_source_id.strip()]).encode("utf-8")

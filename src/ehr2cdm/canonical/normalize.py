@@ -130,7 +130,7 @@ def build_role_map(spec: SourceSpec, columns: Iterable[str]) -> dict[str, list[s
         matched: list[str] = []
         for alias in fs.from_:
             column = available.get(alias.strip().lower())
-            # Aliases differing only in case ("MRN" and "mrn") name one column, and
+            # Aliases differing only in case name one and the same column, and
             # listing it twice would make a fallback look like a real second source.
             if column and column not in matched:
                 matched.append(column)

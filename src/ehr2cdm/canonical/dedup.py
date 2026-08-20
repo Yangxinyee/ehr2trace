@@ -90,13 +90,20 @@ def apply_duplicate_flags(events: Sequence[dict[str, Any]], partitions: dict[str
 
 
 def dedup_records(records: Iterable[dict[str, Any]], key_fields: Sequence[str]) -> list[dict[str, Any]]:
-    """Generic sorted deduplication for anchors, memberships and quality issues."""
-    seen: dict[tuple, dict[str, Any]] = {}
+    """Generic deduplication for anchors, memberships and quality issues.
+
+    Records sharing a key usually differ in which source row they happened to be built
+    from. Keeping "the first one seen" would make the output depend on task completion
+    order, so the survivor is chosen by a total order over the record's own values.
+    """
+    seen: dict[tuple, tuple[tuple, dict[str, Any]]] = {}
     for rec in records:
         key = tuple(_sortable(rec.get(f)) for f in key_fields)
-        if key not in seen:
-            seen[key] = dict(rec)
-    return [seen[k] for k in sorted(seen)]
+        rank = tuple(str(_sortable(v)) for _k, v in sorted(rec.items()))
+        current = seen.get(key)
+        if current is None or rank < current[0]:
+            seen[key] = (rank, dict(rec))
+    return [seen[k][1] for k in sorted(seen)]
 
 
 def _sortable(value: Any) -> Any:

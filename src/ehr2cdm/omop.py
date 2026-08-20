@@ -13,10 +13,19 @@ Ground rules, in the order they matter:
   blocker report. Canonical and MEDS are unaffected, because they can state an age
   honestly and OMOP cannot.
 
+The transformation runs as SQL inside the target database rather than as Python over
+materialized rows. That is not a micro-optimization: the measurement table alone is
+tens of millions of rows, and a builder that only works while the whole table fits in
+memory is one that quietly stops working on the next export.
+
+Judgements that need real parsing rules -- a dose string, a terminology lookup -- are
+still made in Python, but **once per distinct value**, and joined back in. There is
+exactly one implementation of each rule.
+
 OMOP primary keys are 32-bit in the DDL while subject ids are 63-bit hashes, so this
-layer assigns dense integer keys by a deterministic sort and records the correspondence
-in ``etl_audit.lineage``. Sorting, rather than a counter, is what makes them
-reproducible across runs and worker counts.
+layer assigns dense keys by a deterministic ordering and records the correspondence in
+``etl_audit.lineage``. Ordering, rather than a counter, is what makes them reproducible
+across runs and worker counts.
 """
 
 from __future__ import annotations
@@ -28,8 +37,6 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
-import polars as pl
-
 from ehr2cdm.config import DatasetConfig
 from ehr2cdm.paths import WorkLayout
 from ehr2cdm.schema import EventKind, QualityFlag
@@ -38,11 +45,10 @@ from ehr2cdm.terminology import (
     MappingRegistry,
     TermRequest,
     Vocabulary,
-    collect_terms,
     normalize_term,
     resolve_terms,
 )
-from ehr2cdm.version import CODE_VERSION
+from ehr2cdm.version import CODE_VERSION, DEFAULT_MAPPING_VERSION
 
 DDL_DIR = Path(__file__).resolve().parents[2] / "sql" / "omop_5.4"
 CDM_SCHEMA = "main"
@@ -84,26 +90,18 @@ CREATE TABLE IF NOT EXISTS etl_audit.quality_issue (
 
 
 @dataclass
-class OmopContext:
-    cfg: DatasetConfig
-    layout: WorkLayout
-    vocabulary: Any
-    mappings: MappingRegistry
-    person_ids: dict[int, int]
-    resolved: dict[tuple[str, str], Any]
+class BuildStats:
+    tables: dict[str, int]
+    distinct_terms: int
+    resolved_terms: int
+    unmapped: list[TermRequest]
+    blocked_subjects: int
 
 
 def build_omop(cfg: DatasetConfig, layout: WorkLayout, vocabulary_dir: Path | None = None) -> dict[str, Any]:
     import duckdb
 
-    events = pl.read_parquet(layout.canonical_path("events"))
-    links = pl.read_parquet(layout.canonical_path("event_source"))
-    anchors = _read_optional(layout.canonical_path("anchors"))
-    memberships = _read_optional(layout.canonical_path("cohort_membership"))
-    issues = _read_optional(layout.canonical_path("quality_issue"))
-
-    vocab_dir = vocabulary_dir or _env_vocabulary_dir()
-    vocabulary = Vocabulary.open(vocab_dir)
+    vocabulary = Vocabulary.open(vocabulary_dir or _env_vocabulary_dir())
     mappings = MappingRegistry.load(Path.cwd() / "mappings")
 
     db_path = layout.omop_dir / "omop.duckdb"
@@ -112,78 +110,31 @@ def build_omop(cfg: DatasetConfig, layout: WorkLayout, vocabulary_dir: Path | No
         # a published layer drifts away from the lineage that explains it.
         db_path.unlink()
     con = duckdb.connect(str(db_path))
-    _create_schema(con)
+    try:
+        _create_schema(con)
+        _register_sources(con, layout)
+        stats = _publish_all(con, cfg, layout, vocabulary, mappings)
+        _publish_audit(con, cfg, layout, vocabulary, mappings)
+    finally:
+        con.close()
 
-    subject_ids = sorted({int(s) for s in events["subject_id"].to_list()})
-    person_ids = {sid: i + 1 for i, sid in enumerate(subject_ids)}
-
-    terms = collect_terms(events.iter_rows(named=True))
-    resolved, unresolved = resolve_terms(list(terms.values()), vocabulary, mappings)
-    ctx = OmopContext(cfg, layout, vocabulary, mappings, person_ids, resolved)
-
-    lineage: list[dict[str, Any]] = []
-    link_index = _index_links(links)
-    counts: dict[str, int] = {}
-
-    person_rows, blocked, birth_issues = _build_person(ctx, events)
-    counts["person"] = _load(con, "person", person_rows)
-    _record_lineage(lineage, "person", person_rows, "person_id", link_index)
-    published = {r["person_id"] for r in person_rows}
-
-    visit_rows = _build_visits(ctx, events)
-    counts["visit_occurrence"] = _load(con, "visit_occurrence", visit_rows)
-    _record_lineage(lineage, "visit_occurrence", visit_rows, "visit_occurrence_id", link_index)
-    visits = {
-        (r["person_id"], r["visit_source_value"]): r["visit_occurrence_id"]
-        for r in visit_rows
-        if r.get("visit_source_value")
-    }
-
-    for table, pk, builder in (
-        ("condition_occurrence", "condition_occurrence_id", _build_conditions),
-        ("drug_exposure", "drug_exposure_id", _build_drugs),
-        ("procedure_occurrence", "procedure_occurrence_id", _build_procedures),
-        ("measurement", "measurement_id", _build_measurements),
-        ("note", "note_id", _build_notes),
-    ):
-        rows = builder(ctx, events, visits)
-        counts[table] = _load(con, table, rows)
-        _record_lineage(lineage, table, rows, pk, link_index)
-
-    death_rows, death_issues = _build_death(ctx, events)
-    counts["death"] = _load(con, "death", death_rows)
-    _record_lineage(lineage, "death", death_rows, "person_id", link_index)
-
-    counts["observation_period"] = _load(
-        con, "observation_period", _build_observation_periods(ctx, events, published)
-    )
-    counts["cdm_source"] = _load(con, "cdm_source", [_cdm_source_row(cfg, vocabulary)])
-
-    # One controlled load path, at the end. Never concurrent inserts.
-    _load_audit(con, "etl_audit.lineage", lineage)
-    _load_audit(con, "etl_audit.anchor", _with_person(anchors, person_ids))
-    _load_audit(con, "etl_audit.cohort_membership", _with_person(memberships, person_ids))
-    _load_audit(con, "etl_audit.quality_issue", _rows(issues) + birth_issues + death_issues)
-    _load_audit(con, "etl_audit.run", [_run_row(cfg, mappings, vocabulary, layout)])
-    con.close()
-
-    pending = _write_pending(layout, unresolved, vocabulary)
+    pending = _write_pending(layout, stats.unmapped, vocabulary)
     result = {
         "database": str(db_path),
-        "tables": counts,
-        "distinct_terms": len(terms),
-        "resolved_terms": len(resolved),
-        "unmapped_terms": len(unresolved),
+        "tables": stats.tables,
+        "distinct_terms": stats.distinct_terms,
+        "resolved_terms": stats.resolved_terms,
+        "unmapped_terms": len(stats.unmapped),
         "pending_csv": str(pending) if pending else None,
         "vocabulary": vocabulary.version,
-        "blocked_subjects": blocked,
+        "blocked_subjects": stats.blocked_subjects,
         "block_reason": (
             "person_birth_policy=strict and no age_as_of_date supplied; year_of_birth "
             "cannot be derived from an age alone"
-            if blocked
+            if stats.blocked_subjects
             else ""
         ),
-        "lineage_rows": len(lineage),
+        "lineage_rows": stats.tables.get("_lineage", 0),
     }
     (layout.omop_dir / "build_report.json").write_text(
         json.dumps(result, indent=2, sort_keys=True), encoding="utf-8"
@@ -198,335 +149,544 @@ def _create_schema(con) -> None:
     con.execute(ETL_AUDIT_DDL)
 
 
-def _env_vocabulary_dir() -> Path | None:
-    raw = os.environ.get("OMOP_VOCAB_DIR")
-    return Path(raw) if raw else None
+def _register_sources(con, layout: WorkLayout) -> None:
+    con.execute("PRAGMA preserve_insertion_order = false")
+    con.execute(f"CREATE VIEW evt AS SELECT * FROM read_parquet('{layout.canonical_path('events')}')")
+    con.execute(f"CREATE VIEW lnk AS SELECT * FROM read_parquet('{layout.canonical_path('event_source')}')")
+    con.execute(
+        """
+        CREATE TABLE pmap AS
+        SELECT subject_id, CAST(row_number() OVER (ORDER BY subject_id) AS INTEGER) AS person_id
+        FROM (SELECT DISTINCT subject_id FROM evt)
+        """
+    )
 
 
 # --------------------------------------------------------------------------------
-# table builders
+# lookups resolved once per distinct value
 # --------------------------------------------------------------------------------
 
 
-def _build_person(ctx: OmopContext, events: pl.DataFrame) -> tuple[list[dict], int, list[dict]]:
+def _build_term_map(con, vocabulary, mappings: MappingRegistry) -> tuple[int, int, list[TermRequest]]:
+    """Resolve every distinct source string once, not once per row.
+
+    Millions of medication rows collapse to a few thousand distinct names. Dispatching
+    by row instead would be the difference between a review queue a person can work
+    through and one nobody ever will.
+    """
+    rows = con.execute(
+        """
+        SELECT code_system, source_code, min(source_name) AS source_name,
+               min(event_kind) AS event_kind, count(*) AS occurrences
+        FROM evt
+        WHERE source_code IS NOT NULL
+        GROUP BY code_system, source_code
+        """
+    ).fetchall()
+    terms = [
+        TermRequest(
+            code_system=r[0] or "SOURCE",
+            source_code=r[1],
+            source_name=r[2],
+            event_kind=r[3] or "",
+            occurrences=int(r[4]),
+        )
+        for r in rows
+    ]
+    resolved, unresolved = resolve_terms(terms, vocabulary, mappings)
+
+    con.execute(
+        "CREATE TABLE term_map (code_system VARCHAR, source_code VARCHAR, "
+        "concept_id BIGINT, source_concept_id BIGINT)"
+    )
+    payload = []
+    for term in terms:
+        match = resolved.get(term.key)
+        if match is None:
+            continue
+        payload.append(
+            (term.code_system, term.source_code, int(match.concept_id), int(match.source_concept_id or 0))
+        )
+    if payload:
+        con.executemany("INSERT INTO term_map VALUES (?, ?, ?, ?)", payload)
+    return len(terms), len(resolved), unresolved
+
+
+def _build_dose_map(con) -> None:
+    """Parse each distinct dose string once, with the same parser the rest uses."""
+    from ehr2cdm.canonical.values import parse_value
+    from ehr2cdm.errors import QuarantineRow
+
+    con.execute(
+        "CREATE TABLE dose_map (dose_source VARCHAR, quantity DOUBLE, dose_unit VARCHAR)"
+    )
+    rows = con.execute(
+        "SELECT DISTINCT dose_source FROM evt WHERE dose_source IS NOT NULL"
+    ).fetchall()
+    payload = []
+    for (dose,) in rows:
+        try:
+            parsed = parse_value(dose)
+        except QuarantineRow:
+            payload.append((dose, None, None))
+            continue
+        payload.append((dose, parsed.number, parsed.unit))
+    if payload:
+        con.executemany("INSERT INTO dose_map VALUES (?, ?, ?)", payload)
+
+
+def _build_attribute_map(con, vocabulary, mappings: MappingRegistry) -> None:
+    """Gender, race and ethnicity values resolved once each."""
+    con.execute("CREATE TABLE attr_map (attr VARCHAR, value_text VARCHAR, concept_id BIGINT)")
+    rows = con.execute(
+        """
+        SELECT DISTINCT upper(source_code) AS attr, value_text
+        FROM evt
+        WHERE event_kind = 'demographic' AND upper(source_code) IN ('GENDER', 'RACE', 'ETHNICITY')
+          AND value_text IS NOT NULL
+        """
+    ).fetchall()
+    domains = {"GENDER": "Gender", "RACE": "Race", "ETHNICITY": "Ethnicity"}
+    payload = []
+    for attr, value in rows:
+        approved = mappings.get(attr, value)
+        if approved is not None:
+            payload.append((attr, value, int(approved.concept_id)))
+            continue
+        match = vocabulary.lookup_name(domains[attr], value)
+        payload.append((attr, value, int(match.concept_id) if match else 0))
+    if payload:
+        con.executemany("INSERT INTO attr_map VALUES (?, ?, ?)", payload)
+
+
+def _type_concept_map(con, mappings: MappingRegistry) -> None:
+    """Fixed type concepts, from the git-tracked registry rather than from code.
+
+    An id typed into a source file has no provenance and nobody revalidates it when the
+    vocabulary is updated, so there are none here; an unresolved key is 0.
+    """
+    keys = (
+        "visit",
+        "condition_problem_list",
+        "drug_order",
+        "drug_admin",
+        "procedure",
+        "measurement",
+        "note",
+        "note_class",
+        "death",
+        "observation_period",
+    )
+    con.execute("CREATE TABLE type_concept (key VARCHAR, concept_id BIGINT)")
+    con.executemany(
+        "INSERT INTO type_concept VALUES (?, ?)",
+        [(k, (mappings.get("TYPE_CONCEPT", k).concept_id if mappings.get("TYPE_CONCEPT", k) else 0)) for k in keys],
+    )
+
+
+def _type_id(con, key: str) -> int:
+    row = con.execute("SELECT concept_id FROM type_concept WHERE key = ?", [key]).fetchone()
+    return int(row[0]) if row else 0
+
+
+# --------------------------------------------------------------------------------
+# publication
+# --------------------------------------------------------------------------------
+
+#: ``event_id`` travels with every staged row so lineage can be produced by a join,
+#: then is dropped before the row reaches a core table.
+STAGE_EXTRA = "event_id"
+
+
+def _publish_all(con, cfg: DatasetConfig, layout: WorkLayout, vocabulary, mappings: MappingRegistry) -> BuildStats:
+    distinct, resolved, unmapped = _build_term_map(con, vocabulary, mappings)
+    _build_dose_map(con)
+    _build_attribute_map(con, vocabulary, mappings)
+    _type_concept_map(con, mappings)
+
+    counts: dict[str, int] = {}
+    blocked = _publish_person(con, cfg)
+    counts["person"] = _count(con, "person")
+
+    counts["visit_occurrence"] = _stage_and_load(con, "visit_occurrence", "visit_occurrence_id", _visit_sql(con))
+    con.execute(
+        """
+        CREATE TABLE visit_lookup AS
+        SELECT person_id, visit_source_value, min(visit_occurrence_id) AS visit_occurrence_id
+        FROM visit_occurrence WHERE visit_source_value IS NOT NULL
+        GROUP BY person_id, visit_source_value
+        """
+    )
+
+    counts["condition_occurrence"] = _stage_and_load(
+        con, "condition_occurrence", "condition_occurrence_id", _condition_sql(con)
+    )
+    counts["drug_exposure"] = _stage_and_load(con, "drug_exposure", "drug_exposure_id", _drug_sql(con))
+    counts["procedure_occurrence"] = _stage_and_load(
+        con, "procedure_occurrence", "procedure_occurrence_id", _procedure_sql(con)
+    )
+    counts["measurement"] = _stage_and_load(con, "measurement", "measurement_id", _measurement_sql(con, cfg))
+    counts["note"] = _stage_and_load(con, "note", "note_id", _note_sql(con))
+    counts["death"] = _publish_death(con)
+    counts["observation_period"] = _publish_observation_periods(con)
+    counts["cdm_source"] = _publish_cdm_source(con, cfg, vocabulary)
+    counts["_lineage"] = _count(con, "etl_audit.lineage")
+    return BuildStats(counts, distinct, resolved, unmapped, blocked)
+
+
+def _stage_and_load(con, table: str, pk: str, select_sql: str) -> int:
+    """Stage rows, load the core columns, then derive lineage from the same staging.
+
+    One controlled load path per table, executed once. Never concurrent inserts, and
+    never a core row that was written before its lineage could be.
+    """
+    con.execute(f"CREATE OR REPLACE TEMP TABLE stage AS {select_sql}")
+    columns = [c for c in _columns(con, "stage") if c != STAGE_EXTRA]
+    con.execute(f"INSERT INTO {table} SELECT {', '.join(columns)} FROM stage")
+    con.execute(
+        f"""
+        INSERT INTO etl_audit.lineage
+        SELECT '{table}', s.{pk}, s.event_id, l.source_row_id, '{DEFAULT_MAPPING_VERSION}'
+        FROM stage s JOIN lnk l ON l.event_id = s.event_id
+        """
+    )
+    n = _count(con, table)
+    con.execute("DROP TABLE stage")
+    return n
+
+
+def _publish_person(con, cfg: DatasetConfig) -> int:
     """PERSON, subject to the birth-year policy.
 
     OMOP requires a year of birth. This export carries an age and no date it was taken
     on, so under the default policy the patient is not published here at all. A number
-    the database would accept is not the same thing as a fact about a person.
+    the database accepts is not the same thing as a fact about a person.
+
+    Two different ages for one patient -- routine when an export is taken twice --
+    cannot both be right against a single reference date, so that patient is blocked
+    and the disagreement is recorded rather than resolved by picking one.
     """
-    policy = ctx.cfg.omop.person_birth_policy
-    demo = events.filter(pl.col("event_kind") == str(EventKind.demographic))
-    by_subject: dict[int, dict[str, Any]] = {}
-    for row in demo.sort("event_id").iter_rows(named=True):
-        entry = by_subject.setdefault(int(row["subject_id"]), {"event_ids": []})
-        entry["event_ids"].append(row["event_id"])
-        code = (row.get("source_code") or "").upper()
-        if code in {"GENDER", "RACE", "ETHNICITY"}:
-            entry[code.lower()] = row.get("value_text")
-        elif code == "AGE":
-            entry["age"] = row.get("value_number")
+    policy = cfg.omop.person_birth_policy
+    con.execute(
+        """
+        CREATE TABLE person_attrs AS
+        SELECT e.subject_id,
+               min(CASE WHEN upper(e.source_code) = 'GENDER' THEN e.value_text END) AS gender_source_value,
+               min(CASE WHEN upper(e.source_code) = 'RACE' THEN e.value_text END) AS race_source_value,
+               min(CASE WHEN upper(e.source_code) = 'ETHNICITY' THEN e.value_text END) AS ethnicity_source_value,
+               min(CASE WHEN upper(e.source_code) = 'AGE' THEN e.value_number END) AS age,
+               count(DISTINCT CASE WHEN upper(e.source_code) = 'AGE' THEN e.value_number END) AS age_variants
+        FROM evt e
+        WHERE e.event_kind = 'demographic'
+        GROUP BY e.subject_id
+        """
+    )
+    con.execute(
+        """
+        INSERT INTO etl_audit.quality_issue
+        SELECT 'AGE_CONFLICT', 'error', 'omop', subject_id, NULL, NULL, NULL, NULL,
+               'the sources record more than one age and no reference date for either'
+        FROM person_attrs WHERE age_variants > 1
+        """
+    )
 
-    rows: list[dict[str, Any]] = []
-    issues: list[dict[str, Any]] = []
-    blocked = 0
-    for sid in sorted(by_subject):
-        entry = by_subject[sid]
-        year_of_birth, approximate = _year_of_birth(policy, entry.get("age"))
-        if year_of_birth is None:
-            blocked += 1
-            issues.append(
-                _issue(
-                    "OMOP_PERSON_BLOCKED",
-                    "error",
-                    sid,
-                    "no derivable year_of_birth under person_birth_policy="
-                    f"{policy.mode}; the source has an age and no reference date",
-                )
-            )
-            continue
-        if approximate:
-            issues.append(
-                _issue(
-                    str(QualityFlag.DERIVED_APPROXIMATE_BIRTH_YEAR),
-                    "warning",
-                    sid,
-                    f"year_of_birth estimated from age as of {policy.age_as_of_date}; may "
-                    "be off by one year because it is unknown whether the birthday had passed",
-                )
-            )
-        gender, race, ethnicity = entry.get("gender"), entry.get("race"), entry.get("ethnicity")
-        rows.append(
-            {
-                "person_id": ctx.person_ids[sid],
-                "gender_concept_id": _attribute_concept(ctx, "Gender", "GENDER", gender),
-                "year_of_birth": year_of_birth,
-                "month_of_birth": None,
-                "day_of_birth": None,
-                "birth_datetime": None,
-                "race_concept_id": _attribute_concept(ctx, "Race", "RACE", race),
-                "ethnicity_concept_id": _attribute_concept(ctx, "Ethnicity", "ETHNICITY", ethnicity),
-                "location_id": None,
-                "provider_id": None,
-                "care_site_id": None,
-                # Deliberately empty: no direct patient identifier is published.
-                "person_source_value": None,
-                "gender_source_value": _v(gender, 50),
-                "gender_source_concept_id": 0,
-                "race_source_value": _v(race, 50),
-                "race_source_concept_id": 0,
-                "ethnicity_source_value": _v(ethnicity, 50),
-                "ethnicity_source_concept_id": 0,
-                "_event_ids": entry["event_ids"],
-            }
+    if policy.mode == "approved_approximation":
+        reference_year = datetime.strptime(policy.age_as_of_date, "%Y-%m-%d").year
+        birth_expr = f"CAST({reference_year} - a.age AS INTEGER)"
+        eligible = "a.age IS NOT NULL AND a.age_variants = 1"
+    else:
+        # Strict: nothing in this export can produce a defensible year of birth.
+        birth_expr = "CAST(NULL AS INTEGER)"
+        eligible = "false"
+
+    con.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE stage AS
+        SELECT p.person_id,
+               CAST(coalesce(g.concept_id, 0) AS INTEGER) AS gender_concept_id,
+               {birth_expr} AS year_of_birth,
+               CAST(NULL AS INTEGER) AS month_of_birth,
+               CAST(NULL AS INTEGER) AS day_of_birth,
+               CAST(NULL AS TIMESTAMP) AS birth_datetime,
+               CAST(coalesce(r.concept_id, 0) AS INTEGER) AS race_concept_id,
+               CAST(coalesce(t.concept_id, 0) AS INTEGER) AS ethnicity_concept_id,
+               CAST(NULL AS INTEGER) AS location_id,
+               CAST(NULL AS INTEGER) AS provider_id,
+               CAST(NULL AS INTEGER) AS care_site_id,
+               -- deliberately empty: no direct patient identifier is published
+               CAST(NULL AS VARCHAR) AS person_source_value,
+               a.gender_source_value,
+               0 AS gender_source_concept_id,
+               a.race_source_value,
+               0 AS race_source_concept_id,
+               a.ethnicity_source_value,
+               0 AS ethnicity_source_concept_id
+        FROM person_attrs a
+        JOIN pmap p ON p.subject_id = a.subject_id
+        LEFT JOIN attr_map g ON g.attr = 'GENDER' AND g.value_text = a.gender_source_value
+        LEFT JOIN attr_map r ON r.attr = 'RACE' AND r.value_text = a.race_source_value
+        LEFT JOIN attr_map t ON t.attr = 'ETHNICITY' AND t.value_text = a.ethnicity_source_value
+        WHERE {eligible}
+        """
+    )
+    columns = _columns(con, "stage")
+    con.execute(f"INSERT INTO person SELECT {', '.join(columns)} FROM stage")
+    con.execute(
+        f"""
+        INSERT INTO etl_audit.lineage
+        SELECT 'person', s.person_id, e.event_id, l.source_row_id, '{DEFAULT_MAPPING_VERSION}'
+        FROM stage s
+        JOIN pmap p ON p.person_id = s.person_id
+        JOIN evt e ON e.subject_id = p.subject_id AND e.event_kind = 'demographic'
+        JOIN lnk l ON l.event_id = e.event_id
+        """
+    )
+    published = _count(con, "person")
+    if policy.mode == "approved_approximation":
+        con.execute(
+            """
+            INSERT INTO etl_audit.quality_issue
+            SELECT 'DERIVED_APPROXIMATE_BIRTH_YEAR', 'warning', 'omop', p.subject_id, NULL, NULL,
+                   NULL, NULL,
+                   'year_of_birth estimated from an age with no birthday known; may be off by one year'
+            FROM person s JOIN pmap p ON p.person_id = s.person_id
+            """
         )
-    return rows, blocked, issues
-
-
-def _year_of_birth(policy, age: float | None) -> tuple[int | None, bool]:
-    if age is None or policy.mode != "approved_approximation":
-        return None, False
-    reference = datetime.strptime(policy.age_as_of_date, "%Y-%m-%d").date()
-    return reference.year - int(age), True
-
-
-def _build_visits(ctx: OmopContext, events: pl.DataFrame) -> list[dict]:
-    rows: list[dict[str, Any]] = []
-    frame = events.filter(pl.col("event_kind") == str(EventKind.visit)).sort("event_id")
-    for i, row in enumerate(frame.iter_rows(named=True), start=1):
-        start = row["event_time"]
-        end = row.get("end_time") or start
-        rows.append(
-            {
-                "visit_occurrence_id": i,
-                "person_id": ctx.person_ids[int(row["subject_id"])],
-                "visit_concept_id": _concept_id(ctx, row),
-                "visit_start_date": start.date(),
-                "visit_start_datetime": start,
-                "visit_end_date": end.date(),
-                "visit_end_datetime": end,
-                "visit_type_concept_id": _type_concept(ctx, "visit"),
-                "provider_id": None,
-                "care_site_id": None,
-                "visit_source_value": _v(row.get("encounter_id"), 50),
-                "visit_source_concept_id": _source_concept_id(ctx, row),
-                "admitted_from_concept_id": 0,
-                "admitted_from_source_value": None,
-                "discharged_to_concept_id": 0,
-                "discharged_to_source_value": None,
-                "preceding_visit_occurrence_id": None,
-                "_event_ids": [row["event_id"]],
-            }
+    total = int(con.execute("SELECT count(*) FROM person_attrs").fetchone()[0])
+    blocked = total - published
+    if blocked:
+        con.execute(
+            f"""
+            INSERT INTO etl_audit.quality_issue
+            SELECT 'OMOP_PERSON_BLOCKED', 'error', 'omop', a.subject_id, NULL, NULL, NULL,
+                   'demographics',
+                   'no derivable year_of_birth under person_birth_policy={policy.mode}'
+            FROM person_attrs a
+            JOIN pmap p ON p.subject_id = a.subject_id
+            WHERE p.person_id NOT IN (SELECT person_id FROM person)
+            """
         )
-    return rows
+    con.execute("DROP TABLE stage")
+    return blocked
 
 
-def _build_conditions(ctx: OmopContext, events: pl.DataFrame, visits: dict) -> list[dict]:
-    rows: list[dict[str, Any]] = []
-    frame = events.filter(pl.col("event_kind") == str(EventKind.condition)).sort("event_id")
-    for i, row in enumerate(frame.iter_rows(named=True), start=1):
-        start = row["event_time"]
-        person_id = ctx.person_ids[int(row["subject_id"])]
-        rows.append(
-            {
-                "condition_occurrence_id": i,
-                "person_id": person_id,
-                "condition_concept_id": _concept_id(ctx, row),
-                "condition_start_date": start.date(),
-                "condition_start_datetime": start,
-                "condition_end_date": None,
-                "condition_end_datetime": None,
-                # The source says when a problem was first noted. That is not an onset
-                # date, and the type concept is what keeps this row from claiming one.
-                "condition_type_concept_id": _type_concept(ctx, "condition_problem_list"),
-                "condition_status_concept_id": 0,
-                "stop_reason": None,
-                "provider_id": None,
-                "visit_occurrence_id": visits.get((person_id, row.get("encounter_id"))),
-                "visit_detail_id": None,
-                "condition_source_value": _v(row.get("source_code"), 50),
-                "condition_source_concept_id": _source_concept_id(ctx, row),
-                "condition_status_source_value": _v(row.get("status_source"), 50),
-                "_event_ids": [row["event_id"]],
-            }
-        )
-    return rows
-
-
-def _build_drugs(ctx: OmopContext, events: pl.DataFrame, visits: dict) -> list[dict]:
-    """DRUG_EXPOSURE for orders and administrations, kept apart by type concept.
-
-    The source status (ordered, dispensed, discontinued) has no home in the OMOP core
-    for an order, so it stays on the canonical event, which the lineage points at. It
-    is not dropped, and it is not forced into ``stop_reason``, which means something
-    else.
+def _visit_sql(con) -> str:
+    return f"""
+        SELECT CAST(row_number() OVER (ORDER BY e.event_id) AS INTEGER) AS visit_occurrence_id,
+               p.person_id,
+               CAST(coalesce(m.concept_id, 0) AS INTEGER) AS visit_concept_id,
+               CAST(e.event_time AS DATE) AS visit_start_date,
+               e.event_time AS visit_start_datetime,
+               CAST(coalesce(e.end_time, e.event_time) AS DATE) AS visit_end_date,
+               coalesce(e.end_time, e.event_time) AS visit_end_datetime,
+               {_type_id(con, 'visit')} AS visit_type_concept_id,
+               CAST(NULL AS INTEGER) AS provider_id,
+               CAST(NULL AS INTEGER) AS care_site_id,
+               substr(e.encounter_id, 1, 50) AS visit_source_value,
+               CAST(coalesce(m.source_concept_id, 0) AS INTEGER) AS visit_source_concept_id,
+               0 AS admitted_from_concept_id,
+               CAST(NULL AS VARCHAR) AS admitted_from_source_value,
+               0 AS discharged_to_concept_id,
+               CAST(NULL AS VARCHAR) AS discharged_to_source_value,
+               CAST(NULL AS INTEGER) AS preceding_visit_occurrence_id,
+               e.event_id
+        FROM evt e
+        JOIN pmap p ON p.subject_id = e.subject_id
+        LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
+        WHERE e.event_kind = '{EventKind.visit}'
     """
-    from ehr2cdm.canonical.values import parse_value
-
-    rows: list[dict[str, Any]] = []
-    frame = events.filter(
-        pl.col("event_kind").is_in([str(EventKind.drug_order), str(EventKind.drug_admin)])
-    ).sort("event_id")
-    for i, row in enumerate(frame.iter_rows(named=True), start=1):
-        start = row["event_time"]
-        person_id = ctx.person_ids[int(row["subject_id"])]
-        dose = row.get("dose_source")
-        quantity = dose_unit = None
-        if dose:
-            parsed = parse_value(dose)
-            quantity, dose_unit = parsed.number, parsed.unit
-        is_order = row["event_kind"] == str(EventKind.drug_order)
-        rows.append(
-            {
-                "drug_exposure_id": i,
-                "person_id": person_id,
-                "drug_concept_id": _concept_id(ctx, row),
-                "drug_exposure_start_date": start.date(),
-                "drug_exposure_start_datetime": start,
-                "drug_exposure_end_date": (row.get("end_time") or start).date(),
-                "drug_exposure_end_datetime": row.get("end_time") or start,
-                "verbatim_end_date": None,
-                "drug_type_concept_id": _type_concept(ctx, "drug_order" if is_order else "drug_admin"),
-                "stop_reason": None,
-                "refills": None,
-                "quantity": quantity,
-                "days_supply": None,
-                "sig": _v(dose, 250) if quantity is None else None,
-                "route_concept_id": 0,
-                "lot_number": None,
-                "provider_id": None,
-                "visit_occurrence_id": visits.get((person_id, row.get("encounter_id"))),
-                "visit_detail_id": None,
-                "drug_source_value": _v(row.get("source_code"), 50),
-                "drug_source_concept_id": _source_concept_id(ctx, row),
-                "route_source_value": _v(row.get("route_source"), 50),
-                "dose_unit_source_value": _v(dose_unit, 50),
-                "_event_ids": [row["event_id"]],
-            }
-        )
-    return rows
 
 
-def _build_procedures(ctx: OmopContext, events: pl.DataFrame, visits: dict) -> list[dict]:
-    rows: list[dict[str, Any]] = []
-    frame = events.filter(pl.col("event_kind") == str(EventKind.procedure)).sort("event_id")
-    for i, row in enumerate(frame.iter_rows(named=True), start=1):
-        start = row["event_time"]
-        person_id = ctx.person_ids[int(row["subject_id"])]
-        rows.append(
-            {
-                "procedure_occurrence_id": i,
-                "person_id": person_id,
-                "procedure_concept_id": _concept_id(ctx, row),
-                "procedure_date": start.date(),
-                "procedure_datetime": start,
-                "procedure_end_date": None,
-                "procedure_end_datetime": None,
-                "procedure_type_concept_id": _type_concept(ctx, "procedure"),
-                "modifier_concept_id": 0,
-                "quantity": None,
-                "provider_id": None,
-                "visit_occurrence_id": visits.get((person_id, row.get("encounter_id"))),
-                "visit_detail_id": None,
-                "procedure_source_value": _v(row.get("source_code"), 50),
-                "procedure_source_concept_id": _source_concept_id(ctx, row),
-                "modifier_source_value": None,
-                "_event_ids": [row["event_id"]],
-            }
-        )
-    return rows
+def _condition_sql(con) -> str:
+    # The source says when a problem was first noted. That is not an onset date, and
+    # the type concept is what keeps this row from claiming one.
+    return f"""
+        SELECT CAST(row_number() OVER (ORDER BY e.event_id) AS INTEGER) AS condition_occurrence_id,
+               p.person_id,
+               CAST(coalesce(m.concept_id, 0) AS INTEGER) AS condition_concept_id,
+               CAST(e.event_time AS DATE) AS condition_start_date,
+               e.event_time AS condition_start_datetime,
+               CAST(NULL AS DATE) AS condition_end_date,
+               CAST(NULL AS TIMESTAMP) AS condition_end_datetime,
+               {_type_id(con, 'condition_problem_list')} AS condition_type_concept_id,
+               0 AS condition_status_concept_id,
+               CAST(NULL AS VARCHAR) AS stop_reason,
+               CAST(NULL AS INTEGER) AS provider_id,
+               v.visit_occurrence_id,
+               CAST(NULL AS INTEGER) AS visit_detail_id,
+               substr(e.source_code, 1, 50) AS condition_source_value,
+               CAST(coalesce(m.source_concept_id, 0) AS INTEGER) AS condition_source_concept_id,
+               substr(e.status_source, 1, 50) AS condition_status_source_value,
+               e.event_id
+        FROM evt e
+        JOIN pmap p ON p.subject_id = e.subject_id
+        LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
+        LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
+        WHERE e.event_kind = '{EventKind.condition}'
+    """
 
 
-def _build_measurements(ctx: OmopContext, events: pl.DataFrame, visits: dict) -> list[dict]:
+def _drug_sql(con) -> str:
+    """Orders and administrations share a table; the type concept keeps them apart.
+
+    The source status of an order has no home in the OMOP core, so it stays on the
+    canonical event that the lineage points at. It is not dropped, and it is not forced
+    into ``stop_reason``, which means something else.
+    """
+    return f"""
+        SELECT CAST(row_number() OVER (ORDER BY e.event_id) AS INTEGER) AS drug_exposure_id,
+               p.person_id,
+               CAST(coalesce(m.concept_id, 0) AS INTEGER) AS drug_concept_id,
+               CAST(e.event_time AS DATE) AS drug_exposure_start_date,
+               e.event_time AS drug_exposure_start_datetime,
+               CAST(coalesce(e.end_time, e.event_time) AS DATE) AS drug_exposure_end_date,
+               coalesce(e.end_time, e.event_time) AS drug_exposure_end_datetime,
+               CAST(NULL AS DATE) AS verbatim_end_date,
+               CASE WHEN e.event_kind = '{EventKind.drug_order}'
+                    THEN {_type_id(con, 'drug_order')} ELSE {_type_id(con, 'drug_admin')} END
+                    AS drug_type_concept_id,
+               CAST(NULL AS VARCHAR) AS stop_reason,
+               CAST(NULL AS INTEGER) AS refills,
+               d.quantity,
+               CAST(NULL AS INTEGER) AS days_supply,
+               CASE WHEN d.quantity IS NULL THEN substr(e.dose_source, 1, 250) END AS sig,
+               0 AS route_concept_id,
+               CAST(NULL AS VARCHAR) AS lot_number,
+               CAST(NULL AS INTEGER) AS provider_id,
+               v.visit_occurrence_id,
+               CAST(NULL AS INTEGER) AS visit_detail_id,
+               substr(e.source_code, 1, 50) AS drug_source_value,
+               CAST(coalesce(m.source_concept_id, 0) AS INTEGER) AS drug_source_concept_id,
+               substr(e.route_source, 1, 50) AS route_source_value,
+               substr(d.dose_unit, 1, 50) AS dose_unit_source_value,
+               e.event_id
+        FROM evt e
+        JOIN pmap p ON p.subject_id = e.subject_id
+        LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
+        LEFT JOIN dose_map d ON d.dose_source = e.dose_source
+        LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
+        WHERE e.event_kind IN ('{EventKind.drug_order}', '{EventKind.drug_admin}')
+    """
+
+
+def _procedure_sql(con) -> str:
+    return f"""
+        SELECT CAST(row_number() OVER (ORDER BY e.event_id) AS INTEGER) AS procedure_occurrence_id,
+               p.person_id,
+               CAST(coalesce(m.concept_id, 0) AS INTEGER) AS procedure_concept_id,
+               CAST(e.event_time AS DATE) AS procedure_date,
+               e.event_time AS procedure_datetime,
+               CAST(NULL AS DATE) AS procedure_end_date,
+               CAST(NULL AS TIMESTAMP) AS procedure_end_datetime,
+               {_type_id(con, 'procedure')} AS procedure_type_concept_id,
+               0 AS modifier_concept_id,
+               CAST(NULL AS INTEGER) AS quantity,
+               CAST(NULL AS INTEGER) AS provider_id,
+               v.visit_occurrence_id,
+               CAST(NULL AS INTEGER) AS visit_detail_id,
+               substr(e.source_code, 1, 50) AS procedure_source_value,
+               CAST(coalesce(m.source_concept_id, 0) AS INTEGER) AS procedure_source_concept_id,
+               CAST(NULL AS VARCHAR) AS modifier_source_value,
+               e.event_id
+        FROM evt e
+        JOIN pmap p ON p.subject_id = e.subject_id
+        LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
+        LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
+        WHERE e.event_kind = '{EventKind.procedure}'
+    """
+
+
+def _measurement_sql(con, cfg: DatasetConfig) -> str:
     """MEASUREMENT, with the value rules from design section 5.4.
 
     A ranged result keeps its original text in ``value_source_value`` with
     ``value_as_number`` empty. It does **not** go to ``range_low``/``range_high``:
     those are the reference range for the test, and a patient's own value there would
     be a different clinical claim. Reference ranges come from configuration, because
-    the source's own range columns are empty throughout.
+    the source's own range columns are empty throughout this export.
     """
-    rows: list[dict[str, Any]] = []
-    frame = events.filter(pl.col("event_kind") == str(EventKind.measurement)).sort("event_id")
-    ranges = ctx.cfg.reference_ranges
-    for i, row in enumerate(frame.iter_rows(named=True), start=1):
-        start = row["event_time"]
-        person_id = ctx.person_ids[int(row["subject_id"])]
-        reference = ranges.get(row.get("source_code") or "")
-        rows.append(
-            {
-                "measurement_id": i,
-                "person_id": person_id,
-                "measurement_concept_id": _concept_id(ctx, row),
-                "measurement_date": start.date(),
-                "measurement_datetime": start,
-                "measurement_time": None,
-                "measurement_type_concept_id": _type_concept(ctx, "measurement"),
-                "operator_concept_id": 0,
-                "value_as_number": row.get("value_number"),
-                "value_as_concept_id": 0,
-                "unit_concept_id": 0,
-                "range_low": reference.low if reference else None,
-                "range_high": reference.high if reference else None,
-                "provider_id": None,
-                "visit_occurrence_id": visits.get((person_id, row.get("encounter_id"))),
-                "visit_detail_id": None,
-                "measurement_source_value": _v(row.get("source_code"), 50),
-                "measurement_source_concept_id": _source_concept_id(ctx, row),
-                "unit_source_value": _v(row.get("unit_source"), 50),
-                "unit_source_concept_id": 0,
-                "value_source_value": _v(_value_source_value(row), 50),
-                "measurement_event_id": None,
-                "meas_event_field_concept_id": None,
-                "_event_ids": [row["event_id"]],
-            }
+    ranges = cfg.reference_ranges
+    if ranges:
+        cases_low = " ".join(
+            f"WHEN e.source_code = '{code}' THEN {r.low if r.low is not None else 'NULL'}"
+            for code, r in ranges.items()
         )
-    return rows
-
-
-def _value_source_value(row: dict[str, Any]) -> str | None:
-    if row.get("value_text"):
-        return str(row["value_text"])
-    if row.get("value_low") is not None and row.get("value_high") is not None:
-        return f"{row['value_low']}-{row['value_high']}"
-    if row.get("value_number") is not None:
-        return str(row["value_number"])
-    return None
-
-
-def _build_notes(ctx: OmopContext, events: pl.DataFrame, visits: dict) -> list[dict]:
-    rows: list[dict[str, Any]] = []
-    frame = events.filter(pl.col("event_kind") == str(EventKind.note)).sort("event_id")
-    for i, row in enumerate(frame.iter_rows(named=True), start=1):
-        start = row["event_time"]
-        person_id = ctx.person_ids[int(row["subject_id"])]
-        rows.append(
-            {
-                "note_id": i,
-                "person_id": person_id,
-                "note_date": start.date(),
-                "note_datetime": start,
-                "note_type_concept_id": _type_concept(ctx, "note"),
-                "note_class_concept_id": _type_concept(ctx, "note_class"),
-                "note_title": _v(row.get("source_name"), 250),
-                # Verbatim. Any later extraction is a separate event with its own
-                # lineage and never edits this text.
-                "note_text": row.get("value_text") or "",
-                "encoding_concept_id": 0,
-                "language_concept_id": 0,
-                "provider_id": None,
-                "visit_occurrence_id": visits.get((person_id, row.get("encounter_id"))),
-                "visit_detail_id": None,
-                "note_source_value": _v(row.get("source_code"), 50),
-                "note_event_id": None,
-                "note_event_field_concept_id": None,
-                "_event_ids": [row["event_id"]],
-            }
+        cases_high = " ".join(
+            f"WHEN e.source_code = '{code}' THEN {r.high if r.high is not None else 'NULL'}"
+            for code, r in ranges.items()
         )
-    return rows
+        range_low = f"CASE {cases_low} ELSE NULL END"
+        range_high = f"CASE {cases_high} ELSE NULL END"
+    else:
+        range_low = range_high = "CAST(NULL AS DOUBLE)"
+
+    return f"""
+        SELECT CAST(row_number() OVER (ORDER BY e.event_id) AS INTEGER) AS measurement_id,
+               p.person_id,
+               CAST(coalesce(m.concept_id, 0) AS INTEGER) AS measurement_concept_id,
+               CAST(e.event_time AS DATE) AS measurement_date,
+               e.event_time AS measurement_datetime,
+               CAST(NULL AS VARCHAR) AS measurement_time,
+               {_type_id(con, 'measurement')} AS measurement_type_concept_id,
+               0 AS operator_concept_id,
+               e.value_number AS value_as_number,
+               0 AS value_as_concept_id,
+               0 AS unit_concept_id,
+               {range_low} AS range_low,
+               {range_high} AS range_high,
+               CAST(NULL AS INTEGER) AS provider_id,
+               v.visit_occurrence_id,
+               CAST(NULL AS INTEGER) AS visit_detail_id,
+               substr(e.source_code, 1, 50) AS measurement_source_value,
+               CAST(coalesce(m.source_concept_id, 0) AS INTEGER) AS measurement_source_concept_id,
+               substr(e.unit_source, 1, 50) AS unit_source_value,
+               0 AS unit_source_concept_id,
+               substr(coalesce(
+                   e.value_text,
+                   CASE WHEN e.value_low IS NOT NULL AND e.value_high IS NOT NULL
+                        THEN CAST(e.value_low AS VARCHAR) || '-' || CAST(e.value_high AS VARCHAR) END,
+                   CAST(e.value_number AS VARCHAR)
+               ), 1, 50) AS value_source_value,
+               CAST(NULL AS BIGINT) AS measurement_event_id,
+               CAST(NULL AS INTEGER) AS meas_event_field_concept_id,
+               e.event_id
+        FROM evt e
+        JOIN pmap p ON p.subject_id = e.subject_id
+        LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
+        LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
+        WHERE e.event_kind = '{EventKind.measurement}'
+    """
 
 
-def _build_death(ctx: OmopContext, events: pl.DataFrame) -> tuple[list[dict], list[dict]]:
+def _note_sql(con) -> str:
+    # note_text is verbatim. Any later extraction is a separate event with its own
+    # lineage and never edits this text.
+    return f"""
+        SELECT CAST(row_number() OVER (ORDER BY e.event_id) AS INTEGER) AS note_id,
+               p.person_id,
+               CAST(e.event_time AS DATE) AS note_date,
+               e.event_time AS note_datetime,
+               {_type_id(con, 'note')} AS note_type_concept_id,
+               {_type_id(con, 'note_class')} AS note_class_concept_id,
+               substr(e.source_name, 1, 250) AS note_title,
+               coalesce(e.value_text, '') AS note_text,
+               0 AS encoding_concept_id,
+               0 AS language_concept_id,
+               CAST(NULL AS INTEGER) AS provider_id,
+               v.visit_occurrence_id,
+               CAST(NULL AS INTEGER) AS visit_detail_id,
+               substr(e.source_code, 1, 50) AS note_source_value,
+               CAST(NULL AS BIGINT) AS note_event_id,
+               CAST(NULL AS INTEGER) AS note_event_field_concept_id,
+               e.event_id
+        FROM evt e
+        JOIN pmap p ON p.subject_id = e.subject_id
+        LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
+        WHERE e.event_kind = '{EventKind.note}'
+    """
+
+
+def _publish_death(con) -> int:
     """DEATH, one row per person, and only where the sources agree.
 
     Where they agree the event already collapsed to one by content. Where they
@@ -534,243 +694,162 @@ def _build_death(ctx: OmopContext, events: pl.DataFrame) -> tuple[list[dict], li
     earlier or the later date would be inventing the answer to a question a human has
     to settle.
     """
-    frame = events.filter(pl.col("event_kind") == str(EventKind.death)).sort("event_id")
-    by_subject: dict[int, list[dict[str, Any]]] = {}
-    for row in frame.iter_rows(named=True):
-        by_subject.setdefault(int(row["subject_id"]), []).append(row)
+    con.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE death_candidates AS
+        SELECT e.subject_id, count(DISTINCT e.event_time) AS variants,
+               min(e.event_time) AS death_time, min(e.event_id) AS event_id
+        FROM evt e WHERE e.event_kind = '{EventKind.death}' AND e.event_time IS NOT NULL
+        GROUP BY e.subject_id
+        """
+    )
+    con.execute(
+        """
+        INSERT INTO etl_audit.quality_issue
+        SELECT 'DEATH_DATE_CONFLICT', 'error', 'omop', subject_id, NULL, event_id, NULL, NULL,
+               'sources disagree about the death date; no DEATH row was published'
+        FROM death_candidates WHERE variants > 1
+        """
+    )
+    con.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE stage AS
+        SELECT p.person_id,
+               CAST(d.death_time AS DATE) AS death_date,
+               d.death_time AS death_datetime,
+               {_type_id(con, 'death')} AS death_type_concept_id,
+               0 AS cause_concept_id,
+               CAST(NULL AS VARCHAR) AS cause_source_value,
+               0 AS cause_source_concept_id,
+               d.event_id
+        FROM death_candidates d
+        JOIN pmap p ON p.subject_id = d.subject_id
+        JOIN person pr ON pr.person_id = p.person_id
+        WHERE d.variants = 1
+        """
+    )
+    columns = [c for c in _columns(con, "stage") if c != STAGE_EXTRA]
+    con.execute(f"INSERT INTO death SELECT {', '.join(columns)} FROM stage")
+    con.execute(
+        f"""
+        INSERT INTO etl_audit.lineage
+        SELECT 'death', s.person_id, s.event_id, l.source_row_id, '{DEFAULT_MAPPING_VERSION}'
+        FROM stage s JOIN lnk l ON l.event_id = s.event_id
+        """
+    )
+    n = _count(con, "death")
+    con.execute("DROP TABLE stage")
+    return n
 
-    rows: list[dict[str, Any]] = []
-    issues: list[dict[str, Any]] = []
-    for sid in sorted(by_subject):
-        candidates = by_subject[sid]
-        distinct = sorted({r["event_time"] for r in candidates})
-        if len(distinct) > 1:
-            issues.append(
-                _issue(
-                    "DEATH_DATE_CONFLICT",
-                    "error",
-                    sid,
-                    "sources disagree: " + "; ".join(d.isoformat() for d in distinct),
-                    event_id=candidates[0]["event_id"],
-                )
-            )
-            continue
-        if sid not in ctx.person_ids:
-            continue
-        when = candidates[0]["event_time"]
-        rows.append(
-            {
-                "person_id": ctx.person_ids[sid],
-                "death_date": when.date(),
-                "death_datetime": when,
-                "death_type_concept_id": _type_concept(ctx, "death"),
-                "cause_concept_id": 0,
-                "cause_source_value": None,
-                "cause_source_concept_id": 0,
-                "_event_ids": [candidates[0]["event_id"]],
-            }
-        )
-    return rows, issues
 
-
-def _build_observation_periods(ctx: OmopContext, events: pl.DataFrame, published: set[int]) -> list[dict]:
+def _publish_observation_periods(con) -> int:
     """OBSERVATION_PERIOD from an explicit, versioned heuristic.
 
     There is no enrolment data here, so the period is the span of trustworthy dated
     events. Records dated after death are excluded from the span but not deleted, and
     the rule carries a version so that changing it is visible rather than silent.
     """
-    trustworthy = events.filter(
-        pl.col("event_time").is_not_null()
-        & ~pl.col("quality_flags").list.contains(str(QualityFlag.RECORDED_AFTER_DEATH))
+    con.execute(
+        f"""
+        INSERT INTO observation_period
+        SELECT CAST(row_number() OVER (ORDER BY p.person_id) AS INTEGER),
+               p.person_id,
+               CAST(min(e.event_time) AS DATE),
+               CAST(max(e.event_time) AS DATE),
+               {_type_id(con, 'observation_period')}
+        FROM evt e
+        JOIN pmap p ON p.subject_id = e.subject_id
+        JOIN person pr ON pr.person_id = p.person_id
+        WHERE e.event_time IS NOT NULL
+          AND NOT list_contains(e.quality_flags, '{QualityFlag.RECORDED_AFTER_DEATH}')
+        GROUP BY p.person_id
+        """
     )
-    if trustworthy.height == 0:
-        return []
-    spans = trustworthy.group_by("subject_id").agg(
-        pl.col("event_time").min().alias("start"), pl.col("event_time").max().alias("end")
-    )
-    rows: list[dict[str, Any]] = []
-    for row in spans.sort("subject_id").iter_rows(named=True):
-        person_id = ctx.person_ids.get(int(row["subject_id"]))
-        if person_id is None or person_id not in published:
-            continue
-        rows.append(
-            {
-                "observation_period_id": len(rows) + 1,
-                "person_id": person_id,
-                "observation_period_start_date": row["start"].date(),
-                "observation_period_end_date": row["end"].date(),
-                "period_type_concept_id": _type_concept(ctx, "observation_period"),
-            }
-        )
-    return rows
+    return _count(con, "observation_period")
 
 
-def _cdm_source_row(cfg: DatasetConfig, vocabulary) -> dict[str, Any]:
-    return {
-        "cdm_source_name": cfg.omop.source_name or cfg.dataset_id,
-        "cdm_source_abbreviation": cfg.dataset_id,
-        "cdm_holder": cfg.omop.cdm_holder or "unspecified (research extract; holder not declared)",
-        "source_description": cfg.description,
-        "source_documentation_reference": "PATIENT_CDM_AGENT_SYSTEM_DESIGN.md",
-        "cdm_etl_reference": f"ehr2cdm {CODE_VERSION}, config {cfg.config_hash()[:12]}",
-        "source_release_date": (
+def _publish_cdm_source(con, cfg: DatasetConfig, vocabulary) -> int:
+    con.execute(
+        "INSERT INTO cdm_source VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            cfg.omop.source_name or cfg.dataset_id,
+            cfg.dataset_id[:25],
+            cfg.omop.cdm_holder or "unspecified (research extract; holder not declared)",
+            cfg.description,
+            "PATIENT_CDM_AGENT_SYSTEM_DESIGN.md",
+            f"ehr2cdm {CODE_VERSION}, config {cfg.config_hash()[:12]}",
             datetime.strptime(cfg.omop.source_release_date, "%Y-%m-%d").date()
             if cfg.omop.source_release_date
-            else date.today()
-        ),
-        "cdm_release_date": date.today(),
-        "cdm_version": cfg.omop.cdm_version,
-        "cdm_version_concept_id": 0,
-        "vocabulary_version": vocabulary.version or "none",
-    }
+            else date.today(),
+            date.today(),
+            cfg.omop.cdm_version,
+            0,
+            (vocabulary.version or "none")[:20],
+        ],
+    )
+    return 1
 
 
-def _run_row(cfg: DatasetConfig, mappings: MappingRegistry, vocabulary, layout: WorkLayout) -> dict:
+def _publish_audit(con, cfg: DatasetConfig, layout: WorkLayout, vocabulary, mappings: MappingRegistry) -> None:
+    for name, table in (("anchors", "etl_audit.anchor"), ("cohort_membership", "etl_audit.cohort_membership")):
+        path = layout.canonical_path(name)
+        if not path.exists():
+            continue
+        columns = [c for c in _columns(con, table) if c != "person_id"]
+        con.execute(
+            f"""
+            INSERT INTO {table}
+            SELECT {', '.join('s.' + c for c in columns[:1])}, s.subject_id, p.person_id,
+                   {', '.join('s.' + c for c in columns[2:])}
+            FROM read_parquet('{path}') s
+            LEFT JOIN pmap p ON p.subject_id = s.subject_id
+            """
+            if name == "anchors"
+            else f"""
+            INSERT INTO {table}
+            SELECT s.subject_id, p.person_id, {', '.join('s.' + c for c in columns[1:])}
+            FROM read_parquet('{path}') s
+            LEFT JOIN pmap p ON p.subject_id = s.subject_id
+            """
+        )
+    issues = layout.canonical_path("quality_issue")
+    if issues.exists():
+        con.execute(f"INSERT INTO etl_audit.quality_issue SELECT * FROM read_parquet('{issues}')")
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    return {
-        "run_id": f"omop-{now.strftime('%Y%m%dT%H%M%SZ')}",
-        "config_hash": cfg.config_hash(),
-        "code_version": CODE_VERSION,
-        "mapping_version": mappings.version,
-        "vocabulary_version": vocabulary.version,
-        "started_at": now,
-        "finished_at": now,
-        "input_files": str(layout.manifest_dir / "inputs.json"),
-        "notes": ""
-        if vocabulary.available
-        else "no vocabulary available: every concept_id is 0 and every term is in review",
-    }
+    con.execute(
+        "INSERT INTO etl_audit.run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            f"omop-{now.strftime('%Y%m%dT%H%M%SZ')}",
+            cfg.config_hash(),
+            CODE_VERSION,
+            mappings.version,
+            vocabulary.version,
+            now,
+            now,
+            str(layout.manifest_dir / "inputs.json"),
+            ""
+            if vocabulary.available
+            else "no vocabulary available: every concept_id is 0 and every term is in review",
+        ],
+    )
 
 
 # --------------------------------------------------------------------------------
-# concept resolution
+# helpers
 # --------------------------------------------------------------------------------
 
 
-def _concept_id(ctx: OmopContext, row: dict[str, Any]) -> int:
-    """Standard concept for an event, or 0. Never an invented id."""
-    code = row.get("source_code")
-    if not code:
-        return 0
-    match = ctx.resolved.get((row.get("code_system") or "SOURCE", normalize_term(str(code))))
-    return int(match.concept_id) if match else 0
-
-
-def _source_concept_id(ctx: OmopContext, row: dict[str, Any]) -> int:
-    code = row.get("source_code")
-    if not code:
-        return 0
-    match = ctx.resolved.get((row.get("code_system") or "SOURCE", normalize_term(str(code))))
-    return int(match.source_concept_id) if match and match.source_concept_id else 0
-
-
-def _attribute_concept(ctx: OmopContext, domain: str, key: str, value: str | None) -> int:
-    if not value:
-        return 0
-    approved = ctx.mappings.get(key, value)
-    if approved:
-        return approved.concept_id
-    match = ctx.vocabulary.lookup_name(domain, value)
-    return int(match.concept_id) if match else 0
-
-
-def _type_concept(ctx: OmopContext, key: str) -> int:
-    """A fixed type concept, resolved from the git-tracked mapping registry.
-
-    Not a literal in code: an id typed into a source file has no provenance and nobody
-    revalidates it when the vocabulary is updated.
-    """
-    approved = ctx.mappings.get("TYPE_CONCEPT", key)
-    return approved.concept_id if approved else 0
-
-
-# --------------------------------------------------------------------------------
-# loading and lineage
-# --------------------------------------------------------------------------------
-
-
-def _table_columns(con, table: str) -> list[str]:
+def _columns(con, table: str) -> list[str]:
     return [r[0] for r in con.execute(f"DESCRIBE {table}").fetchall()]
 
 
-def _load(con, table: str, rows: Sequence[dict[str, Any]]) -> int:
-    if not rows:
-        return 0
-    columns = _table_columns(con, table)
-    frame = pl.DataFrame({c: [r.get(c) for r in rows] for c in columns})
-    con.register("_staging", frame.to_arrow())
-    con.execute(f"INSERT INTO {table} SELECT {', '.join(columns)} FROM _staging")
-    con.unregister("_staging")
-    return len(rows)
+def _count(con, table: str) -> int:
+    return int(con.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
 
 
-def _load_audit(con, table: str, rows: Sequence[dict[str, Any]]) -> int:
-    if not rows:
-        return 0
-    columns = _table_columns(con, table)
-    frame = pl.DataFrame({c: [r.get(c) for r in rows] for c in columns})
-    con.register("_staging_audit", frame.to_arrow())
-    con.execute(f"INSERT INTO {table} SELECT {', '.join(columns)} FROM _staging_audit")
-    con.unregister("_staging_audit")
-    return len(rows)
-
-
-def _index_links(links: pl.DataFrame) -> dict[str, list[str]]:
-    index: dict[str, list[str]] = {}
-    for event_id, source_row_id in zip(links["event_id"].to_list(), links["source_row_id"].to_list()):
-        index.setdefault(event_id, []).append(source_row_id)
-    return index
-
-
-def _record_lineage(
-    lineage: list[dict[str, Any]],
-    table: str,
-    rows: Sequence[dict[str, Any]],
-    pk_field: str,
-    link_index: dict[str, list[str]],
-) -> None:
-    for row in rows:
-        for event_id in row.get("_event_ids") or []:
-            for source_row_id in link_index.get(event_id, []):
-                lineage.append(
-                    {
-                        "target_table": table,
-                        "target_pk": row[pk_field],
-                        "event_id": event_id,
-                        "source_row_id": source_row_id,
-                        "mapping_version": "0",
-                    }
-                )
-
-
-def _with_person(frame: pl.DataFrame | None, person_ids: dict[int, int]) -> list[dict]:
-    if frame is None or frame.height == 0:
-        return []
-    out = []
-    for row in frame.iter_rows(named=True):
-        record = dict(row)
-        record["person_id"] = person_ids.get(int(row["subject_id"]))
-        out.append(record)
-    return out
-
-
-def _rows(frame: pl.DataFrame | None) -> list[dict]:
-    return [] if frame is None or frame.height == 0 else frame.to_dicts()
-
-
-def _issue(issue_type: str, severity: str, subject_id: int, detail: str, event_id: str | None = None) -> dict:
-    return {
-        "issue_type": issue_type,
-        "severity": severity,
-        "stage": "omop",
-        "subject_id": subject_id,
-        "source_row_id": None,
-        "event_id": event_id,
-        "partition_id": None,
-        "source_id": None,
-        "detail": detail,
-    }
+def _env_vocabulary_dir() -> Path | None:
+    raw = os.environ.get("OMOP_VOCAB_DIR")
+    return Path(raw) if raw else None
 
 
 def _write_pending(layout: WorkLayout, unresolved: Sequence[TermRequest], vocabulary) -> Path | None:
@@ -802,15 +881,3 @@ def _write_pending(layout: WorkLayout, unresolved: Sequence[TermRequest], vocabu
             }
         )
     return write_pending(layout, items)
-
-
-def _read_optional(path: Path) -> pl.DataFrame | None:
-    return pl.read_parquet(path) if path.exists() else None
-
-
-def _v(value: object, limit: int) -> str | None:
-    """Truncate to the DDL's declared width so a Postgres export behaves identically."""
-    if value is None:
-        return None
-    text = str(value)
-    return text[:limit] if len(text) > limit else text

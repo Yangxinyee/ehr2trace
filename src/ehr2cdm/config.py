@@ -165,7 +165,7 @@ class IdentitySpec(BaseModel):
 
     person_key: str
     encounter_key: str | None = None
-    #: env var holding an optional secret salt for MRN -> subject_id
+    #: env var holding an optional secret salt for patient key -> subject_id
     subject_salt_env: str = "EHR_SUBJECT_SALT"
 
 
@@ -191,7 +191,7 @@ class TimeSpec(BaseModel):
 
 
 class AnchorSpec(BaseModel):
-    """Extraction-time anchors (``dos``): provenance, never an event time."""
+    """Extraction-time anchors: provenance, never an event time."""
 
     model_config = Strict
 

@@ -566,21 +566,51 @@ def _omop_untimed(l: Layers) -> CheckResult:
 # --------------------------------------------------------------------------------
 
 
-def _meds_data(l: Layers) -> pl.DataFrame | None:
+def _meds_files(l: Layers) -> list[str]:
     import meds as meds_spec
 
     data_dir = l.layout.meds_dir / meds_spec.data_subdirectory
-    files = sorted(str(p) for p in data_dir.rglob("*.parquet"))
-    return pl.read_parquet(files) if files else None
+    return sorted(str(p) for p in data_dir.rglob("*.parquet"))
+
+
+def _meds_columns(files: list[str]) -> list[str]:
+    import pyarrow.parquet as pq
+
+    return list(pq.read_schema(files[0]).names)
+
+
+def _sql_list(values) -> str:
+    """A quoted, lowercased SQL list. Values come from the dataset config, not a user."""
+    return ", ".join("'" + str(v).lower().replace("'", "''") + "'" for v in values)
+
+
+def _meds_query(files: list[str], sql: str, params: dict | None = None) -> list[tuple]:
+    """Query the published shards without materializing them.
+
+    The point of the sharding contract is that nobody ever needs the whole dataset in
+    memory. A validator that needed it would be violating the property it checks.
+    """
+    import duckdb
+
+    con = duckdb.connect()
+    try:
+        con.execute("PRAGMA preserve_insertion_order = false")
+        # The relation API rather than a parameterized CREATE VIEW: DuckDB refuses to
+        # prepare a CREATE statement, and hive partitioning stays off so a shard's
+        # directory name cannot become a column.
+        con.read_parquet(files, hive_partitioning=False).create_view("meds")
+        return con.execute(sql, params or {}).fetchall()
+    finally:
+        con.close()
 
 
 @check("MEDS_SCHEMA_VALID")
 def _meds_schema(l: Layers) -> CheckResult:
+    """The installed MEDS version decides what is valid, not this project's opinion."""
     import meds as meds_spec
     import pyarrow.parquet as pq
 
-    data_dir = l.layout.meds_dir / meds_spec.data_subdirectory
-    files = sorted(data_dir.rglob("*.parquet"))
+    files = [Path(f) for f in _meds_files(l)]
     if not files:
         return _skip("MEDS not built")
     errors: list[str] = []
@@ -589,6 +619,8 @@ def _meds_schema(l: Layers) -> CheckResult:
             meds_spec.DataSchema.validate(pq.read_table(path))
         except Exception as exc:
             errors.append(f"{path.name}: {exc}")
+            if len(errors) > 5:
+                break
     codes_path = l.layout.meds_dir / meds_spec.code_metadata_filepath
     if codes_path.exists():
         try:
@@ -598,7 +630,7 @@ def _meds_schema(l: Layers) -> CheckResult:
     return CheckResult(
         "",
         not errors,
-        f"{len(files)} shards validate against the installed MEDS schema"
+        f"{len(files):,} shards validate against the installed MEDS schema"
         if not errors
         else f"schema violations: {errors[:3]}",
         {"shards": len(files)},
@@ -607,74 +639,83 @@ def _meds_schema(l: Layers) -> CheckResult:
 
 @check("MEDS_SHARDS_CONTIGUOUS_AND_SORTED")
 def _meds_sharding(l: Layers) -> CheckResult:
-    import meds as meds_spec
+    """Each subject whole, in one shard, in time order.
 
-    data_dir = l.layout.meds_dir / meds_spec.data_subdirectory
-    files = sorted(data_dir.rglob("*.parquet"))
+    Checked shard by shard rather than over a concatenation: this is exactly the
+    property that lets a reader stream one patient without a global index.
+    """
+    files = [Path(f) for f in _meds_files(l)]
     if not files:
         return _skip("MEDS not built")
     problems: list[str] = []
-    seen: dict[int, str] = {}
+    owners: dict[int, str] = {}
     for path in files:
-        frame = pl.read_parquet(path)
+        frame = pl.read_parquet(path, columns=["subject_id", "time"])
         subjects = frame["subject_id"].to_list()
-        for subject_id in set(subjects):
-            if subject_id in seen and seen[subject_id] != path.name:
-                problems.append(f"subject {subject_id} spans {seen[subject_id]} and {path.name}")
-            seen[subject_id] = path.name
-        # contiguous: the subject column may not return to a value it left
+        times = frame["time"].to_list()
         blocks = [s for i, s in enumerate(subjects) if i == 0 or s != subjects[i - 1]]
         if len(blocks) != len(set(blocks)):
             problems.append(f"{path.name}: a subject's events are not contiguous")
-        times = frame.select("subject_id", "time").to_dicts()
-        for i in range(1, len(times)):
-            if times[i]["subject_id"] != times[i - 1]["subject_id"]:
+        for subject_id in blocks:
+            if subject_id in owners:
+                problems.append(f"a subject spans {owners[subject_id]} and {path.name}")
+            owners[subject_id] = path.name
+        for i in range(1, len(subjects)):
+            if subjects[i] != subjects[i - 1]:
                 continue
-            a, b = times[i - 1]["time"], times[i]["time"]
-            if a is not None and b is not None and b < a:
+            if times[i - 1] is not None and times[i] is not None and times[i] < times[i - 1]:
                 problems.append(f"{path.name}: events are not time-sorted")
                 break
+        if len(problems) > 10:
+            break
     return CheckResult(
         "",
         not problems,
-        f"{len(seen):,} subjects, each in exactly one shard, contiguous and time-sorted"
+        f"{len(owners):,} subjects, each in exactly one shard, contiguous and time-sorted"
         if not problems
         else f"sharding problems: {problems[:3]}",
-        {"subjects": len(seen), "shards": len(files)},
+        {"subjects": len(owners), "shards": len(files)},
     )
 
 
 @check("MEDS_NO_LABEL_LEAKAGE")
 def _meds_leakage(l: Layers) -> CheckResult:
-    """The cohort label and its proxies must not appear anywhere in event rows."""
-    frame = _meds_data(l)
-    if frame is None:
+    """The cohort label and its proxies must not appear anywhere in event rows.
+
+    Both halves matter: no column that carries the label, and no *value* that is the
+    label smuggled in through a code or a source table name.
+    """
+    files = _meds_files(l)
+    if not files:
         return _skip("MEDS not built")
     from ehr2cdm.meds import FORBIDDEN_EVENT_COLUMNS
 
-    leaked_columns = sorted(set(frame.columns) & FORBIDDEN_EVENT_COLUMNS)
-    labels = {p.membership_label.lower() for p in l.cfg.partitions if p.membership_label}
-    leaked_values = 0
+    columns = _meds_columns(files)
+    leaked_columns = sorted(set(columns) & FORBIDDEN_EVENT_COLUMNS)
+
+    labels = _sql_list(p.membership_label for p in l.cfg.partitions if p.membership_label)
+    partitions = _sql_list(p.id for p in l.cfg.partitions)
+    conditions: list[str] = []
     if labels:
         for column in ("code", "source_code", "text_value"):
-            if column in frame.columns:
-                leaked_values += int(
-                    frame.filter(pl.col(column).str.to_lowercase().is_in(list(labels))).height
-                )
-    partitions = {p.id.lower() for p in l.cfg.partitions}
-    leaked_partition = 0
-    if "source_table" in frame.columns:
-        leaked_partition = int(
-            frame.filter(pl.col("source_table").str.to_lowercase().is_in(list(partitions))).height
+            if column in columns:
+                conditions.append(f"lower(CAST({column} AS VARCHAR)) IN ({labels})")
+    if partitions and "source_table" in columns:
+        conditions.append(f"lower(source_table) IN ({partitions})")
+
+    leaked_values = 0
+    if conditions:
+        leaked_values = int(
+            _meds_query(files, f"SELECT count(*) FROM meds WHERE {' OR '.join(conditions)}")[0][0]
         )
-    ok = not leaked_columns and not leaked_values and not leaked_partition
+    ok = not leaked_columns and not leaked_values
     return CheckResult(
         "",
         ok,
         "no cohort label, partition id or file name in any event row"
         if ok
-        else f"leakage: columns={leaked_columns} label_values={leaked_values} partition={leaked_partition}",
-        {"rows": frame.height},
+        else f"leakage: columns={leaked_columns} values={leaked_values}",
+        {"shards": len(files)},
     )
 
 
@@ -682,14 +723,13 @@ def _meds_leakage(l: Layers) -> CheckResult:
 def _meds_codes(l: Layers) -> CheckResult:
     import meds as meds_spec
 
-    frame = _meds_data(l)
+    files = _meds_files(l)
     codes_path = l.layout.meds_dir / meds_spec.code_metadata_filepath
-    if frame is None or not codes_path.exists():
+    if not files or not codes_path.exists():
         return _skip("MEDS not built")
-    used = set(frame["code"].to_list())
+    used = {r[0] for r in _meds_query(files, "SELECT DISTINCT code FROM meds")}
     documented = set(pl.read_parquet(codes_path)["code"].to_list())
-    missing = used - documented
-    extra = documented - used
+    missing, extra = used - documented, documented - used
     return CheckResult(
         "",
         not missing and not extra,
@@ -704,58 +744,57 @@ def _meds_codes(l: Layers) -> CheckResult:
 def _meds_splits(l: Layers) -> CheckResult:
     import meds as meds_spec
 
-    frame = _meds_data(l)
+    files = _meds_files(l)
     splits_path = l.layout.meds_dir / meds_spec.subject_splits_filepath
-    if frame is None or not splits_path.exists():
+    if not files or not splits_path.exists():
         return _skip("MEDS not built")
     splits = pl.read_parquet(splits_path)
     duplicated = splits.height - splits["subject_id"].n_unique()
-    subjects = set(frame["subject_id"].to_list())
-    covered = set(splits["subject_id"].to_list())
+    subjects = {int(r[0]) for r in _meds_query(files, "SELECT DISTINCT subject_id FROM meds")}
+    covered = {int(s) for s in splits["subject_id"].to_list()}
+    counts = splits.group_by("split").len()
+    ok = duplicated == 0 and subjects == covered
     return CheckResult(
         "",
-        duplicated == 0 and subjects == covered,
+        ok,
         f"{splits.height:,} subjects, one split each, covering every subject in the data"
-        if duplicated == 0 and subjects == covered
+        if ok
         else f"{duplicated} subjects in more than one split; {len(subjects - covered)} unassigned",
-        {
-            "by_split": dict(
-                zip(
-                    splits.group_by("split").len()["split"].to_list(),
-                    splits.group_by("split").len()["len"].to_list(),
-                )
-            )
-        },
+        {"by_split": dict(zip(counts["split"].to_list(), counts["len"].to_list()))},
     )
 
 
 @check("MEDS_AVAILABILITY_PREVENTS_LEAKAGE")
 def _meds_availability(l: Layers) -> CheckResult:
-    """An as-of view must contain nothing that was not yet visible at that moment."""
-    frame = _meds_data(l)
-    if frame is None:
+    """Availability must never precede occurrence, and must never be missing.
+
+    An as-of view filters on ``available_time``; if a row claimed to be visible before
+    it happened, that filter would admit the future.
+    """
+    files = _meds_files(l)
+    if not files:
         return _skip("MEDS not built")
-    if "available_time" not in frame.columns:
+    if "available_time" not in _meds_columns(files):
         return CheckResult("", False, "available_time is missing: leakage cannot be prevented")
-    timed = frame.filter(pl.col("time").is_not_null())
-    if timed.height == 0:
-        return CheckResult("", True, "no timed events")
-    midpoint = timed["time"].median()
-    as_of = timed.filter(
-        pl.col("available_time").is_null() | (pl.col("available_time") <= midpoint)
-    )
-    violations = int(as_of.filter(pl.col("available_time") > midpoint).height)
-    assumed = int(
-        frame.filter(pl.col("quality_flags").list.contains(str(QualityFlag.AVAILABILITY_ASSUMED))).height
-    )
+    timed, missing, backwards, assumed = _meds_query(
+        files,
+        """
+        SELECT count(*) FILTER (WHERE time IS NOT NULL),
+               count(*) FILTER (WHERE time IS NOT NULL AND available_time IS NULL),
+               count(*) FILTER (WHERE available_time < time),
+               count(*) FILTER (WHERE list_contains(quality_flags, 'AVAILABILITY_ASSUMED'))
+        FROM meds
+        """,
+    )[0]
+    ok = int(missing or 0) == 0 and int(backwards or 0) == 0
     return CheckResult(
         "",
-        violations == 0,
-        f"an as-of view at the median event time contains no unavailable row "
-        f"({assumed:,} rows carry an assumed availability)"
-        if violations == 0
-        else f"{violations} rows leak future information",
-        {"availability_assumed": assumed},
+        ok,
+        f"{int(timed or 0):,} timed events all carry an availability that never precedes "
+        f"occurrence ({int(assumed or 0):,} of them assumed and flagged)"
+        if ok
+        else f"{missing} rows have no availability and {backwards} claim to predate their own event",
+        {"availability_assumed": int(assumed or 0), "timed_events": int(timed or 0)},
     )
 
 

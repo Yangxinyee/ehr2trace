@@ -12,6 +12,7 @@ parallel run is checked against.
 from __future__ import annotations
 
 import json
+import multiprocessing as mp
 import os
 import platform
 from concurrent.futures import ProcessPoolExecutor
@@ -38,7 +39,11 @@ def execute(tasks: Sequence[T], fn: Callable[[T], R], workers: int = 1) -> list[
         return []
     if workers <= 1:
         return [fn(t) for t in tasks]
-    with ProcessPoolExecutor(max_workers=workers) as pool:
+    # "spawn", not the platform default: the parent has already started the thread
+    # pools inside the dataframe engine, and forking a process with live threads
+    # deadlocks intermittently -- the kind of failure that only shows up under load.
+    context = mp.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
         return list(pool.map(fn, tasks))
 
 

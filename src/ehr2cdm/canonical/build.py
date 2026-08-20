@@ -15,6 +15,7 @@ no cross-worker coordination.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -417,26 +418,51 @@ SORT_KEYS = {
 
 
 def merge_buckets(layout: WorkLayout, digests: dict[int, str]) -> dict[str, int]:
-    """Concatenate bucket outputs into the canonical layer, sorted, order-independent."""
+    """Concatenate bucket outputs into the canonical layer, sorted, order-independent.
+
+    The sort is what makes the result independent of which worker finished first, and
+    it runs in the database engine rather than in memory: the link table alone reaches
+    a hundred million rows, and a merge that only works while it fits in RAM is a merge
+    that fails on the next dataset.
+    """
+    import duckdb
+
     counts: dict[str, int] = {}
-    for name, schema in MERGE_TABLES.items():
-        files = []
-        for bucket in sorted(digests):
-            path = layout.bucket_dir(bucket) / digests[bucket] / f"{name}.parquet"
-            if path.exists():
-                files.append(path)
-        if not files:
-            write_table_atomic(
-                pa.table({f.name: pa.array([], type=f.type) for f in schema}, schema=schema),
-                layout.canonical_path(name),
+    con = duckdb.connect()
+    try:
+        con.execute("PRAGMA preserve_insertion_order = false")
+        for name, schema in MERGE_TABLES.items():
+            files = [
+                str(layout.bucket_dir(bucket) / digests[bucket] / f"{name}.parquet")
+                for bucket in sorted(digests)
+                if (layout.bucket_dir(bucket) / digests[bucket] / f"{name}.parquet").exists()
+            ]
+            target = layout.canonical_path(name)
+            if not files:
+                write_table_atomic(
+                    pa.table({f.name: pa.array([], type=f.type) for f in schema}, schema=schema),
+                    target,
+                )
+                counts[name] = 0
+                continue
+            keys = [k for k in SORT_KEYS[name] if k in schema.names]
+            order = f"ORDER BY {', '.join(f'{k} NULLS LAST' for k in keys)}" if keys else ""
+            tmp = target.with_suffix(".parquet.partial")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            # Columns are named explicitly and hive partitioning is off: bucket
+            # directories are an internal detail of how the work was split, and a
+            # reader that infers a column from a directory name would silently widen
+            # the frozen canonical schema.
+            columns = ", ".join(f.name for f in schema)
+            con.execute(
+                f"COPY (SELECT {columns} FROM read_parquet($files, hive_partitioning=false) "
+                f"{order}) TO '{tmp}' (FORMAT PARQUET, COMPRESSION ZSTD)",
+                {"files": files},
             )
-            counts[name] = 0
-            continue
-        table = pa.concat_tables([pq.read_table(f) for f in files]).cast(schema)
-        df = pl.from_arrow(table)
-        keys = [k for k in SORT_KEYS[name] if k in df.columns]
-        if keys:
-            df = df.sort(keys, nulls_last=True)
-        write_table_atomic(df.to_arrow().cast(schema), layout.canonical_path(name))
-        counts[name] = df.height
+            os.replace(tmp, target)
+            counts[name] = int(
+                con.execute(f"SELECT count(*) FROM read_parquet('{target}')").fetchone()[0]
+            )
+    finally:
+        con.close()
     return counts
