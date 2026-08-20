@@ -13,14 +13,13 @@ questions are listed, by id, with who has to answer them.
 
 from __future__ import annotations
 
-import os
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ehr2cdm.adapters import get_adapter, has_bom, list_sheets, resolve_sheet, sniff_line_ending
-from ehr2cdm.config import AdapterOptions, DatasetConfig, SourceSpec
+from ehr2cdm.adapters import get_adapter, has_bom, list_sheets, sniff_line_ending
+from ehr2cdm.config import DatasetConfig, SourceSpec
 from ehr2cdm.hashing import file_sha256
 from ehr2cdm.schema import Coverage
 from ehr2cdm.version import CODE_VERSION

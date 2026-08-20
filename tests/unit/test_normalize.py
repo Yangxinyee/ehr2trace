@@ -9,8 +9,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-import pytest
-
 from ehr2cdm.canonical.normalize import (
     COL_PREFIX,
     Row,
@@ -19,7 +17,7 @@ from ehr2cdm.canonical.normalize import (
     get_shape,
 )
 from ehr2cdm.canonical.values import ValueParsingSpec
-from ehr2cdm.config import DatasetConfig, SourceSpec
+from ehr2cdm.config import DatasetConfig
 from ehr2cdm.schema import EventKind, QualityFlag, QuarantineReason, SourceRelation
 from ehr2cdm.timeutil import TimeContext
 

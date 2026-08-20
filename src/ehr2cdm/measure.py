@@ -21,19 +21,13 @@ from __future__ import annotations
 import csv
 import json
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from ehr2cdm.config import DatasetConfig
 from ehr2cdm.paths import WorkLayout
-from ehr2cdm.terminology import (
-    DOMAIN_FOR_KIND,
-    Candidate,
-    MappingRegistry,
-    Vocabulary,
-    normalize_term,
-)
+from ehr2cdm.terminology import DOMAIN_FOR_KIND, Candidate, MappingRegistry, Vocabulary
 
 GOLD_FIELDS = ["code_system", "source_string", "event_kind", "concept_id", "concept_name", "note"]
 

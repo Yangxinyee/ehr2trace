@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator, Sequence
@@ -34,7 +34,7 @@ from ehr2cdm.canonical.dedup import (
     merge_links,
     sort_events,
 )
-from ehr2cdm.canonical.normalize import COL_PREFIX, Emission, Row, ShapeContext, build_role_map, get_shape
+from ehr2cdm.canonical.normalize import Emission, Row, ShapeContext, build_role_map, get_shape
 from ehr2cdm.canonical.values import spec_from_config
 from ehr2cdm.config import DatasetConfig
 from ehr2cdm.paths import StreamingParquetWriter, WorkLayout, task_hash, write_table_atomic

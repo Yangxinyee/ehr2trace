@@ -102,6 +102,9 @@ class SourceSpec(BaseModel):
     shape: str
     event_kind: str | None = None
     code_system: str = "SOURCE"
+    #: what a result column is expected to hold. ``numeric`` makes a value that matches
+    #: none of the documented forms a quarantine case instead of free text.
+    value_expect: Literal["auto", "numeric", "text"] = "auto"
     required: bool = True
     #: restrict this source to a subset of partitions; empty means all
     partitions: list[str] = Field(default_factory=list)

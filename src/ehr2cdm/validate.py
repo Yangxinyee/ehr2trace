@@ -890,7 +890,7 @@ def _meds_availability(l: Layers) -> CheckResult:
 def _undecided_not_published(l: Layers) -> CheckResult:
     """A proposal nobody accepted must not have become a mapping."""
     from ehr2cdm.review import read_decisions, read_pending
-    from ehr2cdm.terminology import MappingRegistry, normalize_term
+    from ehr2cdm.terminology import MappingRegistry
 
     pending = read_pending(l.layout)
     if not pending:

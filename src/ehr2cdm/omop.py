@@ -47,7 +47,6 @@ from ehr2cdm.terminology import (
     MappingRegistry,
     TermRequest,
     Vocabulary,
-    normalize_term,
     resolve_terms,
 )
 from ehr2cdm.version import CODE_VERSION, DEFAULT_MAPPING_VERSION
@@ -820,30 +819,44 @@ def _publish_cdm_source(con, cfg: DatasetConfig, vocabulary) -> int:
 
 
 def _publish_audit(con, cfg: DatasetConfig, layout: WorkLayout, vocabulary, mappings: MappingRegistry) -> None:
-    for name, table in (("anchors", "etl_audit.anchor"), ("cohort_membership", "etl_audit.cohort_membership")):
-        path = layout.canonical_path(name)
-        if not path.exists():
-            continue
-        columns = [c for c in _columns(con, table) if c != "person_id"]
+    """Load the audit tables: anchors, cohort membership, quality issues, the run row.
+
+    Columns are named explicitly rather than taken positionally. These tables carry the
+    provenance that explains every published row, and a silent column shift here would
+    misattribute it.
+    """
+    anchors = layout.canonical_path("anchors")
+    if anchors.exists():
         con.execute(
             f"""
-            INSERT INTO {table}
-            SELECT {', '.join('s.' + c for c in columns[:1])}, s.subject_id, p.person_id,
-                   {', '.join('s.' + c for c in columns[2:])}
-            FROM read_parquet('{path}') s
+            INSERT INTO etl_audit.anchor
+            SELECT s.anchor_id, s.subject_id, p.person_id, s.anchor_type, s.anchor_date,
+                   s.anchor_time, s.anchor_time_known, s.partition_id, s.source_row_id
+            FROM read_parquet('{anchors}') s
             LEFT JOIN pmap p ON p.subject_id = s.subject_id
             """
-            if name == "anchors"
-            else f"""
-            INSERT INTO {table}
-            SELECT s.subject_id, p.person_id, {', '.join('s.' + c for c in columns[1:])}
-            FROM read_parquet('{path}') s
+        )
+    memberships = layout.canonical_path("cohort_membership")
+    if memberships.exists():
+        con.execute(
+            f"""
+            INSERT INTO etl_audit.cohort_membership
+            SELECT s.subject_id, p.person_id, s.partition_id, s.batch, s.membership_label,
+                   s.anchor_id, s.label_scope, s.source_row_id
+            FROM read_parquet('{memberships}') s
             LEFT JOIN pmap p ON p.subject_id = s.subject_id
             """
         )
     issues = layout.canonical_path("quality_issue")
     if issues.exists():
-        con.execute(f"INSERT INTO etl_audit.quality_issue SELECT * FROM read_parquet('{issues}')")
+        con.execute(
+            f"""
+            INSERT INTO etl_audit.quality_issue
+            SELECT issue_type, severity, stage, subject_id, source_row_id, event_id,
+                   partition_id, source_id, detail
+            FROM read_parquet('{issues}')
+            """
+        )
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     con.execute(
         "INSERT INTO etl_audit.run VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",

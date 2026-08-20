@@ -243,7 +243,6 @@ def _materialize_rows(con, out_path: Path) -> None:
 def _write_shards(rows_path: Path, data_dir: Path, splits: dict[int, str], shard_size: int) -> tuple[int, int]:
     """Stream ordered rows into shards, never splitting a subject across two files."""
     size = max(1, shard_size)
-    writers: dict[str, tuple[Path, list[dict[str, Any]], int]] = {}
     counts = {"shards": 0, "events": 0}
     buffers: dict[str, list[pa.Table]] = {}
     subjects_in_shard: dict[str, int] = {}

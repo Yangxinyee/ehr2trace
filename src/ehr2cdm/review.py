@@ -20,7 +20,7 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 
 from ehr2cdm.config import DatasetConfig
 from ehr2cdm.hashing import sha256_hex

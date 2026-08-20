@@ -13,7 +13,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Sequence
 from zoneinfo import ZoneInfo
 
 from ehr2cdm.errors import QuarantineRow

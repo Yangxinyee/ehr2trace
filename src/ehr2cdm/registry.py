@@ -80,9 +80,13 @@ def register_shape(name: str) -> Callable[[T], T]:
 
 
 def load_registries() -> None:
-    """Import the modules that populate the registries (kept lazy to avoid cycles)."""
-    import ehr2cdm.adapters  # noqa: F401
-    import ehr2cdm.canonical.normalize  # noqa: F401
+    """Import the modules that populate the registries.
+
+    Imported for their side effect -- the decorators run at import time -- and kept
+    lazy so that config validation can check names without a circular import.
+    """
+    import ehr2cdm.adapters  # noqa: F401  (registers the adapters)
+    import ehr2cdm.canonical.normalize  # noqa: F401  (registers the shapes)
 
 
 def adapter_names() -> set[str]:

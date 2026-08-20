@@ -10,8 +10,6 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-import pytest
-
 from ehr2cdm.adapters import get_adapter, has_bom, resolve_sheet, sniff_line_ending
 from ehr2cdm.adapters.base import PhysicalUnit, is_unnamed, strip_bom
 from ehr2cdm.config import AdapterOptions

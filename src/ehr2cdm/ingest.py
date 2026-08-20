@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import pyarrow as pa
 
@@ -32,7 +32,7 @@ from ehr2cdm.adapters.base import PhysicalUnit
 from ehr2cdm.config import DatasetConfig, SourceSpec
 from ehr2cdm.discover import resolve_source_units
 from ehr2cdm.hashing import file_sha256, row_sha256, source_cell, source_row_id
-from ehr2cdm.paths import StreamingParquetWriter, WorkLayout, task_hash, write_table_atomic
+from ehr2cdm.paths import StreamingParquetWriter, WorkLayout, task_hash
 from ehr2cdm.schema import (
     QUARANTINE_SCHEMA,
     SOURCE_BASE_FIELDS,

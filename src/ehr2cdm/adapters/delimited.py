@@ -6,7 +6,6 @@ Streams line by line: single files here reach 650 MB and must never be materiali
 from __future__ import annotations
 
 import csv
-import io
 from pathlib import Path
 from typing import Iterator
 

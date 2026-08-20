@@ -387,8 +387,8 @@ def shape_narrative_lines(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
     """
     out = Emission()
     kind = ctx.spec.event_kind or str(EventKind.note)
-    for key, group in _group(ctx, rows, out):
-        subject_id, encounter_id, title, event_time, available_time, flags = key
+    for (key, flags), group in _group(ctx, rows, out):
+        subject_id, encounter_id, title, event_time, available_time = key
         lines: dict[tuple[int, str], str] = {}
         line_rows: dict[tuple[int, str], list[Row]] = {}
         for row in group:
@@ -467,8 +467,8 @@ def shape_component_measurements(ctx: ShapeContext, rows: Sequence[Row]) -> Emis
     """One row is one component of a study; the study itself becomes its own event."""
     out = Emission()
     kind = ctx.spec.event_kind or str(EventKind.measurement)
-    for key, group in _group(ctx, rows, out):
-        subject_id, encounter_id, title, event_time, available_time, flags = key
+    for (key, flags), group in _group(ctx, rows, out):
+        subject_id, encounter_id, title, event_time, available_time = key
         study_emission = (
             _emit_study_event(
                 ctx,
@@ -805,17 +805,24 @@ def _emit_study_event(
     return out
 
 
-GroupKey = tuple[int, str | None, str | None, datetime | None, datetime | None, tuple[str, ...]]
+GroupKey = tuple[int, str | None, str | None, datetime | None, datetime | None]
 
 
-def _group(ctx: ShapeContext, rows: Sequence[Row], out: Emission) -> Iterator[tuple[GroupKey, list[Row]]]:
+def _group(
+    ctx: ShapeContext, rows: Sequence[Row], out: Emission
+) -> Iterator[tuple[tuple[GroupKey, tuple[str, ...]], list[Row]]]:
     """Group rows into the report or study they belong to.
 
     The grouping key is the clinical identity of the study -- subject, encounter, study
     name, result time -- and deliberately not the anchor, which is what makes the
     once-per-anchor duplication collapse.
+
+    Quality flags are unioned across the group rather than being part of the key. One
+    row of a report earning a fallback flag must not split the report in two; the flag
+    describes the group, not a different study.
     """
     groups: dict[GroupKey, list[Row]] = {}
+    group_flags: dict[GroupKey, set[str]] = {}
     for row in rows:
         try:
             event_time, available_time, _end, flags = resolve_times(ctx, row)
@@ -828,28 +835,21 @@ def _group(ctx: ShapeContext, rows: Sequence[Row], out: Emission) -> Iterator[tu
             )
             continue
         title = row.text("display_name", ctx.null_literals) or row.text("source_name", ctx.null_literals)
-        key: GroupKey = (
-            row.subject_id,
-            row.encounter_source_id,
-            title,
-            event_time,
-            available_time,
-            tuple(_dedup_flags(flags)),
-        )
+        key: GroupKey = (row.subject_id, row.encounter_source_id, title, event_time, available_time)
         groups.setdefault(key, []).append(row)
+        group_flags.setdefault(key, set()).update(flags)
     for key in sorted(groups, key=_group_sort_key):
-        yield key, groups[key]
+        yield (key, tuple(sorted(group_flags[key]))), groups[key]
 
 
 def _group_sort_key(key: GroupKey) -> tuple:
-    subject_id, encounter_id, title, event_time, available_time, flags = key
+    subject_id, encounter_id, title, event_time, available_time = key
     return (
         subject_id,
         encounter_id or "",
         title or "",
         event_time or datetime.min,
         available_time or datetime.min,
-        flags,
     )
 
 
@@ -863,7 +863,14 @@ def _as_int(value: str | None) -> int | None:
 
 
 def _expect_for(ctx: ShapeContext) -> str:
-    return "auto"
+    """What this source's result column is expected to hold.
+
+    ``auto`` accepts free text, which is correct for a column that genuinely mixes
+    numbers and phrases. A source that declares ``numeric`` gets the stricter rule the
+    design asks for: a value matching none of the documented forms is quarantined
+    rather than quietly kept as text.
+    """
+    return ctx.spec.value_expect
 
 
 def get_shape(name: str) -> Callable[[ShapeContext, Sequence[Row]], Emission]:
