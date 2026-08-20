@@ -1,0 +1,302 @@
+# Dataset contract for the CTPE export (design section 4).
+#
+# Everything the converter knows about this particular hospital extract is in this
+# file. The package itself contains none of these strings: swapping in a structurally
+# similar export means writing another file like this one, not editing code.
+#
+# Anything this file records as `null` is an open question for the data owner. It stays
+# null until they answer, and `ehr2cdm inspect` lists it as a blocker.
+
+dataset_id: ctpe
+root_env: EHR_DATA_ROOT
+description: >-
+  CT pulmonary embolism extract: four cohort partitions across two extraction batches,
+  delivered as tab-delimited text plus one workbook per partition.
+
+identity:
+  person_key: MRN
+  encounter_key: CSN
+  subject_salt_env: EHR_SUBJECT_SALT
+
+time:
+  # Unanswered. The export carries naive local timestamps with no zone, and guessing
+  # one would silently shift every event by hours.
+  timezone_assumption: null
+  naive_time_policy: block
+  formats:
+    - "%Y-%m-%d %H:%M:%S.%f"
+    - "%Y-%m-%d %H:%M:%S"
+    - "%Y-%m-%dT%H:%M:%S.%f"
+    - "%Y-%m-%dT%H:%M:%S"
+    - "%Y-%m-%d"
+    - "%m/%d/%Y %H:%M:%S"
+    - "%m/%d/%Y"
+  null_literals: ["NULL"]
+
+partitions:
+  # Directory names are inconsistent between batches, so each is declared explicitly
+  # rather than derived from a pattern.
+  - id: "29_has"
+    dir: "29 - pulmonary embolism/has_embolism"
+    membership_label: "has"       # provenance. Not a diagnosis.
+    batch: "29"
+  - id: "29_no"
+    dir: "29 - pulmonary embolism/no_embolism"
+    membership_label: "no"
+    batch: "29"
+  - id: "29b_has"
+    dir: "29b - pulmonary embolism/has_pulmonary_embolism"
+    membership_label: "has"
+    batch: "29b"
+  - id: "29b_no"
+    dir: "29b - pulmonary embolism/no_pulmonary_embolism"
+    membership_label: "no"
+    batch: "29b"
+
+sources:
+
+  all_rx:
+    adapter: delimited
+    file_glob: "*all_rx.txt"
+    options: {delimiter: "\t", encoding: "utf-8-sig"}
+    shape: point_event
+    event_kind: drug_order
+    required: true
+    # Ordering intent. Never merged with administration: a prescribed drug and a given
+    # drug are different facts about a patient.
+    fields:
+      person_id:    {from: [MRN, mrn], required: true}
+      encounter_id: {from: [Encounter_CSN, CSN]}
+      source_code:  {from: [Medication_Name], required: true}
+      source_name:  {from: [Medication_Name]}
+      dose:         {from: [HV_Discrete_Dose]}
+      event_time:   {from: [Ordering_Date], required: true}
+      status:       {from: [Order_Status]}
+
+  medication_admin:
+    # One logical source, two physical forms: a standalone file in one partition, a
+    # workbook sheet in the others.
+    adapter: any_of
+    variants:
+      - adapter: delimited
+        file_glob: "*medication_admin.txt"
+        options: {delimiter: "\t", encoding: "utf-8-sig"}
+      - adapter: excel
+        sheet_aliases: ["Medication Administration"]
+    shape: point_event
+    event_kind: drug_admin
+    required: false
+    fields:
+      person_id:    {from: [MRN, mrn], required: true}
+      encounter_id: {from: [CSN, Encounter_CSN]}
+      event_time:   {from: [Date_Administered], required: true}
+      source_code:  {from: [Medication_Name], required: true}
+      source_name:  {from: [Medication_Name]}
+      dose:         {from: [Dose]}
+      route:        {from: [Route]}
+
+  labs:
+    adapter: delimited
+    file_glob: "*labs.txt"
+    options: {delimiter: "\t", encoding: "utf-8-sig"}
+    shape: point_event
+    event_kind: measurement
+    required: true
+    fields:
+      person_id:      {from: [MRN, mrn], required: true}
+      encounter_id:   {from: [CSN]}
+      # Collection time is when the specimen was taken; result time is when anyone
+      # could see it. Both are kept, and the fallback is flagged.
+      event_time:     {from: [Collection_time, Result_Time], required: true}
+      available_time: {from: [Result_Time]}
+      anchor_time:    {from: [dos]}          # extraction anchor, never an event time
+      anchor_rank:    {from: [Closest_to_CT]}
+      source_code:    {from: [Base_Name], required: true}
+      source_name:    {from: [Lab_Name]}
+      value:          {from: [Value]}
+      unit:           {from: [Units]}
+      # Reference_Range_Low/High are NULL throughout this export; ranges, if needed,
+      # come from reference_ranges below rather than from the source.
+
+  problem_list:
+    adapter: delimited
+    file_glob: "*problem_list.txt"
+    options: {delimiter: "\t", encoding: "utf-8-sig"}
+    shape: point_event
+    event_kind: condition
+    code_system: ICD10CM
+    required: true
+    # The recorded date is when the problem was first noted, not a disease onset.
+    fields:
+      person_id:   {from: [MRN, mrn], required: true}
+      source_code: {from: [Diagnosis_Code], required: true}
+      source_name: {from: [Diagnosis_Name]}
+      event_time:  {from: [First_Noted_Date], required: true}
+      status:      {from: [Status]}
+
+  echo:
+    adapter: delimited
+    file_glob: "*echo.txt"
+    options: {delimiter: "\t", encoding: "utf-8-sig"}
+    shape: narrative_lines
+    event_kind: note
+    study_event_kind: procedure
+    required: true
+    fields:
+      person_id:       {from: [mrn, MRN], required: true}
+      encounter_id:    {from: [CSN]}
+      display_name:    {from: [DESCRIPTION], required: true}
+      anchor_time:     {from: [dos]}
+      anchor_rank:     {from: [Closest_to_CT]}
+      event_time:      {from: [result_time], required: true}
+      available_time:  {from: [result_time]}
+      result_category: {from: [Rad_Result_type]}
+      text_line:       {from: [LINE]}
+      text:            {from: [NARRATIVE]}
+
+  ekg:
+    adapter: delimited
+    file_glob: "*ekg.txt"
+    options: {delimiter: "\t", encoding: "utf-8-sig"}
+    shape: component_measurements
+    event_kind: measurement
+    study_event_kind: procedure
+    required: true
+    fields:
+      person_id:      {from: [MRN, mrn], required: true}
+      encounter_id:   {from: [CSN]}
+      display_name:   {from: [Procedure_Name], required: true}
+      anchor_time:    {from: [dos]}
+      anchor_rank:    {from: [Closest_to_CT]}
+      event_time:     {from: [Result_Time], required: true}
+      available_time: {from: [Result_Time]}
+      source_code:    {from: [Component_Name], required: true}
+      text_line:      {from: [Line]}
+      value:          {from: [Result_Value]}
+
+  demographics:
+    adapter: excel
+    sheet_aliases: ["Demographics"]
+    shape: person_attributes
+    event_kind: demographic
+    required: true
+    fields:
+      person_id:    {from: [MRN, mrn], required: true}
+      age:          {from: [Age]}
+      gender:       {from: [Gender]}
+      race:         {from: [Race]}
+      ethnicity:    {from: [Ethnicity]}
+      vital_status: {from: [Status]}
+      death_time:   {from: [Death_Date]}
+    # Real measurements with no measurement time anywhere in the export. Quarantined
+    # rather than dated by guesswork; publish them only once the data owner supplies a
+    # trustworthy time-association rule.
+    untimed_values:
+      - {column: BMI, code: BMI, unit: "kg/m2"}
+      - {column: Pulse, code: PULSE, unit: "/min"}
+      - {column: BP_Systolic, code: BP_SYSTOLIC, unit: "mm[Hg]"}
+
+  outcome:
+    adapter: excel
+    sheet_aliases: ["Outcome"]
+    shape: visit
+    event_kind: visit
+    required: false
+    fields:
+      person_id:       {from: [MRN, mrn], required: true}
+      encounter_id:    {from: [CSN]}
+      event_time:      {from: [Hosp_Admsn_Time, Date_of_Service], required: true}
+      visit_type:      {from: [Hospital_Visit_Type]}
+      length_of_stay:  {from: [Length_of_stay_days]}
+      # A masked duration string; kept verbatim, never parsed as a duration.
+      duration_masked: {from: [Time_Difference]}
+      death_time:      {from: [Death_Date]}
+
+  pft_narrative:
+    adapter: excel
+    # The same sheet is named differently across partitions.
+    sheet_aliases: ["PFT Narrative", "PFT"]
+    options: {skip_unnamed_leading_columns: true}
+    shape: narrative_lines
+    event_kind: note
+    study_event_kind: procedure
+    required: false
+    fields:
+      person_id:       {from: [mrn, MRN], required: true}
+      encounter_id:    {from: [CSN]}
+      display_name:    {from: [DESCRIPTION], required: true}
+      anchor_time:     {from: [dos]}
+      anchor_rank:     {from: [Closest_to_CT]}
+      event_time:      {from: [result_time], required: true}
+      available_time:  {from: [result_time]}
+      result_category: {from: [Rad_Result_type]}
+      text_line:       {from: [LINE]}
+      text:            {from: [NARRATIVE]}
+
+  pft_values:
+    adapter: excel
+    sheet_aliases: ["PFT Values", "PFT Value"]
+    shape: component_measurements
+    event_kind: measurement
+    study_event_kind: procedure
+    required: false
+    fields:
+      person_id:      {from: [MRN, mrn], required: true}
+      encounter_id:   {from: [CSN]}
+      display_name:   {from: [Procedure_Name], required: true}
+      anchor_time:    {from: [dos]}
+      anchor_rank:    {from: [Closest_to_CT]}
+      event_time:     {from: [Result_Time], required: true}
+      available_time: {from: [Result_Time]}
+      source_code:    {from: [Component_Name], required: true}
+      text_line:      {from: [Line]}
+      value:          {from: [Result_Value]}
+
+anchors:
+  anchor_type: ctpa
+  from_field: anchor_time
+  # One batch carries a full timestamp, the other only a date, so anchors are compared
+  # at date granularity and the missing time component is recorded per anchor.
+  granularity: date
+  dedup_key: [anchor_date, partition_id]
+  rank_field: anchor_rank
+
+labels:
+  - id: pulmonary_embolism
+    # Demonstrated by the data, not assumed: one patient appears in both a "has" and a
+    # "no" partition of the same batch, with different CT episodes in each.
+    scope: episode
+    from: membership_label
+    requires_anchor: true
+    definition_status: undefined
+
+omop:
+  backend: duckdb
+  cdm_version: "5.4"
+  person_birth_policy:
+    # The export carries an age but no birth date and no as-of date, so a compliant
+    # year_of_birth cannot be derived. Strict mode blocks PERSON rather than inventing
+    # one; canonical and MEDS are unaffected.
+    mode: strict
+    age_as_of_date: null
+    approval_note: null
+  observation_period_rule: "first_to_last_trustworthy_event_date/v1"
+  source_name: ctpe
+
+meds:
+  splits: [["train", 0.8], ["tuning", 0.1], ["held_out", 0.1]]
+  split_salt: "ctpe/meds-split/v1"
+  shard_size: 1
+  include_membership_label: false
+
+execution:
+  bucket_count: 64
+  workers: 4
+  chunk_rows: 200000
+
+owner_answers:
+  batch_relationship: null
+  imaging_reports_included: null
+  vocabulary_source: null
+  answered_by: null
+  answered_on: null

@@ -8,3 +8,16 @@ tools/baselines.local.json
 work/
 __pycache__/
 *.pyc
+
+# Virtualenv / build
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# Model weights and vocabularies (large, licensed, or PHI-adjacent)
+*.gguf
+*.safetensors
+vocab/
+docs/standards/*.pdf
