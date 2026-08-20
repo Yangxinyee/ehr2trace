@@ -388,3 +388,20 @@ def test_an_empty_sheet_is_coverage_information_not_a_negative_fact(built):
     # events exist from the other partitions, and none of them are negative assertions
     assert from_empty.height > 0
     assert not any("no " in (v or "").lower() for v in from_empty["value_text"].to_list())
+
+
+def test_a_clinical_result_that_reads_like_a_cohort_label_is_not_leakage(built):
+    """A two-letter cohort label collides with real clinical text.
+
+    The reference export contains an ECG diagnosis whose result is the word "No". The
+    leakage check must not report that as the cohort label leaking, because a check
+    that cries wolf on clinical text is one people learn to ignore — while a
+    distinctive label appearing in the same place still has to be caught.
+    """
+    from ehr2cdm.validate import MIN_DISTINCTIVE_LABEL
+
+    layout, cfg = built
+    labels = [p.membership_label for p in cfg.partitions if p.membership_label]
+    assert labels and all(len(v) < MIN_DISTINCTIVE_LABEL for v in labels), (
+        "this fixture's labels must be short ones, or the test proves nothing"
+    )

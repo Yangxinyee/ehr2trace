@@ -284,6 +284,16 @@ def resolve_times(ctx: ShapeContext, row: Row) -> tuple[datetime | None, datetim
     event_time, f1 = to_utc(event_naive, ctx.time)
     available_time, _ = to_utc(avail_naive, ctx.time)
     end_time, _ = to_utc(end_naive, ctx.time)
+
+    if event_time is not None and available_time is not None and available_time < event_time:
+        # The source contradicts itself: a result cannot have been visible before the
+        # specimen was taken. Which of the two timestamps is wrong is unknowable from
+        # here, so availability moves to the later one -- the conservative direction for
+        # a field whose whole purpose is to keep the future out of a training window --
+        # and the contradiction is flagged rather than quietly accepted.
+        available_time = event_time
+        flags.append(str(QualityFlag.AVAILABILITY_BEFORE_EVENT))
+
     return event_time, available_time, end_time, flags + f1
 
 

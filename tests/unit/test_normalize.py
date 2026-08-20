@@ -331,3 +331,34 @@ def test_a_derived_visit_end_is_marked_derived():
     assert visit.end_time == datetime(2021, 1, 7, 9, 30)
     assert str(QualityFlag.DERIVED_END_TIME) in visit.quality_flags
     assert visit.provenance_status == "derived"
+
+
+def test_availability_may_not_precede_the_event_it_describes():
+    """The source contradicts itself in real data: a result timed before its specimen.
+
+    Which timestamp is wrong is unknowable here, so availability moves to the later of
+    the two — the conservative direction for a field whose purpose is keeping the
+    future out of a training window — and the contradiction is flagged.
+    """
+    ctx = make_ctx("labs", LAB_SPEC)
+    rows = make_rows(
+        ctx,
+        [{"PID": "P1", "collected": "2018-02-22 13:33:00", "resulted": "2018-02-01 09:00:00",
+          "code": "PHART", "val": "7.31"}],
+    )
+    event = get_shape("point_event")(ctx, rows).events[0]
+    assert event.event_time == datetime(2018, 2, 22, 13, 33), "the clinical time is never rewritten"
+    assert event.available_time == event.event_time
+    assert str(QualityFlag.AVAILABILITY_BEFORE_EVENT) in event.quality_flags
+
+
+def test_a_normal_result_time_after_collection_is_left_alone():
+    ctx = make_ctx("labs", LAB_SPEC)
+    rows = make_rows(
+        ctx,
+        [{"PID": "P1", "collected": "2018-02-22 13:33:00", "resulted": "2018-02-22 13:55:00",
+          "code": "PHART", "val": "7.31"}],
+    )
+    event = get_shape("point_event")(ctx, rows).events[0]
+    assert event.available_time == datetime(2018, 2, 22, 13, 55)
+    assert str(QualityFlag.AVAILABILITY_BEFORE_EVENT) not in event.quality_flags

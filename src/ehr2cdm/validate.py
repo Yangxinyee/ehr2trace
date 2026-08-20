@@ -58,6 +58,10 @@ class CheckResult:
 
 CHECKS: list[tuple[str, Callable]] = []
 
+#: Below this length a cohort label is an ordinary English word, and matching it against
+#: clinical free text produces false alarms rather than findings.
+MIN_DISTINCTIVE_LABEL = 4
+
 
 def check(check_id: str, slow: bool = False):
     def deco(fn):
@@ -856,13 +860,25 @@ def _meds_leakage(l: Layers) -> CheckResult:
     columns = _meds_columns(files)
     leaked_columns = sorted(set(columns) & FORBIDDEN_EVENT_COLUMNS)
 
-    labels = _sql_list(p.membership_label for p in l.cfg.partitions if p.membership_label)
+    label_values = [p.membership_label for p in l.cfg.partitions if p.membership_label]
+    labels = _sql_list(label_values)
     partitions = _sql_list(p.id for p in l.cfg.partitions)
     conditions: list[str] = []
     if labels:
-        for column in ("code", "source_code", "text_value"):
+        # `code` and `source_table` are namespaces this ETL builds, so a cohort label
+        # appearing there is unambiguously leakage.
+        for column in ("code", "source_table"):
             if column in columns:
                 conditions.append(f"lower(CAST({column} AS VARCHAR)) IN ({labels})")
+        # `text_value` and `source_code` are copied from the source. A cohort label of
+        # "no" collides with a real ECG result of "No", and a check that cries wolf on
+        # clinical text is a check people learn to ignore. Distinctive labels are still
+        # worth catching there; two-letter ones are not.
+        distinctive = _sql_list(v for v in label_values if len(v) >= MIN_DISTINCTIVE_LABEL)
+        if distinctive:
+            for column in ("source_code", "text_value"):
+                if column in columns:
+                    conditions.append(f"lower(CAST({column} AS VARCHAR)) IN ({distinctive})")
     if partitions and "source_table" in columns:
         conditions.append(f"lower(source_table) IN ({partitions})")
 
