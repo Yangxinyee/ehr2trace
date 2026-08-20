@@ -274,8 +274,17 @@ def source_rows(layout, partition: str, source: str, person: str) -> int:
 
 @pytest.fixture(scope="module")
 def ingested(work_layout):
+    """The source layer for the *current* content address.
+
+    A manifest alone is not enough: after a code-version bump the previous run's
+    manifest survives while its content-addressed parquet files no longer match, so
+    the presence of readable source files is what decides whether these assertions
+    can run at all.
+    """
     if not (work_layout.manifest_dir / "inputs.json").exists():
         pytest.skip("source layer not built for the real dataset")
+    if not any(work_layout.source_dir.rglob("*.parquet")):
+        pytest.skip("source layer is stale for the current code version; re-run ingest")
     return work_layout
 
 
