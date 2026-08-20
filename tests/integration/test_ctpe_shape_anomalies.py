@@ -405,3 +405,48 @@ def test_a_clinical_result_that_reads_like_a_cohort_label_is_not_leakage(built):
     assert labels and all(len(v) < MIN_DISTINCTIVE_LABEL for v in labels), (
         "this fixture's labels must be short ones, or the test proves nothing"
     )
+
+
+def test_a_patient_can_be_followed_from_key_to_raw_file(built):
+    """Design section 1.3's third success criterion, exercised end to end.
+
+    "Anyone can answer where this record came from" is only true if there is a way to
+    ask. This is that way: a patient key in, and for each sampled event the file and
+    row number of every source row behind it.
+    """
+    from ehr2cdm.trace import render, trace_patient
+
+    layout, cfg = built
+    result = trace_patient(cfg, layout, CROSS_LABEL_PATIENT, samples=3)
+
+    assert result.subject_id == subject_of(cfg, CROSS_LABEL_PATIENT)
+    assert set(result.partitions) == {"b1_has", "b2_has", "b2_no"}
+    assert sum(result.source_rows.values()) > 0
+    assert sum(result.events.values()) > 0
+
+    # the cohort conflict is visible, and labelled as provenance rather than a fact
+    assert {m["membership_label"] for m in result.memberships} == {"has", "no"}
+    assert {m["label_scope"] for m in result.memberships} == {"episode"}
+    assert len({str(a["anchor_date"]) for a in result.anchors}) == EXPECTED_ANCHOR_DATES
+
+    # every sampled event resolves to a real file and row number
+    assert result.sample
+    for event in result.sample:
+        assert event["source_rows"]
+        for origin in event["source_rows"]:
+            assert origin["file"] not in (None, "?")
+            assert isinstance(origin["row"], int)
+
+    text = render(result)
+    assert "cohort membership (provenance, not a clinical fact)" in text
+    assert "traced back to the raw file" in text
+
+
+def test_tracing_an_unknown_patient_says_so_rather_than_inventing_one(built):
+    from ehr2cdm.trace import trace_patient
+
+    layout, cfg = built
+    result = trace_patient(cfg, layout, "NO-SUCH-PATIENT")
+    assert result.partitions == []
+    assert result.source_rows == {} and result.events == {}
+    assert result.sample == []
