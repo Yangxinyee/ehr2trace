@@ -383,6 +383,32 @@ def compile_mappings(
 
 
 @app.command()
+def trace(
+    dataset: str = DatasetOpt,
+    patient: str = typer.Option(..., "--patient", help="patient key as it appears in the source"),
+    samples: int = typer.Option(3, "--samples", help="how many events to follow back to the raw file"),
+    as_json: bool = JsonOpt,
+) -> None:
+    """Follow one patient through every layer, back to file and row number.
+
+    A debugging and fixture-generation aid: it reads and never writes, and terminology
+    still comes from the global `mappings/`, so what it shows is what a full run
+    produces for that patient. It prints a real patient key, so use it on a terminal
+    you would be willing to show the data owner.
+    """
+    from ehr2cdm.trace import render, trace_patient
+
+    cfg, _path = _load(dataset)
+    layout = _layout(cfg)
+    result = trace_patient(cfg, layout, patient, samples=samples)
+    if as_json:
+        _echo_json(result.to_dict())
+    else:
+        typer.echo(render(result))
+    raise typer.Exit(code=0)
+
+
+@app.command()
 def clean(
     dataset: str = DatasetOpt,
     dry_run: bool = typer.Option(True, "--dry-run/--delete", help="list what would be removed"),

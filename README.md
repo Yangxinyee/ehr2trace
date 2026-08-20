@@ -104,7 +104,23 @@ Re-running is safe and cheap: outputs are content-addressed by input hash + conf
 + code version, so anything already computed from identical inputs is reused. That is
 the whole resumption mechanism — there is no ledger.
 
-### 4. Terminology and review
+### 4. Ask where a record came from
+
+```bash
+.venv/bin/ehr2cdm trace --dataset ctpe --patient <key>
+```
+
+Prints one patient's path through every layer: source rows per partition, what was
+quarantined and why, canonical events by kind, anchors, cohort membership — and for a
+few sampled events, every source row behind them by file and line number. On the
+reference export a single lab measurement typically resolves to six source rows across
+three partitions, which is anchor duplication and cross-batch duplication collapsing
+into one event with all six still traceable.
+
+It prints a real patient key, so use it on a terminal you would be willing to show the
+data owner.
+
+### 5. Terminology and review
 
 ```bash
 .venv/bin/ehr2cdm propose --dataset ctpe --kind terminology   # -> review/pending.csv

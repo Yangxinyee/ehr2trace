@@ -163,8 +163,22 @@ def render(trace: PatientTrace) -> str:
             lines.append(f"  {anchor['anchor_date']}  {anchor['partition_id']:<10} {known}")
     if trace.memberships:
         lines += ["", "cohort membership (provenance, not a clinical fact)"]
-        for m in sorted(trace.memberships, key=lambda m: m["partition_id"]):
-            lines.append(f"  {m['partition_id']:<10} label={m['membership_label']} scope={m['label_scope']}")
+        # One row per episode, which is the point: a label that binds to an anchor
+        # rather than to a lifetime. Grouped for reading, never merged in the data.
+        grouped: dict[tuple[str, str, str], int] = {}
+        for m in trace.memberships:
+            key = (m["partition_id"], m["membership_label"], m["label_scope"])
+            grouped[key] = grouped.get(key, 0) + 1
+        for (partition, label, scope) in sorted(grouped):
+            episodes = grouped[(partition, label, scope)]
+            lines.append(
+                f"  {partition:<10} label={label:<4} scope={scope:<8} {episodes} episode(s)"
+            )
+        if len({label for _p, label, _s in grouped}) > 1:
+            lines.append(
+                "  ^ this patient carries more than one cohort label. Both are kept, "
+                "unmerged: the label is episode-level."
+            )
     if trace.sample:
         lines += ["", "sample events, traced back to the raw file"]
         for event in trace.sample:
