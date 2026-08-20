@@ -85,7 +85,7 @@ class StageResult:
     reused: bool
 
 
-def plan_stage(cfg: DatasetConfig, layout: WorkLayout) -> list[StageTask]:
+def plan_stage(cfg: DatasetConfig, layout: WorkLayout, strict: bool = True) -> list[StageTask]:
     """Plan staging from the ingest manifest, never from a directory listing.
 
     Source outputs are content-addressed, so a code or config change leaves the
@@ -125,12 +125,15 @@ def plan_stage(cfg: DatasetConfig, layout: WorkLayout) -> list[StageTask]:
             stale.append(f"{unit['partition_id']}/{unit['source_id']}")
             continue
         by_source.setdefault((unit["partition_id"], unit["source_id"]), []).append(str(path))
-    if missing:
+    # `strict=False` is for callers whose whole job is dealing with stale artifacts --
+    # refusing to plan because things are stale would make cleanup impossible exactly
+    # when it is needed.
+    if missing and strict:
         raise RuntimeError(
             f"{len(missing)} source files named by the manifest are gone (first: "
             f"{missing[0]}); re-run ingest"
         )
-    if stale:
+    if stale and strict:
         raise RuntimeError(
             f"{len(stale)} source files were produced by a different code or config "
             f"version (first: {stale[0]}); re-run ingest before canonical"

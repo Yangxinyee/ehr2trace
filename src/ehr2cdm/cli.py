@@ -436,7 +436,9 @@ def clean(
         digest = task.digest(file_sha256(task.file_path))
         keep.add(layout.source_task_path(task.partition_id, task.source_id, digest))
         keep.add(layout.quarantine_task_path("ingest", task.partition_id, task.source_id, digest))
-    for task in plan_stage(cfg, layout):
+    # Not strict: this command exists to remove artifacts a version bump stranded, so
+    # refusing to plan because they are stranded would be exactly backwards.
+    for task in plan_stage(cfg, layout, strict=False):
         keep.add(layout.staged_dir / "_done" / f"{task.partition_id}__{task.source_id}__{task.digest}.json")
     try:
         tz, tz_assumed = _resolve_timezone(cfg, assume_timezone)

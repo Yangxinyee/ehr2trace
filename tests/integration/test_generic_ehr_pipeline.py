@@ -248,3 +248,18 @@ def test_staging_refuses_a_manifest_from_a_different_code_version(tmp_path_facto
     monkeypatch.setattr("ehr2cdm.ingest.CODE_VERSION", "99.0.0")
     with pytest.raises(RuntimeError, match="different code or config version"):
         plan_stage(cfg, layout)
+
+
+def test_cleanup_still_works_when_everything_is_stale(tmp_path_factory, monkeypatch):
+    """The command for removing stranded artifacts must not refuse because of them."""
+    from ehr2cdm.canonical.build import plan_stage
+
+    root = tmp_path_factory.mktemp("cleanstale")
+    layout = run_pipeline(root, workers=1)
+    os.environ["GENERIC_EHR_ROOT"] = str(FIXTURE)
+    cfg = load_dataset_config(CONFIG)
+
+    monkeypatch.setattr("ehr2cdm.ingest.CODE_VERSION", "99.0.0")
+    with pytest.raises(RuntimeError):
+        plan_stage(cfg, layout)
+    assert plan_stage(cfg, layout, strict=False) == []
