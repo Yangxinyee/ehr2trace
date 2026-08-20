@@ -263,9 +263,13 @@ def build_workbook(path: Path, partition_id: str, patients: list[str]) -> None:
 
     values = wb.create_sheet(values_name)
     values.append(["MRN", "CSN", "Procedure_Name", "dos", "Result_Time", "Component_Name", "Line", "Result_Value", "Closest_to_CT"])
-    for patient in patients:
-        values.append([patient, f"ENC-{patient}-1", "PULMONARY FUNCTION TEST", "2019-03-04",
-                       datetime(2019, 3, 6, 9, 15), "FEV1 PCT PRED", 1, 78, 1])
+    # One partition ships this sheet with a header and no rows. That means the extract
+    # carried no such data -- not that the patients had none -- and it must produce
+    # coverage information rather than any negative fact.
+    if partition_id != "b1_no":
+        for patient in patients:
+            values.append([patient, f"ENC-{patient}-1", "PULMONARY FUNCTION TEST", "2019-03-04",
+                           datetime(2019, 3, 6, 9, 15), "FEV1 PCT PRED", 1, 78, 1])
 
     outcome = wb.create_sheet("Outcome")
     outcome.append(["MRN", "CSN", "Date_of_Service", "Hosp_Admsn_Time", "Length_of_stay_days",

@@ -361,3 +361,30 @@ def test_disagreeing_ages_block_that_patient_and_say_why(built):
     finally:
         con.close()
     assert conflicts == 1 and blocked == 1 and dangling == 0
+
+
+def test_an_empty_sheet_is_coverage_information_not_a_negative_fact(built):
+    """One partition ships a sheet with a header and no rows.
+
+    That says the extract carried no such data. It does not say the patients had none,
+    and the difference is the whole reason coverage is recorded separately from events.
+    """
+    import json
+
+    layout, cfg = built
+    manifest = json.loads((layout.manifest_dir / "inputs.json").read_text(encoding="utf-8"))
+    empty = [
+        u for u in manifest["inputs"]
+        if u["source_id"] == "pft_values" and u["rows_parsed"] == 0
+    ]
+    assert len(empty) == 1, "the fixture must actually contain an empty sheet"
+    assert empty[0]["coverage"] == "empty"
+    assert empty[0]["rows_read"] == 0
+
+    events = pl.read_parquet(layout.canonical_path("events"))
+    from_empty = events.filter(
+        (pl.col("source_id") == "pft_values") & (pl.col("event_kind") == str(EventKind.measurement))
+    )
+    # events exist from the other partitions, and none of them are negative assertions
+    assert from_empty.height > 0
+    assert not any("no " in (v or "").lower() for v in from_empty["value_text"].to_list())

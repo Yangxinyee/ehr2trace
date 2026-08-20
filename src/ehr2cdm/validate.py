@@ -11,6 +11,26 @@ whether a conversion is complete.
 
 It does not soften a failure into a warning. A check that fails means the output is not
 publishable, and the command exits non-zero.
+
+The checks here cover design section 10.2. Where a requirement is better expressed as a
+test than as a runtime check -- the measured baselines, determinism across worker
+counts, resumption after a crash -- it lives in ``tests/`` instead, and the mapping is:
+
+=====================================  =========================================
+Design section 10.2                    Where it is checked
+=====================================  =========================================
+1-5   input completeness, anomalies     ``INPUT_MANIFEST_COMPLETE``,
+                                        ``SOURCE_COVERAGE_REPORTED``,
+                                        ``tests/integration/test_ctpe_baselines.py``
+6-8   type drift and per-cell typing    ``tests/unit/test_hashing.py``,
+                                        ``tests/unit/test_adapters.py``
+9-18  semantic correctness              ``ANCHOR_NEVER_AN_EVENT_TIME`` and the
+                                        other semantic checks below
+19-24 target-layer compliance           the ``OMOP_*`` and ``MEDS_*`` checks below
+25-27 determinism and resumption        ``tests/integration/test_generic_ehr_pipeline.py``
+28-30 generalization                    ``tests/test_no_hardcoded_dataset_strings.py``,
+                                        ``tests/integration/test_generic_ehr_pipeline.py``
+=====================================  =========================================
 """
 
 from __future__ import annotations
@@ -150,6 +170,43 @@ def _reconciliation(l: Layers) -> CheckResult:
             "rows_quarantined": total_q,
             "quarantine_rate": round(total_q / total_read, 6) if total_read else 0.0,
         },
+    )
+
+
+@check("SOURCE_COVERAGE_REPORTED")
+def _coverage(l: Layers) -> CheckResult:
+    """Absent and empty sources are reported as coverage, never as a negative fact.
+
+    An empty sheet means this extract carried no such data. It does not mean the
+    patient had none, and nothing downstream may treat it that way -- so what matters
+    is that the distinction is recorded at all.
+    """
+    if l.manifest is None:
+        return _skip("no ingest manifest")
+    from ehr2cdm.discover import resolve_source_units
+
+    present = {(i["partition_id"], i["source_id"]) for i in l.manifest["inputs"]}
+    empty = {
+        (i["partition_id"], i["source_id"])
+        for i in l.manifest["inputs"]
+        if i["rows_parsed"] == 0
+    }
+    not_extracted: list[str] = []
+    for part in l.cfg.partitions:
+        for source_id, spec in l.cfg.sources_for(part.id).items():
+            if (part.id, source_id) in present:
+                continue
+            if spec.required:
+                return CheckResult(
+                    "", False, f"required source {source_id} missing from {part.id}"
+                )
+            not_extracted.append(f"{part.id}/{source_id}")
+    return CheckResult(
+        "",
+        True,
+        f"{len(present)} sources present ({len(empty)} empty), "
+        f"{len(not_extracted)} not extracted and recorded as such",
+        {"present": len(present), "empty": sorted(f"{p}/{s}" for p, s in empty), "not_extracted": sorted(not_extracted)},
     )
 
 
@@ -758,6 +815,29 @@ def _meds_sharding(l: Layers) -> CheckResult:
         if not problems
         else f"sharding problems: {problems[:3]}",
         {"subjects": len(owners), "shards": len(files)},
+    )
+
+
+@check("MEDS_LINEAGE_COMPLETE")
+def _meds_lineage(l: Layers) -> CheckResult:
+    """Every published event row names the source rows behind it."""
+    files = _meds_files(l)
+    if not files:
+        return _skip("MEDS not built")
+    if "source_row_ids" not in _meds_columns(files):
+        return CheckResult("", False, "source_row_ids is missing: MEDS rows are untraceable")
+    total, orphans = _meds_query(
+        files,
+        "SELECT count(*), count(*) FILTER (WHERE source_row_ids IS NULL "
+        "OR length(source_row_ids) = 0) FROM meds",
+    )[0]
+    return CheckResult(
+        "",
+        int(orphans or 0) == 0,
+        f"all {int(total):,} MEDS rows trace back to at least one source row"
+        if not orphans
+        else f"{orphans} MEDS rows have no source row",
+        {"rows": int(total)},
     )
 
 
