@@ -8,10 +8,15 @@ interprets clinical meaning; the only judgements made are structural:
 * a row with no patient key is quarantined, not dropped silently;
 * every surviving row carries the identifiers needed to find it again in the raw file.
 
-Cell values are stored in their canonical string form (section 5.1). That is what makes
-the same record hash identically when one workbook stores a date as text and another
-stores it as a date, which is the difference between cross-batch deduplication working
-and failing without a sound.
+Cell values are stored as the source wrote them (whitespace trimmed, null literals
+emptied). The stronger canonical form of section 5.1 is used for the row hash and
+nowhere else, which is what makes the same record hash identically when one workbook
+types a date as text and another types it as a date -- the difference between
+cross-batch deduplication working and failing without a sound.
+
+Storage keeps the written shape on purpose: a bare ``2019-03-04`` says the source had
+no time to give, and flattening it to midnight would erase a fact the design requires
+to be recorded.
 """
 
 from __future__ import annotations

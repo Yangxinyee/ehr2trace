@@ -89,6 +89,30 @@ def apply_duplicate_flags(events: Sequence[dict[str, Any]], partitions: dict[str
     return out
 
 
+def merge_anchors(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Collapse anchors on ``(subject, type, date, partition)``, keeping the best time.
+
+    Within one partition the same anchor date can arrive twice: one source writes it as
+    a full timestamp and another as a bare date. They are the same anchor, and the
+    version that still has its time component is the one worth keeping -- a generic
+    "first wins" or "smallest wins" rule would throw the time away roughly half the
+    time, silently.
+    """
+    best: dict[tuple, dict[str, Any]] = {}
+    for rec in records:
+        key = (
+            rec.get("subject_id"),
+            rec.get("anchor_type"),
+            rec.get("anchor_date"),
+            rec.get("partition_id"),
+        )
+        rank = (not bool(rec.get("anchor_time_known")), str(rec.get("source_row_id") or ""))
+        current = best.get(key)
+        if current is None or rank < current[0]:
+            best[key] = (rank, dict(rec))
+    return [best[k][1] for k in sorted(best, key=lambda k: tuple(_sortable(v) for v in k))]
+
+
 def dedup_records(records: Iterable[dict[str, Any]], key_fields: Sequence[str]) -> list[dict[str, Any]]:
     """Generic deduplication for anchors, memberships and quality issues.
 

@@ -158,11 +158,19 @@ def test_non_timestamp_text_is_left_alone():
     assert canonical_cell("2031-02-03 patient seen") == "2031-02-03 patient seen"
 
 
-def test_source_cell_keeps_the_written_form():
-    """Storage keeps what the source wrote; only hashing normalizes further."""
+def test_storage_keeps_the_written_shape_while_hashing_normalizes_it():
+    """The two functions have different jobs, and both jobs matter.
+
+    Hashing must flatten a date typed as text onto a date typed as a date, or
+    cross-batch deduplication fails silently. Storage must *not* flatten a bare date
+    onto midnight, because "this source had no time to give" is a fact the anchor
+    handling depends on.
+    """
     from ehr2cdm.hashing import source_cell
 
-    assert source_cell("2031-02-03 04:05:00") == "2031-02-03 04:05:00"
+    assert canonical_cell("2031-02-03 04:05:00") == canonical_cell(datetime(2031, 2, 3, 4, 5))
+    assert source_cell("2031-02-03") == "2031-02-03"
+    assert source_cell(datetime(2031, 2, 3, 0, 0)) == "2031-02-03T00:00:00"
     assert source_cell("NULL") == ""
     assert source_cell(None) == ""
     assert source_cell(5.0) == "5"

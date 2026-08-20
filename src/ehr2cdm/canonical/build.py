@@ -29,6 +29,7 @@ from ehr2cdm.canonical.anchors import emit_anchors
 from ehr2cdm.canonical.dedup import (
     apply_duplicate_flags,
     dedup_records,
+    merge_anchors,
     merge_events,
     merge_links,
     sort_events,
@@ -271,7 +272,7 @@ def run_canonical_task(task: CanonicalTask) -> CanonicalResult:
     events, death_issues = apply_cross_event_rules(events)
     all_issues.extend(death_issues)
     events = sort_events(events)
-    anchors = dedup_records(all_anchors, ["subject_id", "anchor_type", "anchor_date", "partition_id"])
+    anchors = merge_anchors(all_anchors)
     memberships = dedup_records(all_memberships, ["subject_id", "partition_id", "anchor_id"])
     issues = dedup_records(
         all_issues, ["issue_type", "subject_id", "source_row_id", "event_id", "detail"]

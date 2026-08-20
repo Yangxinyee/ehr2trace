@@ -105,9 +105,15 @@ def canonical_cell(value: object, null_literals: Sequence[str] = DEFAULT_NULL_LI
 def source_cell(value: object, null_literals: Sequence[str] = DEFAULT_NULL_LITERALS) -> str:
     """Render one cell for *storage* in the source layer.
 
-    Deliberately weaker than :func:`canonical_cell`: text is kept in the form the
-    source wrote it, so a value can still be compared against the raw file by eye. The
-    stronger normalization is applied only where it is needed, when hashing.
+    Deliberately weaker than :func:`canonical_cell`: text is kept in the shape the
+    source wrote it. That shape carries information the canonical form throws away --
+    a bare ``2019-03-04`` says the source had no time component to give, while
+    ``2019-03-04T00:00:00`` says it recorded midnight. One extraction batch writes
+    anchors the first way and another writes them the second, and the design requires
+    that difference to be recorded rather than flattened.
+
+    Hashing still uses the canonical form, so a value typed differently in two
+    workbooks still hashes identically. The two functions have different jobs.
     """
     if value is None:
         return ""

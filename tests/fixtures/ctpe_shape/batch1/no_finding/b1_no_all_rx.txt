@@ -1,0 +1,5 @@
+﻿MRN	Encounter_CSN	Medication_Name	HV_Discrete_Dose	Ordering_Date	Order_Status
+SUBJ-3	ENC-SUBJ-3-1	TESTDRUG 10 mg tablet	10 mg	2019-06-01 17:44:00.000	Dispensed
+SUBJ-3	ENC-SUBJ-3-1	TESTDRUG 10 mg tablet	10 mg	2019-09-30 08:42:00.000	Dispensed
+SUBJ-3	ENC-SUBJ-3-1	TESTDRUG 10 mg tablet	10 mg	2020-09-21 08:23:00.000	Dispensed
+SUBJ-3	ENC-SUBJ-3-1	TESTDRUG 10 mg tablet	10 mg	NULL	Dispensed

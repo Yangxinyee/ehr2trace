@@ -24,6 +24,13 @@ from ehr2cdm.schema import QualityFlag, QuarantineReason
 _FRACTION = re.compile(r"(\.\d{7,})")
 
 
+#: Formats the source layer itself writes. A workbook date cell is stored in canonical
+#: ISO form (section 5.1), so these are always accepted regardless of what a dataset
+#: declares -- a config should describe the *source's* formats, and forgetting to also
+#: list our own storage format would quarantine every date that arrived as a date.
+BUILTIN_FORMATS: tuple[str, ...] = ("%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S")
+
+
 @dataclass(frozen=True)
 class TimeContext:
     """Everything time parsing needs, resolved once per run."""
@@ -58,7 +65,7 @@ def parse_naive(value: object, ctx: TimeContext) -> datetime | None:
     if not text or text in ctx.null_literals:
         return None
     candidate = _trim_fraction(text)
-    for fmt in ctx.formats:
+    for fmt in tuple(ctx.formats) + BUILTIN_FORMATS:
         try:
             return datetime.strptime(candidate, fmt)
         except ValueError:

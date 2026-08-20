@@ -1,0 +1,264 @@
+# Structural fixture contract (see tests/fixtures/ctpe_shape/README.md).
+#
+# Deliberately a near-copy of datasets/ctpe.yaml: the fixture exists to exercise the
+# reference export's structural traps with fabricated content, so the config that reads
+# it should differ only in the places that are genuinely different — the partition
+# directories, the file prefixes, and the fact that a synthetic dataset can honestly
+# declare its own timezone and age reference date.
+
+dataset_id: ctpe_shape
+root_env: CTPE_SHAPE_ROOT
+description: >-
+  Synthetic export with the reference data's shape and none of its content: an
+  inconsistent byte-order mark, tables repeated once per extraction anchor, two sheet
+  naming variants, an extra unnamed leading column, one logical source shipped as text
+  in one partition and as a sheet in the others, and cross-workbook cell-type drift.
+
+identity:
+  person_key: MRN
+  encounter_key: CSN
+
+time:
+  # Fabricated data, so the zone is genuinely known rather than assumed.
+  timezone_assumption: UTC
+  naive_time_policy: block
+  formats:
+    - "%Y-%m-%d %H:%M:%S.%f"
+    - "%Y-%m-%d %H:%M:%S"
+    - "%Y-%m-%d"
+  null_literals: ["NULL"]
+
+partitions:
+  - {id: "b1_has", dir: "batch1/has_finding",     membership_label: "has", batch: "1"}
+  - {id: "b1_no",  dir: "batch1/no_finding",      membership_label: "no",  batch: "1"}
+  - {id: "b2_has", dir: "batch2/has_the_finding", membership_label: "has", batch: "2"}
+  - {id: "b2_no",  dir: "batch2/no_the_finding",  membership_label: "no",  batch: "2"}
+
+sources:
+
+  all_rx:
+    adapter: delimited
+    file_glob: "*all_rx.txt"
+    options: {delimiter: "\t", encoding: "utf-8-sig"}
+    shape: point_event
+    event_kind: drug_order
+    required: true
+    fields:
+      person_id:    {from: [MRN, mrn], required: true}
+      encounter_id: {from: [Encounter_CSN, CSN]}
+      source_code:  {from: [Medication_Name], required: true}
+      source_name:  {from: [Medication_Name]}
+      dose:         {from: [HV_Discrete_Dose]}
+      event_time:   {from: [Ordering_Date], required: true}
+      status:       {from: [Order_Status]}
+
+  medication_admin:
+    adapter: any_of
+    variants:
+      - adapter: delimited
+        file_glob: "*medication_admin.txt"
+        options: {delimiter: "\t", encoding: "utf-8-sig"}
+      - adapter: excel
+        sheet_aliases: ["Medication Administration"]
+    shape: point_event
+    event_kind: drug_admin
+    required: false
+    fields:
+      person_id:    {from: [MRN, mrn], required: true}
+      encounter_id: {from: [CSN, Encounter_CSN]}
+      event_time:   {from: [Date_Administered], required: true}
+      source_code:  {from: [Medication_Name], required: true}
+      source_name:  {from: [Medication_Name]}
+      dose:         {from: [Dose]}
+      route:        {from: [Route]}
+
+  labs:
+    adapter: delimited
+    file_glob: "*labs.txt"
+    options: {delimiter: "\t", encoding: "utf-8-sig"}
+    shape: point_event
+    event_kind: measurement
+    required: true
+    fields:
+      person_id:      {from: [MRN, mrn], required: true}
+      encounter_id:   {from: [CSN]}
+      event_time:     {from: [Collection_time, Result_Time], required: true}
+      available_time: {from: [Result_Time]}
+      anchor_time:    {from: [dos]}
+      anchor_rank:    {from: [Closest_to_CT]}
+      source_code:    {from: [Base_Name], required: true}
+      source_name:    {from: [Lab_Name]}
+      value:          {from: [Value]}
+      unit:           {from: [Units]}
+
+  problem_list:
+    adapter: delimited
+    file_glob: "*problem_list.txt"
+    options: {delimiter: "\t", encoding: "utf-8-sig"}
+    shape: point_event
+    event_kind: condition
+    code_system: ICD10CM
+    required: true
+    fields:
+      person_id:   {from: [MRN, mrn], required: true}
+      source_code: {from: [Diagnosis_Code], required: true}
+      source_name: {from: [Diagnosis_Name]}
+      event_time:  {from: [First_Noted_Date], required: true}
+      status:      {from: [Status]}
+
+  echo:
+    adapter: delimited
+    file_glob: "*echo.txt"
+    options: {delimiter: "\t", encoding: "utf-8-sig"}
+    shape: narrative_lines
+    event_kind: note
+    study_event_kind: procedure
+    required: true
+    fields:
+      person_id:       {from: [mrn, MRN], required: true}
+      encounter_id:    {from: [CSN]}
+      display_name:    {from: [DESCRIPTION], required: true}
+      anchor_time:     {from: [dos]}
+      anchor_rank:     {from: [Closest_to_CT]}
+      event_time:      {from: [result_time], required: true}
+      available_time:  {from: [result_time]}
+      result_category: {from: [Rad_Result_type]}
+      text_line:       {from: [LINE]}
+      text:            {from: [NARRATIVE]}
+
+  ekg:
+    adapter: delimited
+    file_glob: "*ekg.txt"
+    options: {delimiter: "\t", encoding: "utf-8-sig"}
+    shape: component_measurements
+    event_kind: measurement
+    study_event_kind: procedure
+    required: true
+    fields:
+      person_id:      {from: [MRN, mrn], required: true}
+      encounter_id:   {from: [CSN]}
+      display_name:   {from: [Procedure_Name], required: true}
+      anchor_time:    {from: [dos]}
+      anchor_rank:    {from: [Closest_to_CT]}
+      event_time:     {from: [Result_Time], required: true}
+      available_time: {from: [Result_Time]}
+      source_code:    {from: [Component_Name], required: true}
+      text_line:      {from: [Line]}
+      value:          {from: [Result_Value]}
+
+  demographics:
+    adapter: excel
+    sheet_aliases: ["Demographics"]
+    shape: person_attributes
+    event_kind: demographic
+    required: true
+    fields:
+      person_id:    {from: [MRN, mrn], required: true}
+      age:          {from: [Age]}
+      gender:       {from: [Gender]}
+      race:         {from: [Race]}
+      ethnicity:    {from: [Ethnicity]}
+      vital_status: {from: [Status]}
+      death_time:   {from: [Death_Date]}
+    untimed_values:
+      - {column: BMI, code: BMI, unit: "kg/m2"}
+      - {column: Pulse, code: PULSE, unit: "/min"}
+      - {column: BP_Systolic, code: BP_SYSTOLIC, unit: "mm[Hg]"}
+
+  outcome:
+    adapter: excel
+    sheet_aliases: ["Outcome"]
+    shape: visit
+    event_kind: visit
+    required: false
+    fields:
+      person_id:       {from: [MRN, mrn], required: true}
+      encounter_id:    {from: [CSN]}
+      event_time:      {from: [Hosp_Admsn_Time, Date_of_Service], required: true}
+      visit_type:      {from: [Hospital_Visit_Type]}
+      length_of_stay:  {from: [Length_of_stay_days]}
+      duration_masked: {from: [Time_Difference]}
+      death_time:      {from: [Death_Date]}
+
+  pft_narrative:
+    adapter: excel
+    sheet_aliases: ["PFT Narrative", "PFT"]
+    options: {skip_unnamed_leading_columns: true}
+    shape: narrative_lines
+    event_kind: note
+    study_event_kind: procedure
+    required: false
+    fields:
+      person_id:       {from: [mrn, MRN], required: true}
+      encounter_id:    {from: [CSN]}
+      display_name:    {from: [DESCRIPTION], required: true}
+      anchor_time:     {from: [dos]}
+      anchor_rank:     {from: [Closest_to_CT]}
+      event_time:      {from: [result_time], required: true}
+      available_time:  {from: [result_time]}
+      result_category: {from: [Rad_Result_type]}
+      text_line:       {from: [LINE]}
+      text:            {from: [NARRATIVE]}
+
+  pft_values:
+    adapter: excel
+    sheet_aliases: ["PFT Values", "PFT Value"]
+    shape: component_measurements
+    event_kind: measurement
+    study_event_kind: procedure
+    required: false
+    fields:
+      person_id:      {from: [MRN, mrn], required: true}
+      encounter_id:   {from: [CSN]}
+      display_name:   {from: [Procedure_Name], required: true}
+      anchor_time:    {from: [dos]}
+      anchor_rank:    {from: [Closest_to_CT]}
+      event_time:     {from: [Result_Time], required: true}
+      available_time: {from: [Result_Time]}
+      source_code:    {from: [Component_Name], required: true}
+      text_line:      {from: [Line]}
+      value:          {from: [Result_Value]}
+
+anchors:
+  anchor_type: study_anchor
+  from_field: anchor_time
+  granularity: date
+  dedup_key: [anchor_date, partition_id]
+  rank_field: anchor_rank
+
+labels:
+  - id: finding
+    scope: episode
+    from: membership_label
+    requires_anchor: true
+    definition_status: undefined
+
+omop:
+  backend: duckdb
+  cdm_version: "5.4"
+  person_birth_policy:
+    # Fabricated ages with a declared reference date, so the full OMOP path can be
+    # exercised. The reference export has no such date, which is why it stays strict.
+    mode: approved_approximation
+    age_as_of_date: "2022-01-01"
+    approval_note: "synthetic fixture: ages are generated as of 2022-01-01"
+  source_name: ctpe_shape
+  cdm_holder: "synthetic fixture; no holder"
+  source_release_date: "2026-08-20"
+
+meds:
+  splits: [["train", 0.6], ["tuning", 0.2], ["held_out", 0.2]]
+  split_salt: "ctpe_shape/meds-split/v1"
+  shard_size: 1
+
+execution:
+  bucket_count: 4
+  workers: 2
+  chunk_rows: 1000
+
+owner_answers:
+  batch_relationship: "two independent synthetic extraction batches"
+  imaging_reports_included: false
+  vocabulary_source: "none: synthetic fixture, concept ids stay 0"
+  answered_by: "fixture author"
+  answered_on: "2026-08-20"
