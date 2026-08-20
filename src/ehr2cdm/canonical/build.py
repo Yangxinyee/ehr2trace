@@ -86,23 +86,47 @@ class StageResult:
 
 
 def plan_stage(cfg: DatasetConfig, layout: WorkLayout) -> list[StageTask]:
-    tasks: list[StageTask] = []
-    for part in cfg.partitions:
-        for source_id in cfg.sources_for(part.id):
-            directory = layout.source_dir / part.id / source_id
-            inputs = sorted(str(p) for p in directory.glob("*.parquet"))
-            if inputs:
-                tasks.append(
-                    StageTask(
-                        dataset_id=cfg.dataset_id,
-                        partition_id=part.id,
-                        source_id=source_id,
-                        inputs=inputs,
-                        work_root=str(layout.root),
-                        config_hash=cfg.config_hash(),
-                        bucket_count=cfg.execution.bucket_count,
-                    )
-                )
+    """Plan staging from the ingest manifest, never from a directory listing.
+
+    Source outputs are content-addressed, so a code or config change leaves the
+    previous version's parquet beside the new one until someone cleans up. Globbing the
+    directory would read both and stage every row twice -- which is silent, because
+    events deduplicate by id and only the counts that do not (quarantine) come out
+    wrong. The manifest records exactly which files the current ingest produced, so it
+    is the only honest answer to "what is the input to staging".
+    """
+    manifest_path = layout.manifest_dir / "inputs.json"
+    if not manifest_path.exists():
+        raise RuntimeError(f"no ingest manifest at {manifest_path}; run ingest first")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    by_source: dict[tuple[str, str], list[str]] = {}
+    missing: list[str] = []
+    for unit in manifest["inputs"]:
+        path = Path(unit["output_path"])
+        if not path.exists():
+            missing.append(unit["output_path"])
+            continue
+        by_source.setdefault((unit["partition_id"], unit["source_id"]), []).append(str(path))
+    if missing:
+        raise RuntimeError(
+            f"{len(missing)} source files named by the manifest are gone (first: "
+            f"{missing[0]}); re-run ingest"
+        )
+
+    tasks = [
+        StageTask(
+            dataset_id=cfg.dataset_id,
+            partition_id=partition_id,
+            source_id=source_id,
+            inputs=sorted(set(paths)),
+            work_root=str(layout.root),
+            config_hash=cfg.config_hash(),
+            bucket_count=cfg.execution.bucket_count,
+        )
+        for (partition_id, source_id), paths in by_source.items()
+        if source_id in cfg.sources
+    ]
     tasks.sort(key=lambda t: (t.partition_id, t.source_id))
     return tasks
 
@@ -277,6 +301,10 @@ def run_canonical_task(task: CanonicalTask) -> CanonicalResult:
     issues = dedup_records(
         all_issues, ["issue_type", "subject_id", "source_row_id", "event_id", "detail"]
     )
+    # One source row can only be quarantined once for one reason. Deduplicating here
+    # means a double-staged input shows up as an unchanged count rather than as a
+    # quietly inflated one.
+    quarantine = dedup_records(all_quarantine, ["source_row_id", "stage", "reason", "detail"])
 
     out_dir.mkdir(parents=True, exist_ok=True)
     _write(out_dir / "events.parquet", events, CANONICAL_EVENT_SCHEMA)
@@ -284,7 +312,7 @@ def run_canonical_task(task: CanonicalTask) -> CanonicalResult:
     _write(out_dir / "anchors.parquet", anchors, ANCHOR_SCHEMA)
     _write(out_dir / "cohort_membership.parquet", memberships, COHORT_MEMBERSHIP_SCHEMA)
     _write(out_dir / "quality_issue.parquet", issues, QUALITY_ISSUE_SCHEMA)
-    _write(out_dir / "quarantine.parquet", all_quarantine, QUARANTINE_SCHEMA)
+    _write(out_dir / "quarantine.parquet", quarantine, QUARANTINE_SCHEMA)
 
     counts = {
         "events": len(events),
@@ -292,7 +320,7 @@ def run_canonical_task(task: CanonicalTask) -> CanonicalResult:
         "anchors": len(anchors),
         "memberships": len(memberships),
         "issues": len(issues),
-        "quarantined": len(all_quarantine),
+        "quarantined": len(quarantine),
     }
     (out_dir / "_done").write_text(json.dumps(counts), encoding="utf-8")
     return CanonicalResult(task.bucket, **counts, reused=False)

@@ -190,3 +190,41 @@ def test_the_merged_layer_matches_the_frozen_schema_exactly(built: WorkLayout):
         path = built.canonical_path(name)
         assert path.exists(), name
         assert pq.read_schema(path).names == schema.names, name
+
+
+def test_staging_reads_the_manifest_not_the_directory(tmp_path_factory):
+    """A stale content-addressed file beside a current one must not be staged too.
+
+    This is the failure the content-addressing scheme is meant to prevent, and a
+    directory glob quietly undoes it: events deduplicate by id so they look right,
+    and only the counts that do not deduplicate come out wrong.
+    """
+    import shutil
+
+    from ehr2cdm.canonical.build import plan_stage
+
+    root = tmp_path_factory.mktemp("stale")
+    layout = run_pipeline(root, workers=1)
+    os.environ["GENERIC_EHR_ROOT"] = str(FIXTURE)
+    cfg = load_dataset_config(CONFIG)
+
+    before = plan_stage(cfg, layout)
+    victim = next(layout.source_dir.rglob("*.parquet"))
+    shutil.copy(victim, victim.with_name("deadbeefdeadbeef.parquet"))
+
+    after = plan_stage(cfg, layout)
+    assert [t.inputs for t in after] == [t.inputs for t in before], (
+        "a leftover from a previous code version was picked up by staging"
+    )
+
+
+def test_staging_refuses_to_run_without_a_manifest(tmp_path_factory):
+    from ehr2cdm.canonical.build import plan_stage
+
+    root = tmp_path_factory.mktemp("nomanifest")
+    layout = run_pipeline(root, workers=1)
+    os.environ["GENERIC_EHR_ROOT"] = str(FIXTURE)
+    cfg = load_dataset_config(CONFIG)
+    (layout.manifest_dir / "inputs.json").unlink()
+    with pytest.raises(RuntimeError, match="run ingest first"):
+        plan_stage(cfg, layout)
