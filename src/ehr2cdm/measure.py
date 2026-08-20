@@ -450,6 +450,7 @@ def measure_columns(
 
     result = {
         "dataset": cfg.dataset_id,
+        "model": client.model if client is not None else None,
         "columns_scored": len(items),
         "answer_key": "the field roles declared in the dataset YAML",
         "arms": arms,
@@ -457,7 +458,10 @@ def measure_columns(
         "verdict": _column_verdict(heuristic, model, client is not None),
         "details": details,
     }
-    path = layout.runs_dir / "llm_benefit_columns.json"
+    # The filename carries the model, so comparing two models is a matter of running
+    # this twice rather than remembering which result was which.
+    tag = (client.model if client is not None else "no-model").replace("/", "_")
+    path = layout.runs_dir / f"llm_benefit_columns.{tag}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(result, indent=2, sort_keys=True, default=str), encoding="utf-8")
     return result
