@@ -301,7 +301,7 @@ def test_a_record_dated_after_death_is_flagged_and_keeps_its_date(events, built)
     )
     assert flagged.height > 0
     assert flagged.filter(pl.col("event_kind") == str(EventKind.condition)).height > 0
-    assert all(t.year == 2022 for t in flagged["event_time"].to_list())
+    assert all(t.year == 2031 for t in flagged["event_time"].to_list())
 
 
 def test_orders_and_administrations_stay_distinguishable(events):

@@ -238,3 +238,129 @@ def test_no_event_time_equals_its_own_anchor_for_the_anchor_patient(canonical, c
     dates = {t.date() for t in studies["event_time"].to_list() if t is not None}
     # Some clinical events may legitimately fall on an anchor date, but not all of them.
     assert dates - anchor_dates, "every study time coincides with an anchor: dos leaked in"
+
+
+# -- per-patient baselines (design §2.5), all partition-scoped -------------------
+
+#: Raw row counts per partition per patient: (txt rows, xlsx rows).
+EXPECTED_PATIENT_ROWS = {
+    "29_has": {"PT-A": (5727, 379), "PT-B": (4243, 206), "PT-C": (377, 22)},
+    "29b_has": {"PT-A": (6095, 11), "PT-B": (6162, 1), "PT-C": (398, 1)},
+    "29b_no": {"PT-B": (2529, 206)},
+}
+EXPECTED_PATIENT_PARTITIONS = {
+    "PT-A": {"29_has", "29b_has"},
+    "PT-B": {"29_has", "29b_has", "29b_no"},
+    "PT-C": {"29_has", "29b_has"},
+}
+#: The anchor patient's echo rows are one base set repeated once per anchor.
+EXPECTED_ECHO_ANCHOR_MULTIPLES = {"29_has": 2, "29b_has": 3, "29b_no": 1}
+
+TEXT_SOURCES = {"all_rx", "echo", "ekg", "labs", "problem_list", "medication_admin"}
+SHEET_SOURCES = {"demographics", "outcome", "pft_narrative", "pft_values"}
+
+
+def source_rows(layout, partition: str, source: str, person: str) -> int:
+    directory = layout.source_dir / partition / source
+    files = sorted(directory.glob("*.parquet"))
+    if not files:
+        return 0
+    total = 0
+    for path in files:
+        frame = pl.read_parquet(path, columns=["person_source_id"])
+        total += int(frame.filter(pl.col("person_source_id") == person).height)
+    return total
+
+
+@pytest.fixture(scope="module")
+def ingested(work_layout):
+    if not (work_layout.manifest_dir / "inputs.json").exists():
+        pytest.skip("source layer not built for the real dataset")
+    return work_layout
+
+
+def test_raw_row_counts_per_partition_match_the_baselines(ingested, local_baselines):
+    """Partition-scoped, not per-patient totals: the same patient has different counts
+    in different partitions, scaling with the anchors recorded there."""
+    aliases = local_baselines["alias_to_mrn"]
+    for partition, per_patient in EXPECTED_PATIENT_ROWS.items():
+        for alias, (expected_text, expected_sheets) in per_patient.items():
+            person = aliases[alias]
+            text_rows = sum(source_rows(ingested, partition, s, person) for s in TEXT_SOURCES)
+            sheet_rows = sum(source_rows(ingested, partition, s, person) for s in SHEET_SOURCES)
+            assert (text_rows, sheet_rows) == (expected_text, expected_sheets), (
+                f"{alias} in {partition}: got {(text_rows, sheet_rows)}, "
+                f"expected {(expected_text, expected_sheets)} — investigate the data, "
+                "do not edit the expectation"
+            )
+
+
+def test_each_patient_appears_in_exactly_the_measured_partitions(subjects, local_baselines):
+    aliases = local_baselines["alias_to_mrn"]
+    for alias, expected in EXPECTED_PATIENT_PARTITIONS.items():
+        row = subjects.filter(pl.col("person_source_id") == aliases[alias])
+        assert row.height == 1, alias
+        assert set(row["partitions"][0].to_list()) == expected, alias
+
+
+def test_the_echo_base_row_count_is_identical_under_every_anchor(ingested, local_baselines):
+    """Direct evidence of the duplication: the same 547 rows, once per anchor."""
+    person = local_baselines["alias_to_mrn"]["PT-B"]
+    for partition, anchors in EXPECTED_ECHO_ANCHOR_MULTIPLES.items():
+        rows = source_rows(ingested, partition, "echo", person)
+        assert rows == anchors * EXPECTED_ECHO_ROWS_PER_ANCHOR, (
+            f"{partition}: {rows} echo rows is not {anchors} x {EXPECTED_ECHO_ROWS_PER_ANCHOR}"
+        )
+
+
+def test_the_anchor_dates_match_the_local_baseline_file(canonical, ctpe_config, local_baselines):
+    anchors = pl.read_parquet(canonical.canonical_path("anchors"))
+    sid = subject_id_for(ctpe_config, local_baselines["alias_to_mrn"]["PT-B"])
+    dates = sorted(str(d) for d in anchors.filter(pl.col("subject_id") == sid)["anchor_date"].unique().to_list())
+    assert dates == sorted(local_baselines["ptb_anchors"])
+
+
+def test_canonical_event_counts_for_the_three_patients_are_stable(canonical, ctpe_config, local_baselines, tmp_path):
+    """Frozen after the first run, in a git-ignored local file for the same reason the
+    identifiers are: the counts are patient-level facts about real people."""
+    baseline_path = Path(__file__).resolve().parents[2] / "tools" / "canonical_counts.local.json"
+    events = pl.read_parquet(canonical.canonical_path("events"), columns=["subject_id", "event_kind"])
+    actual = {}
+    for alias, mrn in local_baselines["alias_to_mrn"].items():
+        sid = subject_id_for(ctpe_config, mrn)
+        mine = events.filter(pl.col("subject_id") == sid)
+        counts = dict(
+            zip(
+                mine.group_by("event_kind").len()["event_kind"].to_list(),
+                mine.group_by("event_kind").len()["len"].to_list(),
+            )
+        )
+        actual[alias] = {"total": mine.height, "by_kind": dict(sorted(counts.items()))}
+
+    if not baseline_path.exists():
+        baseline_path.write_text(json.dumps(actual, indent=2, sort_keys=True), encoding="utf-8")
+        pytest.skip(f"froze canonical count baselines into {baseline_path.name}; rerun to assert them")
+    expected = json.loads(baseline_path.read_text(encoding="utf-8"))
+    assert actual == expected, (
+        "canonical event counts drifted. Report the drift and investigate; do not edit "
+        f"{baseline_path.name} to make this pass."
+    )
+
+
+def test_anchor_duplication_does_not_multiply_canonical_events(canonical, ctpe_config, local_baselines):
+    """The anchor patient has three times the echo rows in one partition and one in
+    another; the deduplicated events must not follow that ratio."""
+    events = pl.read_parquet(
+        canonical.canonical_path("events"), columns=["subject_id", "source_id", "event_kind", "event_id"]
+    )
+    links = pl.read_parquet(canonical.canonical_path("event_source"), columns=["event_id", "source_row_id"])
+    sid = subject_id_for(ctpe_config, local_baselines["alias_to_mrn"]["PT-B"])
+    notes = events.filter(
+        (pl.col("subject_id") == sid)
+        & (pl.col("source_id") == "echo")
+        & (pl.col("event_kind") == "note")
+    )
+    assert notes.height > 0
+    linked = links.join(notes.select("event_id"), on="event_id")
+    fan_in = linked.height / notes.height
+    assert fan_in > 2, f"expected many source rows per note, got {fan_in:.1f}"

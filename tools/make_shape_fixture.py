@@ -140,7 +140,7 @@ def build_partition(partition_id: str) -> None:
     for patient in patients:
         problem_rows.append([patient, "J45.909", "Unspecified asthma uncomplicated", "2017-04-02 00:00:00.000", "Active"])
         # dated after the death date below: must be flagged, never deleted or re-dated
-        problem_rows.append([patient, "E11.9", "Type 2 diabetes mellitus", "2022-09-14 00:00:00.000", "Active"])
+        problem_rows.append([patient, "E11.9", "Type 2 diabetes mellitus", "2031-09-14 00:00:00.000", "Active"])
     write_text(
         root / f"{prefix}_problem_list.txt",
         ["MRN", "Diagnosis_Code", "Diagnosis_Name", "First_Noted_Date", "Status"],

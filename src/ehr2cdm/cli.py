@@ -384,6 +384,81 @@ def compile_mappings(
 
 
 @app.command()
+def clean(
+    dataset: str = DatasetOpt,
+    dry_run: bool = typer.Option(True, "--dry-run/--delete", help="list what would be removed"),
+    assume_timezone: Optional[str] = typer.Option(None, "--assume-timezone"),
+) -> None:
+    """Remove artifacts that no longer match the current content address.
+
+    Content addressing means a code or config change leaves the previous run's outputs
+    on disk, still valid for the inputs that produced them and no longer reachable.
+    That is the right trade for resumability, but on a dataset this size the dead
+    weight is measured in tens of gigabytes, so removing it is an explicit command
+    rather than something a run does silently behind your back.
+    """
+    from ehr2cdm.canonical.build import plan_canonical, plan_stage
+    from ehr2cdm.ingest import plan_ingest
+    from ehr2cdm.paths import PARTIAL_SUFFIX
+
+    cfg, path = _load(dataset)
+    layout = _layout(cfg)
+
+    keep: set[Path] = set()
+    for task in plan_ingest(cfg, layout):
+        from ehr2cdm.hashing import file_sha256
+
+        digest = task.digest(file_sha256(task.file_path))
+        keep.add(layout.source_task_path(task.partition_id, task.source_id, digest))
+        keep.add(layout.quarantine_task_path("ingest", task.partition_id, task.source_id, digest))
+    for task in plan_stage(cfg, layout):
+        keep.add(layout.staged_dir / "_done" / f"{task.partition_id}__{task.source_id}__{task.digest}.json")
+    try:
+        tz, tz_assumed = _resolve_timezone(cfg, assume_timezone)
+        for task in plan_canonical(cfg, layout, path, tz, tz_assumed):
+            keep.add(layout.bucket_dir(task.bucket) / task.digest)
+    except BlockerError:
+        typer.echo("note: canonical buckets left alone (no timezone resolved for this run)")
+
+    stale: list[Path] = []
+    freed = 0
+    for root in (layout.source_dir, layout.quarantine_dir):
+        for candidate in root.rglob("*.parquet*"):
+            if candidate in keep or candidate.name.endswith(PARTIAL_SUFFIX):
+                if candidate.name.endswith(PARTIAL_SUFFIX):
+                    stale.append(candidate)
+                    freed += candidate.stat().st_size
+                continue
+            stale.append(candidate)
+            freed += candidate.stat().st_size
+    for marker in (layout.staged_dir / "_done").glob("*.json"):
+        if marker not in keep:
+            stale.append(marker)
+    for bucket_dir in layout.canonical_dir.glob("buckets/bucket=*/*"):
+        if bucket_dir.is_dir() and bucket_dir not in keep:
+            stale.append(bucket_dir)
+            freed += sum(f.stat().st_size for f in bucket_dir.rglob("*") if f.is_file())
+
+    typer.echo(f"{len(stale)} stale artifacts, {freed / 1e9:.2f} GB")
+    if dry_run:
+        for item in stale[:20]:
+            typer.echo(f"  would remove {item}")
+        if len(stale) > 20:
+            typer.echo(f"  ... and {len(stale) - 20} more")
+        typer.echo("\nnothing was removed; pass --delete to actually remove these")
+    else:
+        import shutil
+
+        for item in stale:
+            if item.is_dir():
+                shutil.rmtree(item, ignore_errors=True)
+            else:
+                item.unlink(missing_ok=True)
+        typer.echo(f"removed {len(stale)} artifacts")
+    raise typer.Exit(code=0)
+
+
+@app.command()
 def measure(
     dataset: str = DatasetOpt,
     gold: Optional[Path] = typer.Option(None, "--gold", help="gold set CSV; defaults to review/gold.csv"),
