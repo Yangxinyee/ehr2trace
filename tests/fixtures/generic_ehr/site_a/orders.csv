@@ -1,0 +1,5 @@
+patient_ref,visit_ref,drug_label,amount,ordered_at,order_state
+PX-1,V-1001,heparin sodium 5000 unit/mL injection,5000 Units,2021-01-04 10:02:00,Dispensed
+PX-1,V-1001,apixaban (ELIQUIS) 5 mg tablet,5 mg,2021-01-05 08:00:00,Sent
+PX-2,V-1002,furosemide (LASIX) 40 mg tablet,40 mg,2021-05-29 07:45:00,Dispensed
+PX-3,V-1003,albuterol 2.5 mg/3 mL nebulizer solution,2.5 mg,,Discontinued

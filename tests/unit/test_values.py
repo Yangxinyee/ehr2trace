@@ -1,0 +1,105 @@
+"""The seven result forms (design section 5.4, checklist P1-6).
+
+Every one of these is a real form observed in the export. The point of the tests is
+the failure path: a value that matches nothing must be quarantined, because a forced
+numeric cast turns "<0.5" into 0.5 and nothing downstream can tell.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from ehr2cdm.canonical.values import ValueParsingSpec, parse_value
+from ehr2cdm.errors import QuarantineRow
+from ehr2cdm.schema import QualityFlag
+
+
+def test_plain_number():
+    v = parse_value("4.2")
+    assert (v.number, v.text, v.form) == (4.2, None, "number")
+
+
+def test_number_with_separate_unit_column():
+    v = parse_value("38.62", "K/cu mm")
+    assert v.number == 38.62 and v.unit == "K/cu mm"
+
+
+def test_number_with_unit_in_the_same_cell():
+    v = parse_value("38.62 K/cu mm")
+    assert v.number == 38.62 and v.unit == "K/cu mm" and v.form == "number_unit"
+
+
+def test_range_keeps_both_bounds_and_no_point_value():
+    v = parse_value("35-40")
+    assert (v.low, v.high, v.number) == (35.0, 40.0, None)
+    assert str(QualityFlag.RANGE_VALUE) in v.flags
+
+
+def test_comparator_is_never_turned_into_a_number():
+    for text in ("<0.5", ">150", "<=2", ">= 3.5"):
+        v = parse_value(text)
+        assert v.number is None, text
+        assert v.text == text.strip()
+        assert str(QualityFlag.COMPARATOR_VALUE) in v.flags
+
+
+def test_sentinel_text():
+    v = parse_value("see below")
+    assert v.text == "see below" and v.number is None
+    assert str(QualityFlag.NON_NUMERIC_RESULT) in v.flags
+
+
+def test_free_text_diagnosis():
+    v = parse_value("SINUS TACHYCARDIA")
+    assert v.text == "SINUS TACHYCARDIA" and v.form == "text"
+    assert v.flags == []
+
+
+def test_signature_line_is_flagged_not_treated_as_a_result():
+    v = parse_value("Confirmed by SMITH, J on 2018-03-04")
+    assert str(QualityFlag.SIGNATURE_LINE) in v.flags
+    assert v.number is None
+
+
+def test_unparseable_value_is_quarantined_when_a_number_is_expected():
+    with pytest.raises(QuarantineRow):
+        parse_value("approximately three-ish", expect="numeric")
+
+
+def test_numeric_expectation_still_accepts_the_documented_forms():
+    for text in ("4.2", "<0.5", "35-40", "see below"):
+        parse_value(text, expect="numeric")
+
+
+def test_null_and_blank_are_absent_not_zero():
+    for raw in (None, "", "   ", "NULL"):
+        v = parse_value(raw)
+        assert v.is_absent and v.number is None and v.text is None
+
+
+def test_number_and_text_never_carry_the_same_meaning():
+    for text in ("4.2", "<0.5", "35-40", "see below", "SINUS TACHYCARDIA", "38.62 mg"):
+        v = parse_value(text)
+        assert not (v.number is not None and v.form in {"comparator", "sentinel", "text"})
+
+
+def test_native_numeric_cells_pass_through():
+    assert parse_value(7).number == 7.0
+    assert parse_value(7.5).number == 7.5
+
+
+def test_sentinels_are_configurable_per_dataset():
+    spec = ValueParsingSpec(sentinels=("nicht bestimmt",))
+    assert str(QualityFlag.NON_NUMERIC_RESULT) in parse_value("nicht bestimmt", spec=spec).flags
+    assert parse_value("see below", spec=spec).form == "text"
+
+
+def test_negative_and_scientific_numbers():
+    assert parse_value("-3.5").number == -3.5
+    assert parse_value("1.2e3").number == 1200.0
+
+
+def test_reversed_range_is_not_read_as_a_range():
+    """40-35 is not a range; treating it as one would invent an ordering."""
+    v = parse_value("40-35")
+    assert v.low is None and v.form in {"text", "number_unit"}

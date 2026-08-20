@@ -1,0 +1,6 @@
+patient_ref,visit_ref,study_label,produced_at,line_no,line_text
+PX-1,V-1001,TRANSTHORACIC ECHOCARDIOGRAM,2021-01-05 15:10:00,1,Transthoracic Echo Report
+PX-1,V-1001,TRANSTHORACIC ECHOCARDIOGRAM,2021-01-05 15:10:00,2,Indications: dyspnea
+PX-1,V-1001,TRANSTHORACIC ECHOCARDIOGRAM,2021-01-05 15:10:00,3,Right ventricle mildly dilated.
+PX-1,V-1001,TRANSTHORACIC ECHOCARDIOGRAM,2021-01-05 15:10:00,4,Confirmed by DOE J on 2021-01-05
+PX-2,V-1002,PULMONARY FUNCTION TEST,2021-05-30 11:00:00,1,Spirometry performed pre and post bronchodilator.

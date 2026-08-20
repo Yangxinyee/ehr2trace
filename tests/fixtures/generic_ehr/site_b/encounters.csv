@@ -1,0 +1,3 @@
+patient_ref,visit_ref,admitted_at,service_on,stay_days,visit_class,deceased_on
+PX-2,V-1002,2021-05-28 22:05:00,2021-05-28,6,Inpatient Hospital Stay,2021-06-02 08:15:00
+PX-4,V-2001,2021-08-19 13:00:00,2021-08-19,2,Inpatient Hospital Stay,

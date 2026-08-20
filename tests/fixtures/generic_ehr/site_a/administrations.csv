@@ -1,0 +1,3 @@
+patient_ref,visit_ref,given_at,drug_label,amount,given_route
+PX-1,V-1001,2021-01-04 10:40:00,heparin sodium 5000 unit/mL injection,5000 Units,Intravenous
+PX-2,V-1002,2021-05-29 08:10:00,furosemide (LASIX) 40 mg tablet,40 mg,Oral

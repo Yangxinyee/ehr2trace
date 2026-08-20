@@ -45,19 +45,21 @@ def build_identity(cfg: DatasetConfig, layout: WorkLayout) -> IdentityResult:
     if not files:
         raise RuntimeError("no source parquet found; run ingest first")
 
-    pairs = (
-        pl.scan_parquet([str(f) for f in files])
-        .select(["person_source_id", "partition_id"])
-        .filter(pl.col("person_source_id").is_not_null() & (pl.col("person_source_id") != ""))
-        .unique()
-        .collect(engine="streaming")
-    )
-
+    # Read file by file rather than as one scan: each source has its own set of
+    # original columns, so the source layer is deliberately not one uniform schema.
+    # Only the two lineage columns are read, and each file is reduced to its distinct
+    # pairs before anything is accumulated.
     by_person: dict[str, set[str]] = {}
-    for person, partition in zip(
-        pairs["person_source_id"].to_list(), pairs["partition_id"].to_list()
-    ):
-        by_person.setdefault(person, set()).add(partition)
+    for path in files:
+        pairs = (
+            pl.read_parquet(path, columns=["person_source_id", "partition_id"])
+            .filter(pl.col("person_source_id").is_not_null() & (pl.col("person_source_id") != ""))
+            .unique()
+        )
+        for person, partition in zip(
+            pairs["person_source_id"].to_list(), pairs["partition_id"].to_list()
+        ):
+            by_person.setdefault(person, set()).add(partition)
 
     salt = cfg.subject_salt()
     bucket_count = cfg.execution.bucket_count

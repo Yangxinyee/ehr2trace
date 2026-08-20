@@ -282,6 +282,9 @@ omop:
     approval_note: null
   observation_period_rule: "first_to_last_trustworthy_event_date/v1"
   source_name: ctpe
+  # CDM_SOURCE requires these and the data does not carry them.
+  cdm_holder: null
+  source_release_date: null
 
 meds:
   splits: [["train", 0.8], ["tuning", 0.1], ["held_out", 0.1]]

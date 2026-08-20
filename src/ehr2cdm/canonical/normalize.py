@@ -127,7 +127,13 @@ def build_role_map(spec: SourceSpec, columns: Iterable[str]) -> dict[str, list[s
     available = {c[len(COL_PREFIX) :].strip().lower(): c for c in columns if c.startswith(COL_PREFIX)}
     roles: dict[str, list[str]] = {}
     for role, fs in spec.fields.items():
-        matched = [available[a.strip().lower()] for a in fs.from_ if a.strip().lower() in available]
+        matched: list[str] = []
+        for alias in fs.from_:
+            column = available.get(alias.strip().lower())
+            # Aliases differing only in case ("MRN" and "mrn") name one column, and
+            # listing it twice would make a fallback look like a real second source.
+            if column and column not in matched:
+                matched.append(column)
         if matched:
             roles[role] = matched
     return roles
@@ -319,8 +325,11 @@ def shape_point_event(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
             )
             continue
 
-        code = row.text("source_code", ctx.null_literals) or row.text("display_name", ctx.null_literals)
         name = row.text("source_name", ctx.null_literals) or row.text("display_name", ctx.null_literals)
+        # A row may carry a name but no code. The name then *is* the code, kept in the
+        # source namespace: an event with no code at all is unusable downstream and a
+        # null code would only surface later, as a silently unmappable term.
+        code = row.text("source_code", ctx.null_literals) or name
         if code is None and name is None:
             out.quarantine_row(
                 row, str(QuarantineReason.UNPARSEABLE_VALUE), "no source code or name", ctx.source_id
@@ -523,7 +532,7 @@ def shape_component_measurements(ctx: ShapeContext, rows: Sequence[Row]) -> Emis
                         value_low=value.low,
                         value_high=value.high,
                         unit_source=value.unit,
-                        quality_flags=_dedup_flags(flags + value.flags),
+                        quality_flags=_dedup_flags(list(flags) + value.flags),
                         parent_event_id=parent_id,
                     )
                 )

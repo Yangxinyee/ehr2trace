@@ -1,0 +1,194 @@
+# Synthetic generalization fixture (checklist P5-2).
+#
+# Structurally unlike the reference export: comma-separated, no byte-order marks,
+# different column names for every role, one file per domain, two sites instead of
+# cohort partitions, and no anchor concept at all.
+#
+# Onboarding it cost exactly this file. If it had cost a code change, the design's
+# claim of generality would be false, and this fixture exists to keep that honest.
+
+dataset_id: generic_ehr
+root_env: GENERIC_EHR_ROOT
+description: Synthetic two-site EHR used to prove a new source needs only a new YAML.
+
+identity:
+  person_key: patient_ref
+  encounter_key: visit_ref
+
+time:
+  # Synthetic data, so the zone is genuinely known rather than assumed.
+  timezone_assumption: UTC
+  naive_time_policy: block
+  formats:
+    - "%Y-%m-%d %H:%M:%S"
+    - "%Y-%m-%d"
+  null_literals: ["NULL"]
+
+partitions:
+  - {id: site_a, dir: site_a}
+  - {id: site_b, dir: site_b}
+
+sources:
+
+  patients:
+    adapter: delimited
+    file_glob: "patients.csv"
+    options: {delimiter: ",", encoding: "utf-8", quoting: minimal}
+    shape: person_attributes
+    event_kind: demographic
+    required: true
+    fields:
+      person_id:  {from: [patient_ref], required: true}
+      gender:     {from: [birth_sex]}
+      race:       {from: [ancestry]}
+      ethnicity:  {from: [ethnic_group]}
+      age:        {from: [years_old]}
+      death_time: {from: [deceased_on]}
+    untimed_values:
+      - {column: body_mass_index, code: BMI, unit: "kg/m2"}
+
+  encounters:
+    adapter: delimited
+    file_glob: "encounters.csv"
+    options: {delimiter: ",", encoding: "utf-8", quoting: minimal}
+    shape: visit
+    event_kind: visit
+    required: false
+    fields:
+      person_id:      {from: [patient_ref], required: true}
+      encounter_id:   {from: [visit_ref]}
+      event_time:     {from: [admitted_at, service_on], required: true}
+      length_of_stay: {from: [stay_days]}
+      visit_type:     {from: [visit_class]}
+      death_time:     {from: [deceased_on]}
+
+  diagnoses:
+    adapter: delimited
+    file_glob: "diagnoses.csv"
+    options: {delimiter: ",", encoding: "utf-8", quoting: minimal}
+    shape: point_event
+    event_kind: condition
+    code_system: ICD10CM
+    required: false
+    fields:
+      person_id:   {from: [patient_ref], required: true}
+      source_code: {from: [dx_code], required: true}
+      source_name: {from: [dx_label]}
+      event_time:  {from: [noted_on], required: true}
+      status:      {from: [dx_state]}
+
+  orders:
+    adapter: delimited
+    file_glob: "orders.csv"
+    options: {delimiter: ",", encoding: "utf-8", quoting: minimal}
+    shape: point_event
+    event_kind: drug_order
+    required: false
+    fields:
+      person_id:    {from: [patient_ref], required: true}
+      encounter_id: {from: [visit_ref]}
+      source_code:  {from: [drug_label], required: true}
+      source_name:  {from: [drug_label]}
+      dose:         {from: [amount]}
+      event_time:   {from: [ordered_at], required: true}
+      status:       {from: [order_state]}
+
+  administrations:
+    adapter: delimited
+    file_glob: "administrations.csv"
+    options: {delimiter: ",", encoding: "utf-8", quoting: minimal}
+    shape: point_event
+    event_kind: drug_admin
+    required: false
+    fields:
+      person_id:    {from: [patient_ref], required: true}
+      encounter_id: {from: [visit_ref]}
+      event_time:   {from: [given_at], required: true}
+      source_code:  {from: [drug_label], required: true}
+      source_name:  {from: [drug_label]}
+      dose:         {from: [amount]}
+      route:        {from: [given_route]}
+
+  results:
+    adapter: delimited
+    file_glob: "results.csv"
+    options: {delimiter: ",", encoding: "utf-8", quoting: minimal}
+    shape: point_event
+    event_kind: measurement
+    required: false
+    fields:
+      person_id:      {from: [patient_ref], required: true}
+      encounter_id:   {from: [visit_ref]}
+      event_time:     {from: [observed_at, released_at], required: true}
+      available_time: {from: [released_at]}
+      source_code:    {from: [analyte], required: true}
+      source_name:    {from: [analyte_label]}
+      value:          {from: [result]}
+      unit:           {from: [units]}
+
+  reports:
+    adapter: delimited
+    file_glob: "reports.csv"
+    options: {delimiter: ",", encoding: "utf-8", quoting: minimal}
+    shape: narrative_lines
+    event_kind: note
+    study_event_kind: procedure
+    required: false
+    fields:
+      person_id:      {from: [patient_ref], required: true}
+      encounter_id:   {from: [visit_ref]}
+      display_name:   {from: [study_label], required: true}
+      event_time:     {from: [produced_at], required: true}
+      available_time: {from: [produced_at]}
+      text_line:      {from: [line_no]}
+      text:           {from: [line_text]}
+
+  study_components:
+    adapter: delimited
+    file_glob: "study_components.csv"
+    options: {delimiter: ",", encoding: "utf-8", quoting: minimal}
+    shape: component_measurements
+    event_kind: measurement
+    study_event_kind: procedure
+    required: false
+    fields:
+      person_id:      {from: [patient_ref], required: true}
+      encounter_id:   {from: [visit_ref]}
+      display_name:   {from: [study_label], required: true}
+      event_time:     {from: [resulted_at], required: true}
+      available_time: {from: [resulted_at]}
+      source_code:    {from: [component], required: true}
+      text_line:      {from: [line_no]}
+      value:          {from: [component_value]}
+
+# No anchors block: this source has no anchor concept, and the pipeline must not
+# require one.
+
+labels: []
+
+omop:
+  backend: duckdb
+  cdm_version: "5.4"
+  person_birth_policy:
+    mode: approved_approximation
+    age_as_of_date: "2022-01-01"
+    approval_note: "synthetic fixture: ages are generated as of 2022-01-01"
+  source_name: generic_ehr
+  cdm_holder: "synthetic fixture; no holder"
+  source_release_date: "2026-08-20"
+
+meds:
+  splits: [["train", 0.6], ["tuning", 0.2], ["held_out", 0.2]]
+  split_salt: "generic_ehr/meds-split/v1"
+
+execution:
+  bucket_count: 4
+  workers: 2
+  chunk_rows: 1000
+
+owner_answers:
+  batch_relationship: "two independent sites; a patient may appear at both"
+  imaging_reports_included: true
+  vocabulary_source: "none: synthetic fixture, concept ids stay 0"
+  answered_by: "fixture author"
+  answered_on: "2026-08-20"

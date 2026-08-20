@@ -1,0 +1,7 @@
+patient_ref,visit_ref,analyte,analyte_label,observed_at,released_at,result,units
+PX-1,V-1001,CREAT,"Creatinine, serum",2021-01-04 09:55:00,2021-01-04 11:20:00,1.02,mg/dL
+PX-1,V-1001,DDIMER,D-dimer quantitative,2021-01-04 09:55:00,2021-01-04 12:05:00,<0.50,ug/mL FEU
+PX-1,V-1001,RVSP,Right ventricular systolic pressure,2021-01-05 14:00:00,2021-01-05 14:30:00,35-40,mmHg
+PX-2,V-1002,K,"Potassium, serum",2021-05-29 06:00:00,2021-05-29 07:10:00,see below,mmol/L
+PX-2,V-1002,WBC,White blood cell count,2021-05-29 06:00:00,2021-05-29 07:10:00,38.62,K/cu mm
+PX-3,V-1003,NA,"Sodium, serum",2021-02-11 18:22:00,,138,mmol/L

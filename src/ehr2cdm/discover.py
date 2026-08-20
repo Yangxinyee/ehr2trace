@@ -211,8 +211,11 @@ def scan_sources(cfg: DatasetConfig) -> list[SourceRecord]:
             units = resolve_source_units(cfg, part.id, source_id, spec)
             unit_records = [peek_columns(u) for u in units]
             if not unit_records:
+                # Absent is "not extracted", not "every column is missing": an optional
+                # source that this partition simply did not ship is coverage
+                # information, and only a *required* one is a blocker.
                 coverage = Coverage.not_extracted
-                missing: list[str] = sorted(spec.fields)
+                missing: list[str] = []
             else:
                 coverage = Coverage.present
                 available = {c.lower() for rec in unit_records for c in rec.columns}

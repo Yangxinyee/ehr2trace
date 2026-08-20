@@ -1,0 +1,5 @@
+patient_ref,dx_code,dx_label,noted_on,dx_state
+PX-1,I26.99,Other pulmonary embolism without acute cor pulmonale,2021-01-04 00:00:00,Active
+PX-2,I50.9,Heart failure unspecified,2019-11-02 00:00:00,Active
+PX-2,E11.9,Type 2 diabetes mellitus without complications,2021-09-14 00:00:00,Active
+PX-3,J45.909,Unspecified asthma uncomplicated,2018-03-30 00:00:00,Resolved

@@ -240,6 +240,10 @@ class OmopSpec(BaseModel):
     #: how OBSERVATION_PERIOD is derived, recorded on every row
     observation_period_rule: str = "first_to_last_trustworthy_event_date/v1"
     source_name: str | None = None
+    #: CDM_SOURCE requires both; neither is derivable from the data, so both are
+    #: declared by whoever publishes rather than invented at build time.
+    cdm_holder: str | None = None
+    source_release_date: str | None = None
 
 
 class MedsSpec(BaseModel):
@@ -383,7 +387,12 @@ def load_dataset_config(path: str | Path) -> DatasetConfig:
     p = Path(path)
     if not p.exists():
         raise ConfigError(f"dataset config not found: {p}")
-    raw: Any = yaml.safe_load(p.read_text(encoding="utf-8"))
+    try:
+        raw: Any = yaml.safe_load(p.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        # Includes an attempt to use a Python-object tag: safe_load refuses, and the
+        # refusal is reported as a config error rather than crashing the CLI.
+        raise ConfigError(f"cannot parse dataset config {p}:\n{exc}") from exc
     if not isinstance(raw, dict):
         raise ConfigError(f"dataset config must be a mapping: {p}")
     try:
