@@ -18,16 +18,29 @@ canonical/         canonical event store — the single source of truth
 omop/              meds/
 ```
 
-Measured on the reference export (8 GB, 4 partitions, 25 files, 40 logical sources):
+Measured on the reference export (8 GB, 4 partitions, 25 files, 40 logical sources),
+from a clean work root, with 30/30 validation checks passing:
 
 | | |
 |---|---:|
 | Source rows read | 73,558,874 |
 | Canonical events | 31,669,480 |
 | Event ↔ source-row links | 100,103,655 |
+| Events built from more than one source row | 15,412,302 |
 | Subjects, resolved across all partitions | 22,982 |
+| Subjects appearing in more than one partition | 6,784 |
 | Extraction anchors (kept out of the event stream) | 35,247 |
 | Rows quarantined rather than guessed at | 637,665 |
+| Rows that carried no fact at all | 1,949 (0.0026%) |
+| Records dated after death, flagged and kept | 62,067 |
+| MEDS shards / distinct codes | 22,980 / 65,481 |
+| Distinct terms awaiting a concept | 59,447 |
+
+Wall time on 48 cores: ingest 136s at 0.8 GB peak, canonical 424s at 32.5 GB peak.
+No GPU is used anywhere in that path.
+
+The OMOP tables are **empty**, and that is the correct output for this export: see the
+birth-year blocker below.
 
 ## Four rules that are never violated
 
