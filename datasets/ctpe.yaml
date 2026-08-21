@@ -298,7 +298,12 @@ execution:
   chunk_rows: 200000
 
 owner_answers:
-  batch_relationship: null
+  # Answered by the data owner 2026-08-21: one cohort, exported twice. The two extracts
+  # differ in places, and the union of both is what is wanted. That is what the pipeline
+  # already does -- identity is resolved across all four partitions before deduplication,
+  # and the same clinical fact appearing in both batches collapses to one event with
+  # every source row still linked.
+  batch_relationship: "one cohort exported twice; take the union of both extracts"
   imaging_reports_included: null
   vocabulary_source: null
   answered_by: null
