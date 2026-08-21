@@ -146,7 +146,9 @@ class LlmClient:
             self.supports_json_schema = False
         return bool(self.supports_json_schema)
 
-    def _post(self, messages: list[dict[str, str]], schema: dict[str, Any], name: str) -> Any:
+    def _post(
+        self, messages: list[dict[str, str]], schema: dict[str, Any], name: str, max_tokens: int = 512
+    ) -> Any:
         import httpx
 
         payload: dict[str, Any] = {
@@ -154,7 +156,10 @@ class LlmClient:
             "messages": messages,
             "temperature": self.temperature,
             "seed": self.seed,
-            "max_tokens": 1024,
+            # Generous enough for a schema-shaped answer with a one-sentence rationale,
+            # and small enough that a model inclined to ramble is cut off rather than
+            # spending a minute per call doing it.
+            "max_tokens": max_tokens,
         }
         if self.supports_json_schema is not False:
             payload["response_format"] = {
@@ -174,7 +179,14 @@ class LlmClient:
         self._last_usage = (usage.get("prompt_tokens"), usage.get("completion_tokens"))
         return json.loads(content)
 
-    def _ask(self, template: str, prompt: str, schema: dict[str, Any], model_cls: type[BaseModel]):
+    def _ask(
+        self,
+        template: str,
+        prompt: str,
+        schema: dict[str, Any],
+        model_cls: type[BaseModel],
+        max_tokens: int = 512,
+    ):
         """One question, validated against a schema, with a bounded retry budget."""
         template_text, template_hash = load_template(template)
         messages = [
@@ -188,7 +200,7 @@ class LlmClient:
         for attempt in range(1, MAX_RETRIES + 2):
             record.attempts = attempt
             try:
-                raw = self._post(messages, schema, template)
+                raw = self._post(messages, schema, template, max_tokens=max_tokens)
                 parsed = model_cls.model_validate(raw)
                 record.prompt_tokens, record.completion_tokens = self._last_usage
                 self.calls.append(record)
@@ -233,7 +245,10 @@ class LlmClient:
             "required": ["role", "logical_type", "confidence", "rationale"],
             "additionalProperties": False,
         }
-        return self._ask("column_semantics", json.dumps(payload, sort_keys=True), schema, ColumnProposal)
+        # A role and one sentence; there is nothing here worth a long answer.
+        return self._ask(
+            "column_semantics", json.dumps(payload, sort_keys=True), schema, ColumnProposal, max_tokens=192
+        )
 
     def rank_candidates(
         self, source_string: str, domain: str | None, candidates: Sequence[Candidate]
@@ -269,7 +284,9 @@ class LlmClient:
             "required": ["ranking", "rationale"],
             "additionalProperties": False,
         }
-        result = self._ask("terminology_ranking", json.dumps(payload, sort_keys=True), schema, CandidateRanking)
+        result = self._ask(
+            "terminology_ranking", json.dumps(payload, sort_keys=True), schema, CandidateRanking, max_tokens=768
+        )
         if result is None:
             return None
         invented = [r.concept_id for r in result.ranking if r.concept_id not in allowed]

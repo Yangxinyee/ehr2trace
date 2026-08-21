@@ -25,5 +25,6 @@ Rules:
 - Distinguish an ordering time from an administration time. Do not merge them.
 - Do not infer a diagnosis, an outcome or a cohort label from a column name.
 - Set `confidence` honestly. Below 0.5 means you would not defend the answer.
+- Keep `rationale` to one short sentence naming the feature that decided it.
 
 Reply with JSON only, matching the given schema.

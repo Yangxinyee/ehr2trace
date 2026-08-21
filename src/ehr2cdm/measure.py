@@ -453,6 +453,12 @@ def measure_columns(
         "model": client.model if client is not None else None,
         "columns_scored": len(items),
         "answer_key": "the field roles declared in the dataset YAML",
+        "asymmetry": (
+            "the model sees the source name and a de-identified value profile; the "
+            "heuristic sees only the column name. That is deliberate -- the extra "
+            "context is the thing being paid for -- but it means the arms are not "
+            "given identical inputs."
+        ),
         "arms": arms,
         "llm": client.usage_summary() if client is not None else None,
         "verdict": _column_verdict(heuristic, model, client is not None),
