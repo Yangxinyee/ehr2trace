@@ -133,7 +133,34 @@ into one event with all six still traceable.
 It prints a real patient key, so use it on a terminal you would be willing to show the
 data owner.
 
-### 5. Terminology and review
+### 5. Install a vocabulary (optional, but it is what makes concept ids real)
+
+Without one, every `*_concept_id` is 0, every source value is preserved, and all 59,447
+distinct terms sit in the review queue. Getting one is a licensing exercise, not a
+technical one:
+
+1. Apply for a **UMLS licence** at <https://uts.nlm.nih.gov/uts/signup-login> — free for
+   research, but approval takes time, so start here.
+2. Register at <https://athena.ohdsi.org/> and use its Download tab to request a bundle
+   containing at least **SNOMED, ICD10CM, LOINC, RxNorm, RxNorm Extension, UCUM** plus
+   the default type/gender/race vocabularies. Athena emails a link when the build is
+   ready. CPT4 is not needed here and costs an extra Java reconstitution step.
+3. Unzip it (the `.csv` files are tab-delimited despite the extension), then check it
+   before trusting it:
+
+```bash
+EHR_WORK_ROOT=... python3 tools/check_vocabulary.py /path/to/unzipped/vocab
+export OMOP_VOCAB_DIR=/path/to/unzipped/vocab
+.venv/bin/ehr2cdm omop --dataset ctpe
+```
+
+`check_vocabulary.py` answers the three questions that matter before a single row is
+mapped: are the required tables present and readable, which vocabularies did the bundle
+actually include, and how much of *this* dataset's terminology would map with it. A
+truncated file and a bundle missing a vocabulary both look identical downstream — like
+having no vocabulary at all — so they are worth catching up front.
+
+### 6. Terminology and review
 
 ```bash
 .venv/bin/ehr2cdm propose --dataset ctpe --kind terminology   # -> review/pending.csv
