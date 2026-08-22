@@ -19,9 +19,11 @@ identity:
   subject_salt_env: EHR_SUBJECT_SALT
 
 time:
-  # Unanswered. The export carries naive local timestamps with no zone, and guessing
-  # one would silently shift every event by hours.
-  timezone_assumption: null
+  # Answered by the data owner 2026-08-22: US Eastern. The IANA name, not a fixed
+  # offset, because the export spans years and the zone's daylight-saving transitions
+  # have to be applied per timestamp rather than assumed away. An hour that occurs
+  # twice on a fall-back date resolves to its first occurrence, deterministically.
+  timezone_assumption: America/New_York
   naive_time_policy: block
   formats:
     - "%Y-%m-%d %H:%M:%S.%f"
