@@ -277,6 +277,14 @@ omop:
     # The export carries an age but no birth date and no as-of date, so a compliant
     # year_of_birth cannot be derived. Strict mode blocks PERSON rather than inventing
     # one; canonical and MEDS are unaffected.
+    #
+    # Evidence gathered 2026-08-21, for whoever asks the data owner:
+    #   - the last clinical event in the data is 2024-07-08
+    #   - the raw files were exported 2024-09-19
+    # So an age recorded at extraction time implies year_of_birth = 2024 - age. A date
+    # in 2025 was suggested and would give 2025 - age, one year earlier for all 22,980
+    # patients. Only the *year* of this date matters; the day does not. The question is
+    # unresolved and stays that way until the data owner answers.
     mode: strict
     age_as_of_date: null
     approval_note: null
