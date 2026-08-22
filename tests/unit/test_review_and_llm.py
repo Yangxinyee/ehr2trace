@@ -187,3 +187,114 @@ def test_prompt_templates_are_versioned_by_content():
     text, digest = load_template("terminology_ranking")
     assert "never" in text.lower()
     assert digest == load_template("terminology_ranking")[1]
+
+
+# -- vocabulary loading ---------------------------------------------------------
+
+
+def write_vocab(directory: Path) -> Path:
+    """A three-concept vocabulary in the shape Athena ships: tab-delimited .csv."""
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "CONCEPT.csv").write_text(
+        "concept_id\tconcept_name\tdomain_id\tvocabulary_id\tconcept_class_id\t"
+        "standard_concept\tconcept_code\tvalid_start_date\tvalid_end_date\tinvalid_reason\n"
+        "316139\tHeart failure\tCondition\tSNOMED\tClinical Finding\tS\t84114007\t"
+        "19700101\t20991231\t\n"
+        "45571738\tHeart failure unspecified\tCondition\tICD10CM\t4-char billing code\t\t"
+        "I50.9\t19700101\t20991231\t\n"
+        "40213260\tOther test\tMeasurement\tLOINC\tLab Test\tS\t12345-6\t"
+        "19700101\t20991231\t\n",
+        encoding="utf-8",
+    )
+    (directory / "CONCEPT_RELATIONSHIP.csv").write_text(
+        "concept_id_1\tconcept_id_2\trelationship_id\tvalid_start_date\tvalid_end_date\t"
+        "invalid_reason\n"
+        "45571738\t316139\tMaps to\t19700101\t20991231\t\n",
+        encoding="utf-8",
+    )
+    (directory / "VOCABULARY.csv").write_text(
+        "vocabulary_id\tvocabulary_name\tvocabulary_reference\tvocabulary_version\t"
+        "vocabulary_concept_id\n"
+        "None\tOMOP Standardized Vocabularies\tOMOP\tv5.0 01-JAN-26\t44819096\n"
+        "SNOMED\tSNOMED CT\thttp://snomed.info\t2026-01-31\t44819097\n",
+        encoding="utf-8",
+    )
+    for table in ("DOMAIN", "CONCEPT_CLASS", "RELATIONSHIP"):
+        (directory / f"{table}.csv").write_text("a\tb\nx\ty\n", encoding="utf-8")
+    return directory
+
+
+def test_a_vocabulary_directory_actually_loads(tmp_path: Path):
+    """The loader is only ever exercised when a real vocabulary exists.
+
+    It used to pass the file path as a bound parameter to a CREATE TABLE, which DuckDB
+    refuses to prepare — so it worked in every test that had no vocabulary and failed
+    the instant one was supplied. This test supplies one.
+    """
+    from ehr2cdm.terminology import Vocabulary
+
+    vocab = Vocabulary.open(write_vocab(tmp_path / "vocab"))
+    try:
+        assert vocab.available, "a directory with CONCEPT.csv must not fall back to null"
+        assert vocab.concept_exists(316139)
+        assert not vocab.concept_exists(999999999)
+        assert vocab.domain_of(316139) == "Condition"
+        assert vocab.version == "v5.0 01-JAN-26", "the bundle version is recorded"
+    finally:
+        vocab.close()
+
+
+def test_a_non_standard_source_code_is_followed_to_its_standard_concept(tmp_path: Path):
+    """The deterministic path: source code -> source concept -> 'Maps to' -> standard."""
+    from ehr2cdm.terminology import Vocabulary
+
+    vocab = Vocabulary.open(write_vocab(tmp_path / "vocab"))
+    try:
+        match = vocab.lookup_code("ICD10CM", "I50.9")
+        assert match is not None
+        assert match.concept_id == 316139, "must land on the standard SNOMED concept"
+        assert match.source_concept_id == 45571738, "and remember where it came from"
+        assert match.path == "mapped_relationship"
+        assert match.domain_id == "Condition"
+    finally:
+        vocab.close()
+
+
+def test_an_unknown_code_maps_to_nothing_rather_than_something_close(tmp_path: Path):
+    from ehr2cdm.terminology import Vocabulary
+
+    vocab = Vocabulary.open(write_vocab(tmp_path / "vocab"))
+    try:
+        assert vocab.lookup_code("ICD10CM", "Z99.999") is None
+        assert vocab.lookup_code("SNOMED", "I50.9") is None, "wrong vocabulary is a miss"
+    finally:
+        vocab.close()
+
+
+def test_an_unreadable_version_string_does_not_fail_the_load(tmp_path: Path):
+    """The version is metadata. A bundle that omits it is still perfectly usable."""
+    from ehr2cdm.terminology import Vocabulary
+
+    directory = write_vocab(tmp_path / "vocab")
+    (directory / "VOCABULARY.csv").write_text("a\tb\nx\ty\n", encoding="utf-8")
+    vocab = Vocabulary.open(directory)
+    try:
+        assert vocab.available
+        assert vocab.version == "unknown"
+        assert vocab.lookup_code("ICD10CM", "I50.9") is not None
+    finally:
+        vocab.close()
+
+
+def test_lexical_recall_surfaces_candidates_without_adopting_them(tmp_path: Path):
+    from ehr2cdm.terminology import Vocabulary
+
+    vocab = Vocabulary.open(write_vocab(tmp_path / "vocab"))
+    try:
+        candidates = vocab.candidates("heart failure", "Condition", limit=5)
+        assert candidates and candidates[0].concept_id == 316139
+        # recall only returns standard concepts; the non-standard source concept is not
+        # a legitimate mapping target
+        assert all(c.concept_id != 45571738 for c in candidates)
+    finally:
+        vocab.close()

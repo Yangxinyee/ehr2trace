@@ -22,3 +22,7 @@ dist/
 vocab/
 docs/standards/*.pdf
 .venv-llm/
+
+# Licensed vocabulary download (multi-GB, not ours to redistribute)
+vocabulary_download_*.zip
+omop_vocab/

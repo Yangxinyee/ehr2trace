@@ -71,10 +71,9 @@ def main(argv: list[str]) -> int:
 
     con = duckdb.connect()
     concept = next(p for p in directory.glob("*") if p.stem.upper() == "CONCEPT")
-    con.execute(
-        "CREATE VIEW concept AS SELECT * FROM read_csv_auto(?, delim='\t', header=true, "
-        "quote='', all_varchar=true)",
-        [str(concept)],
+    con.register(
+        "concept",
+        con.read_csv(str(concept), sep="\t", header=True, quotechar="", all_varchar=True),
     )
     total = con.execute("SELECT count(*) FROM concept").fetchone()[0]
     print(f"\n{total:,} concepts\n")

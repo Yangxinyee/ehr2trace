@@ -168,18 +168,31 @@ class Vocabulary:
         for table, path in files.items():
             if path is None:
                 continue
-            con.execute(
-                f"CREATE OR REPLACE TABLE {table} AS SELECT * FROM read_csv_auto(?, delim='\t', "
-                "header=true, quote='', all_varchar=true)",
-                [str(path)],
+            # The relation API rather than a parameterized CREATE TABLE: DuckDB refuses
+            # to prepare a CREATE statement, so passing the path as a bound parameter
+            # fails the moment a real vocabulary is supplied -- which is exactly when
+            # nobody is looking. Everything is read as text: concept ids are compared as
+            # strings here and cast once, at the point of use.
+            relation = con.read_csv(
+                str(path), sep="\t", header=True, quotechar="", all_varchar=True
             )
+            con.register(f"_src_{table}", relation)
+            con.execute(f"CREATE OR REPLACE TABLE {table} AS SELECT * FROM _src_{table}")
+            con.unregister(f"_src_{table}")
+        # The bundle's version string is metadata, not data. Athena records it on a
+        # sentinel row; a bundle that does not carry it is still perfectly usable, so a
+        # missing or oddly-shaped VOCABULARY table downgrades the version to "unknown"
+        # rather than failing the load.
         version = "unknown"
         if files.get("VOCABULARY"):
-            row = con.execute(
-                "SELECT vocabulary_version FROM VOCABULARY WHERE vocabulary_id = 'None' LIMIT 1"
-            ).fetchone()
-            if row and row[0]:
-                version = str(row[0])
+            try:
+                row = con.execute(
+                    "SELECT vocabulary_version FROM VOCABULARY WHERE vocabulary_id = 'None' LIMIT 1"
+                ).fetchone()
+                if row and row[0]:
+                    version = str(row[0])
+            except Exception:
+                pass
         return cls(con, version=version)
 
     @staticmethod
@@ -262,12 +275,20 @@ class Vocabulary:
             params.append(domain)
         score = " + ".join(["CASE WHEN lower(concept_name) LIKE ? THEN 1 ELSE 0 END"] * len(tokens))
         params_score = [f"%{t}%" for t in tokens]
+        # The score is filtered in an outer query rather than with QUALIFY, which
+        # DuckDB reserves for window functions. Ties break toward the shorter concept
+        # name: given "Heart failure" and "Heart failure with reduced ejection
+        # fraction", the less specific one is the safer thing to put in front of a
+        # reviewer, because adding specificity nobody wrote down is the failure mode
+        # that matters here.
         rows = self.con.execute(
             f"""
-            SELECT concept_id, concept_name, domain_id, vocabulary_id, ({score}) AS hits
-            FROM CONCEPT
-            WHERE {' AND '.join(where)}
-            QUALIFY hits > 0
+            SELECT concept_id, concept_name, domain_id, vocabulary_id, hits FROM (
+                SELECT concept_id, concept_name, domain_id, vocabulary_id,
+                       ({score}) AS hits
+                FROM CONCEPT
+                WHERE {' AND '.join(where)}
+            ) WHERE hits > 0
             ORDER BY hits DESC, length(concept_name) ASC, concept_id ASC
             LIMIT ?
             """,
