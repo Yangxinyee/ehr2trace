@@ -590,20 +590,38 @@ def _omop_concepts(l: Layers) -> CheckResult:
             ("procedure_occurrence", "procedure_concept_id", "Procedure"),
             ("measurement", "measurement_concept_id", "Measurement"),
         ]
+        # Checked with one join per table rather than two queries per concept. On this
+        # export that is ~10,000 concepts against a 4.16-million-row vocabulary; asking
+        # about them one at a time turned a check into a coffee break.
         bad: list[str] = []
         nonzero = 0
         for table, column, domain in checks:
             ids = [
-                r[0]
+                int(r[0])
                 for r in con.execute(
                     f"SELECT DISTINCT {column} FROM {table} WHERE {column} <> 0"
                 ).fetchall()
             ]
             nonzero += len(ids)
-            for concept_id in ids:
-                if not vocab.concept_exists(concept_id):
+            if not ids or not vocab.available:
+                bad.extend(
+                    f"{table}.{column}={i} not in vocabulary" for i in ids if not vocab.concept_exists(i)
+                )
+                continue
+            vocab.con.execute("CREATE OR REPLACE TEMP TABLE _ids (concept_id BIGINT)")
+            vocab.con.executemany("INSERT INTO _ids VALUES (?)", [(i,) for i in ids])
+            rows = vocab.con.execute(
+                """
+                SELECT i.concept_id, c.domain_id
+                FROM _ids i
+                LEFT JOIN CONCEPT c ON CAST(c.concept_id AS BIGINT) = i.concept_id
+                """
+            ).fetchall()
+            vocab.con.execute("DROP TABLE IF EXISTS _ids")
+            for concept_id, found_domain in rows:
+                if found_domain is None:
                     bad.append(f"{table}.{column}={concept_id} not in vocabulary")
-                elif vocab.available and vocab.domain_of(concept_id) != domain:
+                elif found_domain != domain:
                     bad.append(f"{table}.{column}={concept_id} is not a {domain} concept")
         vocab.close()
         return CheckResult(

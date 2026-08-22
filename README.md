@@ -34,13 +34,16 @@ from a clean work root, with 30/30 validation checks passing:
 | Rows that carried no fact at all | 1,949 (0.0026%) |
 | Records dated after death, flagged and kept | 62,067 |
 | MEDS shards / distinct codes | 22,980 / 65,481 |
-| Distinct terms awaiting a concept | 59,447 |
+| Distinct terms resolved by the vocabulary | 24,754 of 59,447 (41.6%) |
+| Distinct standard concepts actually used | 9,639 |
+| OMOP clinical rows published | 31,555,608 |
 
 Wall time on 48 cores: ingest 136s at 0.8 GB peak, canonical 424s at 32.5 GB peak.
 No GPU is used anywhere in that path.
 
-The OMOP tables are **empty**, and that is the correct output for this export: see the
-birth-year blocker below.
+With an OMOP vocabulary installed and the age reference date approved, all three layers
+publish. Without either, the pipeline still runs and says exactly what it is missing —
+see the blocker table below.
 
 ## Four rules that are never violated
 
@@ -190,11 +193,11 @@ worked around:
 | Blocker | Consequence |
 |---|---|
 | Source timezone undeclared | `--assume-timezone` required; every event flagged `TZ_ASSUMED` |
-| No reference date for `Age` | **OMOP publication is withheld for every patient.** Canonical and MEDS are complete and unaffected |
+| ~~No reference date for `Age`~~ | **Answered 2026-08-22**: 2025-03-01, with an approval note. Every derived birth year is flagged `DERIVED_APPROXIMATE_BIRTH_YEAR`. Note the data ends 2024-07-08 and was exported 2024-09-19, both before that date — recorded in the config next to the policy |
 | Cohort label rule and episode binding undefined | The label stays provenance in the audit layer; it is not a clinical fact and not a training target |
-| Batch relationship unconfirmed | Batches are merged by lineage, which assumes independent extracts |
+| ~~Batch relationship unconfirmed~~ | **Answered 2026-08-21**: one cohort exported twice, take the union — which is what the pipeline already did |
 | Imaging reports not in the delivery | No imaging conclusion is synthesized from an anchor date or a directory name |
-| No licensed vocabulary | Every `*_concept_id` is 0, every source value is preserved, every distinct term is in the review queue |
+| ~~No licensed vocabulary~~ | **Installed 2026-08-22** (Athena v5.0 27-FEB-26). 41.6% of distinct terms map deterministically; the rest are in the review queue with their source values preserved |
 
 The second one is worth being explicit about: under the default `strict` birth-year
 policy, a patient with no derivable `year_of_birth` is withheld from OMOP **entirely** —
