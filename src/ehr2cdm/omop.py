@@ -47,7 +47,7 @@ from ehr2cdm.terminology import (
     MappingRegistry,
     TermRequest,
     Vocabulary,
-    resolve_terms,
+    resolve_terms_batch,
 )
 from ehr2cdm.version import CODE_VERSION, DEFAULT_MAPPING_VERSION
 
@@ -194,7 +194,7 @@ def _build_term_map(con, vocabulary, mappings: MappingRegistry) -> tuple[int, in
         )
         for r in rows
     ]
-    resolved, unresolved = resolve_terms(terms, vocabulary, mappings)
+    resolved, unresolved = resolve_terms_batch(terms, vocabulary, mappings)
 
     con.execute(
         "CREATE TABLE term_map (code_system VARCHAR, source_code VARCHAR, "
@@ -900,11 +900,13 @@ def _write_pending(layout: WorkLayout, unresolved: Sequence[TermRequest], vocabu
         return None
     from ehr2cdm.review import write_pending
 
+    # Candidates are deliberately *not* computed here. Lexical recall is a scan of the
+    # whole concept table per term, and publishing should not spend hours building a
+    # review queue nobody has asked for yet. `ehr2cdm propose` does recall on demand,
+    # for as many of the most frequent terms as a reviewer intends to work through.
     items = []
     for term in sorted(unresolved, key=lambda t: (-t.occurrences, t.source_code)):
-        candidates = vocabulary.candidates(
-            term.source_name or term.source_code, DOMAIN_FOR_KIND.get(term.event_kind), limit=8
-        )
+        candidates: list = []
         items.append(
             {
                 "kind": "terminology",

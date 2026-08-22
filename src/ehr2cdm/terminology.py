@@ -366,6 +366,99 @@ def collect_terms(events: Iterable[dict]) -> dict[tuple[str, str], TermRequest]:
     return out
 
 
+def resolve_terms_batch(
+    terms: Sequence[TermRequest], vocabulary, mappings: MappingRegistry
+) -> tuple[dict[tuple[str, str], ConceptMatch], list[TermRequest]]:
+    """Resolve every term in two SQL joins rather than one query per term.
+
+    Semantically identical to :func:`resolve_terms` -- same source-concept lookup, same
+    ``Maps to`` hop, same domain check -- but a real export has tens of thousands of
+    distinct terms and a real vocabulary has millions of concepts, so asking one
+    question at a time turns twenty minutes of work into a query per term. Falls back
+    to the per-term path when there is no vocabulary to join against.
+    """
+    if not getattr(vocabulary, "available", False):
+        return resolve_terms(terms, vocabulary, mappings)
+
+    resolved: dict[tuple[str, str], ConceptMatch] = {}
+    pending: list[TermRequest] = []
+    for term in terms:
+        approved = mappings.get(term.code_system, term.source_code)
+        if approved is not None:
+            resolved[term.key] = approved
+        else:
+            pending.append(term)
+    if not pending:
+        return resolved, []
+
+    con = vocabulary.con
+    con.execute(
+        "CREATE OR REPLACE TEMP TABLE _terms "
+        "(code_system VARCHAR, source_code VARCHAR, event_kind VARCHAR)"
+    )
+    con.executemany(
+        "INSERT INTO _terms VALUES (?, ?, ?)",
+        [(t.code_system, t.source_code, t.event_kind) for t in pending],
+    )
+    rows = con.execute(
+        """
+        WITH src AS (
+            SELECT t.code_system, t.source_code, t.event_kind,
+                   CAST(c.concept_id AS BIGINT) AS source_concept_id,
+                   c.standard_concept, c.concept_name, c.domain_id, c.vocabulary_id
+            FROM _terms t
+            JOIN CONCEPT c
+              ON c.vocabulary_id = t.code_system
+             AND c.concept_code = t.source_code
+             AND (c.invalid_reason IS NULL OR c.invalid_reason = '')
+        )
+        SELECT s.code_system, s.source_code, s.event_kind,
+               CASE WHEN s.standard_concept = 'S' THEN s.source_concept_id
+                    ELSE CAST(m.concept_id AS BIGINT) END AS concept_id,
+               CASE WHEN s.standard_concept = 'S' THEN s.concept_name ELSE m.concept_name END,
+               CASE WHEN s.standard_concept = 'S' THEN s.domain_id ELSE m.domain_id END,
+               CASE WHEN s.standard_concept = 'S' THEN s.vocabulary_id ELSE m.vocabulary_id END,
+               s.source_concept_id,
+               s.standard_concept = 'S' AS was_already_standard
+        FROM src s
+        LEFT JOIN CONCEPT_RELATIONSHIP r
+               ON r.concept_id_1 = CAST(s.source_concept_id AS VARCHAR)
+              AND r.relationship_id = 'Maps to'
+              AND (r.invalid_reason IS NULL OR r.invalid_reason = '')
+        LEFT JOIN CONCEPT m
+               ON m.concept_id = r.concept_id_2 AND m.standard_concept = 'S'
+        WHERE s.standard_concept = 'S' OR m.concept_id IS NOT NULL
+        """
+    ).fetchall()
+    con.execute("DROP TABLE IF EXISTS _terms")
+
+    hits: dict[tuple[str, str], ConceptMatch] = {}
+    for code_system, source_code, event_kind, concept_id, name, domain, vocab, source_id, direct in rows:
+        if concept_id is None:
+            continue
+        expected = DOMAIN_FOR_KIND.get(event_kind or "")
+        if expected and domain != expected:
+            # Right code, wrong domain for the field it would land in. A question for a
+            # human, not something to force into a column.
+            continue
+        key = (code_system, normalize_term(source_code))
+        if key in hits:
+            continue
+        hits[key] = ConceptMatch(
+            concept_id=int(concept_id),
+            concept_name=name or "",
+            domain_id=domain or "",
+            vocabulary_id=vocab or "",
+            standard_concept="S",
+            source_concept_id=None if direct else int(source_id),
+            path="exact_code" if direct else "mapped_relationship",
+        )
+
+    resolved.update(hits)
+    unresolved = [t for t in pending if t.key not in hits]
+    return resolved, unresolved
+
+
 def resolve_terms(
     terms: Sequence[TermRequest], vocabulary, mappings: MappingRegistry
 ) -> tuple[dict[tuple[str, str], ConceptMatch], list[TermRequest]]:

@@ -37,7 +37,13 @@ from ehr2cdm.config import DatasetConfig
 from ehr2cdm.hashing import split_of
 from ehr2cdm.paths import WorkLayout, write_table_atomic
 from ehr2cdm.schema import EventKind, QualityFlag
-from ehr2cdm.terminology import MappingRegistry, TermRequest, Vocabulary, normalize_term, resolve_terms
+from ehr2cdm.terminology import (
+    MappingRegistry,
+    TermRequest,
+    Vocabulary,
+    normalize_term,
+    resolve_terms_batch,
+)
 from ehr2cdm.version import CODE_VERSION
 
 #: Required MEDS columns plus this project's extensions (design section 7.1).
@@ -172,7 +178,7 @@ def _build_term_map(con, vocabulary, mappings: MappingRegistry) -> tuple[int, in
     terms = [
         TermRequest(r[0] or "SOURCE", r[1], r[2], r[3] or "", int(r[4])) for r in rows
     ]
-    resolved, _unresolved = resolve_terms(terms, vocabulary, mappings)
+    resolved, _unresolved = resolve_terms_batch(terms, vocabulary, mappings)
     con.execute(
         "CREATE TABLE term_map (code_system VARCHAR, source_code VARCHAR, "
         "concept_id BIGINT, normalized VARCHAR)"
