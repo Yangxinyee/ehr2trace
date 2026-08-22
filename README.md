@@ -33,9 +33,9 @@ from a clean work root, with 30/30 validation checks passing:
 | Rows quarantined rather than guessed at | 637,665 |
 | Rows that carried no fact at all | 1,949 (0.0026%) |
 | Records dated after death, flagged and kept | 62,067 |
-| MEDS shards / distinct codes | 22,980 / 65,481 |
+| MEDS shards / distinct codes | 22,980 / 50,352 |
 | Distinct terms resolved by the vocabulary | 24,754 of 59,447 (41.6%) |
-| Distinct standard concepts actually used | 9,639 |
+| Distinct standard concepts actually used | 9,630 |
 | OMOP clinical rows published | 31,555,608 |
 
 Wall time on 48 cores: ingest 136s at 0.8 GB peak, canonical 424s at 32.5 GB peak.
@@ -192,7 +192,7 @@ worked around:
 
 | Blocker | Consequence |
 |---|---|
-| Source timezone undeclared | `--assume-timezone` required; every event flagged `TZ_ASSUMED` |
+| ~~Source timezone undeclared~~ | **Answered 2026-08-22**: US Eastern, recorded as `America/New_York` so daylight-saving transitions apply per timestamp. `TZ_ASSUMED` is gone from all 31.7M events |
 | ~~No reference date for `Age`~~ | **Answered 2026-08-22**: 2025-03-01, with an approval note. Every derived birth year is flagged `DERIVED_APPROXIMATE_BIRTH_YEAR`. Note the data ends 2024-07-08 and was exported 2024-09-19, both before that date — recorded in the config next to the policy |
 | Cohort label rule and episode binding undefined | The label stays provenance in the audit layer; it is not a clinical fact and not a training target |
 | ~~Batch relationship unconfirmed~~ | **Answered 2026-08-21**: one cohort exported twice, take the union — which is what the pipeline already did |
