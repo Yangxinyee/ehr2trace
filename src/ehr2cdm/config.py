@@ -274,6 +274,9 @@ class OwnerAnswers(BaseModel):
     batch_relationship: str | None = None
     #: whether the imaging reports behind the anchors are part of this delivery
     imaging_reports_included: bool | None = None
+    #: what exactly is and is not delivered where imaging is concerned -- a bare False
+    #: does not distinguish "no images" from "images exist but live somewhere else"
+    imaging_note: str | None = None
     #: provenance and version of the terminology download
     vocabulary_source: str | None = None
     #: free-form record of who answered what, kept in git next to the config

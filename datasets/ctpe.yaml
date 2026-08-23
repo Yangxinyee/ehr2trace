@@ -318,7 +318,15 @@ owner_answers:
   # and the same clinical fact appearing in both batches collapses to one event with
   # every source row still linked.
   batch_relationship: "one cohort exported twice; take the union of both extracts"
-  imaging_reports_included: null
+  # Partially answered 2026-08-22: the images exist, but are held elsewhere for size and
+  # are not part of this delivery. Whether the *radiology report text* exists is not yet
+  # known. That text is what would become NOTE events and what an anchor date currently
+  # stands in for, so the question stays open until someone checks.
+  imaging_reports_included: false
+  imaging_note: >-
+    Images exist off-site and are not delivered here. Report text unconfirmed. Nothing in
+    this extract contains a CT finding, so no imaging conclusion may be derived from an
+    anchor date or a partition name.
   vocabulary_source: null
   answered_by: null
   answered_on: null
