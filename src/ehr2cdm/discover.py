@@ -26,6 +26,9 @@ from ehr2cdm.version import CODE_VERSION
 
 TEXT_SUFFIXES = {".txt", ".tsv", ".csv"}
 WORKBOOK_SUFFIXES = {".xlsx", ".xlsm"}
+#: Columnar inputs. Reported as their own kind rather than as text: they carry a schema,
+#: so the byte-order-mark and line-ending questions asked of text files do not apply.
+COLUMNAR_SUFFIXES = {".parquet"}
 IGNORED_NAMES = {".DS_Store", "Thumbs.db"}
 
 
@@ -125,6 +128,9 @@ def scan_files(cfg: DatasetConfig, compute_hashes: bool = True, workers: int = 8
                 bom, ending = has_bom(path), sniff_line_ending(path)
             elif suffix in WORKBOOK_SUFFIXES:
                 kind, sheets = "workbook", list_sheets(path)
+                bom, ending = None, None
+            elif suffix in COLUMNAR_SUFFIXES:
+                kind, sheets = "columnar", []
                 bom, ending = None, None
             else:
                 continue
@@ -258,7 +264,12 @@ def collect_blockers(cfg: DatasetConfig, sources: list[SourceRecord]) -> list[Bl
         )
 
     policy = cfg.omop.person_birth_policy
-    if policy.mode == "strict" and not policy.age_as_of_date:
+    # An age reference date is only needed when the birth year has to be reconstructed
+    # from an age. A dataset that carries a real birth date needs no such question, and
+    # asking it anyway turns the best case -- strict mode, exact birth years -- into a
+    # blocker. MIMIC-IV supplies one; the reference export does not.
+    has_birth_date = any("birth_date" in src.fields for src in cfg.sources.values())
+    if policy.mode == "strict" and not policy.age_as_of_date and not has_birth_date:
         blockers.append(
             Blocker(
                 "AGE_REFERENCE_DATE_MISSING",
@@ -366,6 +377,7 @@ def inspect(cfg: DatasetConfig, compute_hashes: bool = True, workers: int = 8) -
         "physical_files": len(files),
         "text_files": sum(1 for f in files if f.kind == "text"),
         "workbooks": sum(1 for f in files if f.kind == "workbook"),
+        "columnar_files": sum(1 for f in files if f.kind == "columnar"),
         "logical_sources": logical_units,
         "logical_sources_text": text_units,
         "logical_sources_sheets": sheet_units,

@@ -7,6 +7,17 @@ name = "ehr2cdm"
 version = "0.3.1"
 description = "Deterministic local EHR (txt/xlsx) -> OMOP CDM 5.4 + MEDS converter with row-level lineage"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+readme = "README.md"
+authors = [{name = "Xinye Yang", email = "yangxinye2001@gmail.com"}]
+keywords = ["OMOP", "MEDS", "EHR", "provenance", "ETL", "clinical"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
 dependencies = [
     "polars>=1.0",
     "pyarrow>=17",

@@ -19,7 +19,7 @@ omop/              meds/
 ```
 
 Measured on the reference export (8 GB, 4 partitions, 25 files, 40 logical sources),
-from a clean work root, with 30/30 validation checks passing:
+from a clean work root, with 34/34 validation checks passing:
 
 | | |
 |---|---:|

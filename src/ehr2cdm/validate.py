@@ -355,6 +355,141 @@ def _anchor_not_event_time(l: Layers) -> CheckResult:
     )
 
 
+@check("CANONICAL_SCHEMA_AS_DECLARED")
+def _canonical_schema_as_declared(l: Layers) -> CheckResult:
+    """The canonical tables carry the declared columns and nothing else.
+
+    Added after fault injection found nothing firing when a physical bucketing key was
+    appended to the event table. Writing canonical output with hive partitioning had
+    once done exactly that: every table silently grew a column encoding how the data
+    was sharded, no check noticed, and a downstream consumer would have read a storage
+    detail as a clinical field. A unit test covered the writer; nothing covered the
+    artifact, which is what actually ships.
+    """
+    from ehr2cdm.schema import (
+        ANCHOR_SCHEMA,
+        CANONICAL_EVENT_SCHEMA,
+        COHORT_MEMBERSHIP_SCHEMA,
+        EVENT_SOURCE_SCHEMA,
+        QUARANTINE_SCHEMA,
+    )
+
+    declared = {
+        "events": CANONICAL_EVENT_SCHEMA,
+        "event_source": EVENT_SOURCE_SCHEMA,
+        "anchors": ANCHOR_SCHEMA,
+        "cohort_membership": COHORT_MEMBERSHIP_SCHEMA,
+        "quarantine": QUARANTINE_SCHEMA,
+    }
+    drift = []
+    checked = 0
+    for name, schema in declared.items():
+        path = l.layout.canonical_path(name)
+        if not path.exists():
+            continue
+        checked += 1
+        import pyarrow.parquet as pq
+
+        actual = list(pq.ParquetFile(path).schema_arrow.names)
+        expected = list(schema.names)
+        extra = [c for c in actual if c not in expected]
+        missing = [c for c in expected if c not in actual]
+        if extra or missing:
+            drift.append(f"{name}: extra={extra} missing={missing}")
+    if not checked:
+        return _skip("canonical layer not built")
+    return CheckResult(
+        "",
+        not drift,
+        f"{checked} canonical tables carry exactly their declared columns"
+        if not drift
+        else f"canonical schema drift: {drift}",
+        {"tables_checked": checked},
+    )
+
+
+@check("EVENT_SUBJECTS_WERE_ISSUED_BY_IDENTITY")
+def _event_subjects_issued(l: Layers) -> CheckResult:
+    """Every subject id in the canonical layer came from the identity map.
+
+    Added after fault injection: reassigning subject ids in the event table so that one
+    patient became several went undetected, because the identity check reads the
+    identity map and the map was still internally consistent. Nothing joined the two.
+    A patient split across partitions inflates the cohort and truncates every timeline,
+    and it is invisible to any check that only looks at one artifact at a time.
+    """
+    path = l.layout.identity_dir / "subject_map.parquet"
+    if not path.exists() or l.events is None:
+        return _skip("identity or events not built")
+    issued = set(pl.read_parquet(path)["subject_id"].to_list())
+    strays: dict[str, int] = {}
+    for name, frame in (("events", l.events), ("anchors", l.anchors), ("cohort_membership", l.memberships)):
+        if frame is None or frame.height == 0 or "subject_id" not in frame.columns:
+            continue
+        present = set(frame["subject_id"].drop_nulls().to_list())
+        unknown = present - issued
+        if unknown:
+            strays[name] = len(unknown)
+    return CheckResult(
+        "",
+        not strays,
+        f"every subject id in the canonical layer is one of the {len(issued):,} the identity map issued"
+        if not strays
+        else f"subject ids never issued by identity resolution: {strays}",
+        {"issued": len(issued), "strays": strays},
+    )
+
+
+@check("ANCHOR_TIMES_ARE_NOT_THE_EVENT_CLOCK")
+def _anchor_not_the_clock(l: Layers) -> CheckResult:
+    """No subject's event times collapse onto that subject's anchor times.
+
+    The structural check above reads the config and catches a source that wires an
+    anchor column to a time role. Fault injection showed that is not enough: a build
+    whose *data* already carries anchor dates as clinical times passes it untouched,
+    because the config it is derived from is innocent. This is the companion that looks
+    at what was actually written.
+
+    The signature is set containment, not a threshold. Events legitimately fall on an
+    anchor date -- that is why the anchor exists. What cannot happen is a subject with
+    many events across several sources whose every distinct timestamp is one of their
+    handful of anchor timestamps: at that point the anchor is the clock.
+    """
+    if l.events is None or l.anchors is None or l.anchors.height == 0:
+        return _skip("no anchors in this dataset")
+    #: Below this a subject's timeline is too short for containment to mean anything.
+    MIN_EVENTS = 8
+    anchors = (
+        l.anchors.select("subject_id", pl.col("anchor_date").cast(pl.Datetime("us")).alias("t"))
+        .drop_nulls()
+        .group_by("subject_id")
+        .agg(pl.col("t").unique().alias("anchor_times"))
+    )
+    events = (
+        l.events.select("subject_id", pl.col("event_time").alias("t"))
+        .drop_nulls()
+        .group_by("subject_id")
+        .agg(pl.col("t").unique().alias("event_times"), pl.len().alias("n_events"))
+        .filter(pl.col("n_events") >= MIN_EVENTS)
+    )
+    joined = events.join(anchors, on="subject_id", how="inner")
+    if joined.height == 0:
+        return _skip("no subject has both anchors and enough events")
+    collapsed = joined.filter(
+        pl.col("event_times").list.set_difference(pl.col("anchor_times")).list.len() == 0
+    )
+    return CheckResult(
+        "",
+        collapsed.height == 0,
+        f"{joined.height:,} subjects have both anchors and a timeline; none of them "
+        f"has event times drawn only from their anchors"
+        if collapsed.height == 0
+        else f"{collapsed.height:,} subjects have no event time that is not an anchor time: "
+        "the extraction anchor has been used as the clinical clock",
+        {"subjects_examined": joined.height, "collapsed": collapsed.height},
+    )
+
+
 @check("ANCHORS_ARE_NOT_EVENTS")
 def _anchors_not_events(l: Layers) -> CheckResult:
     if l.events is None or l.anchors is None or l.anchors.height == 0:
@@ -714,6 +849,80 @@ def _omop_primary_keys(l: Layers) -> CheckResult:
             "primary keys are unique in every table"
             if not duplicates
             else f"duplicate keys: {duplicates}",
+        )
+    finally:
+        con.close()
+
+
+@check("OMOP_BIRTH_YEAR_IS_REPRODUCIBLE")
+def _omop_birth_year_reproducible(l: Layers) -> CheckResult:
+    """Every published year_of_birth recomputes from the source age and the declared date.
+
+    Added after fault injection: shifting every birth year by seven years was detected
+    by nothing. The policy check below verifies that the right *policy* was applied and
+    that derived years were flagged -- it never compares the published number to the
+    number the source implies, so any systematic offset survives it. Age is a covariate
+    in effectively every clinical model built on this data, and an offset applied to
+    everyone is invisible to a distribution check as well.
+
+    This is a reproduction, not a heuristic: under an approved approximation the year is
+    year(age_as_of_date) - age by definition, so a mismatch is arithmetic, not judgement.
+
+    Getting from a person_id back to a subject_id goes through the lineage table, which
+    is the only thing that connects the two -- another reason every published row is
+    required to carry one.
+    """
+    con = _omop_connection(l)
+    if con is None:
+        return _skip("OMOP not built")
+    try:
+        policy = l.cfg.omop.person_birth_policy
+        if policy.mode != "approved_approximation" or not policy.age_as_of_date:
+            return _skip("no age-derived birth years to reproduce")
+        if l.events is None:
+            return _skip("canonical events unavailable")
+        reference_year = int(str(policy.age_as_of_date)[:4])
+
+        rows = con.execute(
+            """
+            SELECT p.person_id, p.year_of_birth, ln.event_id
+            FROM person p
+            JOIN etl_audit.lineage ln
+              ON ln.target_table = 'person' AND ln.target_pk = p.person_id
+            """
+        ).fetchall()
+        if not rows:
+            return _skip("no person rows carry lineage")
+        published = pl.DataFrame(
+            rows, schema=["person_id", "year_of_birth", "event_id"], orient="row"
+        ).unique()
+
+        ages = (
+            l.events.filter(pl.col("source_code") == "AGE")
+            .select("event_id", "subject_id", pl.col("value_number").alias("age"))
+            .drop_nulls("age")
+        )
+        if ages.height == 0:
+            return _skip("no source ages recorded in canonical events")
+
+        # Lineage links a person to every demographic event it was built from; only the
+        # age-bearing one can be reproduced against.
+        joined = published.join(ages, on="event_id", how="inner").unique(subset=["person_id"])
+        if joined.height == 0:
+            return _skip("no published person traces back to a recorded source age")
+
+        mismatched = joined.filter(
+            (pl.lit(reference_year) - pl.col("age").cast(pl.Int64)) != pl.col("year_of_birth")
+        )
+        return CheckResult(
+            "",
+            mismatched.height == 0,
+            f"{joined.height:,} birth years recompute exactly from the source age "
+            f"and the declared reference date {policy.age_as_of_date}"
+            if mismatched.height == 0
+            else f"{mismatched.height:,} of {joined.height:,} published birth years do not "
+            f"recompute from the source age and {policy.age_as_of_date}",
+            {"checked": joined.height, "mismatched": mismatched.height},
         )
     finally:
         con.close()

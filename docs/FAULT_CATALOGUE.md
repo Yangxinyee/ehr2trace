@@ -1,0 +1,105 @@
+# Fault catalogue
+
+Thirty-four checks passing on the pipeline that produced the data proves very little.
+The question a reader should ask is the other one: when a specific corruption is
+present, does anything fire?
+
+This file records the faults `ehr2cdm.faults` injects, and — for each — the incident it
+is drawn from. Every one of them happened while building this converter. That
+constraint matters: invented faults are the ones you already knew how to prevent, which
+is precisely why they make a detector suite look better than it is.
+
+Reproduce with:
+
+```bash
+python tools/run_fault_experiment.py --dataset datasets/ctpe_shape.yaml \
+  --built <work>/ctpe_shape --work /tmp/faultlab --out results/faults_fixture.json --slow
+```
+
+The experiment runs against `tests/fixtures/ctpe_shape/`, which contains no patient
+data, so the result is reproducible by anyone who clones the repository. Detector
+sensitivity is a property of the checks, not of the dataset's size.
+
+## Result
+
+| | faults detected |
+|---|---:|
+| Suite as it stood before the experiment (30 checks) | **13 / 17** |
+| Suite after the four checks the experiment motivated (34 checks) | **17 / 17** |
+
+Both numbers come from the identical harness; the "before" figure is measured by
+ignoring the four new check ids, not by checking out an older revision, so nothing else
+moves between the two rows.
+
+The honest caveat, stated up front: a detector written in response to a specific fault
+is guaranteed to catch that fault. 17/17 is not evidence that the suite is complete. The
+value of the experiment is in the first row — four corruptions that the suite was
+supposed to cover and did not — and in the four gaps being of a kind that recur.
+
+## What the four misses had in common
+
+Each miss was a check looking at the wrong artifact.
+
+| Miss | Why it was missed |
+|---|---|
+| `ANCHOR_USED_AS_EVENT_TIME` | `ANCHOR_NEVER_AN_EVENT_TIME` lints the *config*: it verifies no source wires an anchor column to a time role. A build whose *data* already carries anchor dates as clinical times passes it untouched, because the config it derives from is innocent. |
+| `PARTITION_COLUMN_LEAKED_INTO_CANONICAL` | A unit test covered the canonical *writer*. Nothing covered the canonical *artifact*, which is what actually ships. |
+| `IDENTITY_NOT_RESOLVED_ACROSS_PARTITIONS` | `IDENTITY_RESOLVED_ACROSS_PARTITIONS` reads the identity map and confirms it is internally consistent. Nothing joined the map to the events, so subject ids in the event table that the map never issued were invisible. |
+| `BIRTH_YEAR_INVENTED_UNDER_STRICT_POLICY` | `OMOP_BIRTH_POLICY_ENFORCED` verifies the right *policy* was applied and that derived years were flagged. It never compares the published number to the number the source implies, so a systematic offset applied to every patient survives it — and is invisible to a distribution check too. |
+
+The four checks added in response — `ANCHOR_TIMES_ARE_NOT_THE_EVENT_CLOCK`,
+`CANONICAL_SCHEMA_AS_DECLARED`, `EVENT_SUBJECTS_WERE_ISSUED_BY_IDENTITY`,
+`OMOP_BIRTH_YEAR_IS_REPRODUCIBLE` — are all of the same shape: check the artifact that
+ships, and check it against something derived independently of it.
+
+## The catalogue
+
+Every fault below is classed `silent`: it leaves row counts plausible, schemas valid,
+and a spot check on a handful of patients clean. That is the selection criterion. Loud
+failures are not interesting — they are caught by the pipeline crashing.
+
+### Canonical layer
+
+| Fault | Drawn from |
+|---|---|
+| `ANCHOR_USED_AS_EVENT_TIME` | The reference export repeats every ancillary result once per index study, carrying the study's date on each repeated row. Reading that column as the result's own time is the mistake the layout invites. |
+| `COHORT_LABEL_BECAME_A_DIAGNOSIS` | Partition directories named after the condition that defines the cohort. Turning that name into a condition row hands a model its own target back as a feature. |
+| `PARTITION_COLUMN_LEAKED_INTO_CANONICAL` | Writing canonical tables with hive partitioning silently appended a `bucket` column to every one of them. Nothing failed; the schema grew a field encoding how the data was sharded. |
+| `POST_DEATH_RECORDS_DELETED` | 62,067 records in the reference export are dated after the patient's death. Deleting them looks like cleaning and destroys the evidence of which of the two dates is wrong. |
+| `QUARANTINE_REASON_ERASED` | A globbing bug staged two ingest versions of every source, exactly doubling the quarantine. Nobody noticed, because events deduplicate by id and the headline counts still looked right. |
+| `LINEAGE_LINKS_DANGLE` | Rebuilding one layer without the other leaves links pointing at events that no longer exist, while the published tables still look complete. |
+| `IDENTITY_NOT_RESOLVED_ACROSS_PARTITIONS` | 6,784 patients appear in more than one partition. Hashing the partition into the subject key splits each into several people, inflating the cohort and truncating every timeline. |
+
+### OMOP layer
+
+| Fault | Drawn from |
+|---|---|
+| `WITHHELD_PATIENT_STILL_PUBLISHED` | The strict birth-year policy withheld patients from `PERSON` while every clinical builder went on publishing their rows: 31 million dangling references in a database that reported a successful build. |
+| `MEASUREMENT_DATE_FABRICATED` | 92,005 values in the reference export carry no time anywhere. Giving them the run date makes them look like measurements that happened. |
+| `PRIMARY_KEY_COLLISION` | A surrogate key derived from too short a hash prefix collides silently; the row count is right and one fact overwrites another downstream. |
+| `CONCEPT_PLACED_IN_THE_WRONG_DOMAIN` | 2,313 of the reference export's diagnosis codes map to standard concepts outside the Condition domain. Publishing them into `CONDITION_OCCURRENCE` anyway is what a mapping without a domain gate does. |
+| `BIRTH_YEAR_INVENTED_UNDER_STRICT_POLICY` | The export carries an age but no birth date and no as-of date. Filling `year_of_birth` from the run year is the permissive default, and it shifts every patient's age by the gap between extraction and run. |
+
+### MEDS layer
+
+| Fault | Drawn from |
+|---|---|
+| `COHORT_LABEL_LEAKED_INTO_MEDS_EVENTS` | The partition a patient came from is perfectly correlated with the label. A partition column in the event stream is a free answer key that arrives looking like ordinary provenance. |
+| `AVAILABILITY_PRECEDES_OCCURRENCE` | `available_time` is what stops a model reading a lab result before the lab reported it. Defaulting it to the event time — the obvious thing when a result time is missing — removes the protection while leaving the column populated and the schema valid. |
+| `SHARD_NOT_TIME_SORTED` | A shard whose rows are out of time order still validates against the MEDS schema. Every model that reads it as a sequence reads a shuffled history. |
+| `SUBJECT_IN_TWO_SPLITS` | Bucketing by anything that is not the subject key reintroduces the oldest leak there is. |
+| `CODE_METADATA_INCOMPLETE` | `codes.parquet` is the only description a downstream consumer gets of what a code means. Dropping entries leaves events referring to codes nothing documents. |
+
+## A note on the harness
+
+The first run of this experiment corrupted the build it was measuring. Work trees are
+cloned with hard links so that a clone costs nothing at full scale, which is safe for
+the parquet artifacts because every mutation writes a new file and renames it into
+place. It is not safe for a DuckDB file, which is opened read-write and modified in
+place: the OMOP faults reached through the clone and rewrote the original, and the
+corruption then leaked across subsequent faults and inflated their detector counts.
+
+`clone_work_tree` now copies database files and links everything else. The numbers
+above are from after that fix. The incident is recorded here because it is the same
+class of failure the catalogue is about — a sharing relationship that is invisible
+until something writes.

@@ -98,7 +98,8 @@ def inspect(
         typer.echo(f"data root      {report.data_root}")
         typer.echo(
             f"physical files {c['physical_files']}  "
-            f"({c['text_files']} text + {c['workbooks']} workbooks, {c['total_bytes'] / 1e9:.1f} GB)"
+            f"({c['text_files']} text + {c['workbooks']} workbooks"
+            f" + {c.get('columnar_files', 0)} columnar, {c['total_bytes'] / 1e9:.1f} GB)"
         )
         typer.echo(
             f"logical srcs   {c['logical_sources']}  "

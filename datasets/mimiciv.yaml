@@ -1,0 +1,455 @@
+# Dataset contract for MIMIC-IV v3.1 (hosp + ed + note).
+#
+# This file exists to answer a question a reader of the paper should ask: does the
+# converter work on anything other than the export it was written against? MIMIC-IV is
+# a good adversary for that. It is normalized where the reference export is flat, it
+# supplies a per-patient age anchor where the reference export supplied nothing, it has
+# no cohort partitions at all, and several of its tables carry no event time.
+#
+# The normalization is closed by `tools/prepare_mimiciv.py`, which performs projections
+# and lookup joins only and records a manifest of input and output hashes. Everything
+# downstream of that script is the ordinary pipeline with no MIMIC-specific code.
+#
+# MIMIC redistribution: the prepared parquet files derive from PhysioNet credentialed
+# data and must not be redistributed. This file is a recipe, not data.
+
+dataset_id: mimiciv
+root_env: MIMICIV_DATA_ROOT
+description: >-
+  MIMIC-IV v3.1 hospital and emergency modules plus v2.2 notes, denormalized into flat
+  per-source parquet by tools/prepare_mimiciv.py. 21 sources, 304,123,813 source rows.
+
+identity:
+  person_key: subject_id
+  encounter_key: hadm_id
+  subject_salt_env: EHR_SUBJECT_SALT
+
+time:
+  # MIMIC-IV timestamps are date-shifted per patient into the future, but the shift is
+  # a whole number of days applied consistently, so wall-clock time of day is real and
+  # the zone that produced it is the hospital's: BIDMC, Boston. Declaring it is what
+  # the converter requires; it is an assumption about the source system, and it is
+  # written here rather than defaulted anywhere in code.
+  timezone_assumption: America/New_York
+  naive_time_policy: block
+  formats:
+    - "%Y-%m-%d %H:%M:%S.%f"
+    - "%Y-%m-%d %H:%M:%S"
+    - "%Y-%m-%dT%H:%M:%S.%f"
+    - "%Y-%m-%dT%H:%M:%S"
+    - "%Y-%m-%d"
+  null_literals: ["", "NULL", "None"]
+
+partitions:
+  # One partition. MIMIC has no cohort structure, so there is no membership label and
+  # nothing for the label checks to find -- which is itself worth exercising.
+  - id: "mimiciv"
+    dir: "mimiciv"
+    membership_label: null
+    batch: "v3.1"
+
+sources:
+
+  # -- person ---------------------------------------------------------------------
+  patients:
+    adapter: parquet
+    file_glob: "patients.parquet"
+    shape: person_attributes
+    event_kind: demographic
+    required: true
+    # MIMIC supplies anchor_age together with anchor_year, so a birth year is derived
+    # exactly rather than approximated. Same code path as the reference export, with
+    # the ambiguity removed -- which is why this dataset runs under the strict policy.
+    fields:
+      person_id:    {from: [subject_id], required: true}
+      birth_date:   {from: [birth_date]}
+      age:          {from: [anchor_age]}
+      gender:       {from: [gender]}
+      vital_status: {from: [vital_status]}
+      death_time:   {from: [dod]}
+
+  # -- visits ---------------------------------------------------------------------
+  admissions:
+    adapter: parquet
+    file_glob: "admissions.parquet"
+    shape: visit
+    event_kind: visit
+    required: true
+    fields:
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [hadm_id]}
+      event_time:     {from: [admittime], required: true}
+      end_time:       {from: [dischtime]}
+      visit_type:     {from: [admission_type]}
+      length_of_stay: {from: [los_days]}
+      race:           {from: [race]}
+      death_time:     {from: [deathtime]}
+
+  transfers:
+    adapter: parquet
+    file_glob: "transfers.parquet"
+    shape: visit
+    event_kind: visit
+    required: false
+    fields:
+      person_id:    {from: [subject_id], required: true}
+      encounter_id: {from: [hadm_id]}
+      event_time:   {from: [intime], required: true}
+      end_time:     {from: [outtime]}
+      visit_type:   {from: [careunit]}
+
+  edstays:
+    adapter: parquet
+    file_glob: "edstays.parquet"
+    shape: visit
+    event_kind: visit
+    required: false
+    fields:
+      person_id:    {from: [subject_id], required: true}
+      encounter_id: {from: [hadm_id]}
+      event_time:   {from: [intime], required: true}
+      end_time:     {from: [outtime]}
+      visit_type:   {from: [disposition]}
+      race:         {from: [race]}
+
+  services:
+    adapter: parquet
+    file_glob: "services.parquet"
+    shape: point_event
+    event_kind: observation
+    code_system: SOURCE
+    required: false
+    fields:
+      person_id:    {from: [subject_id], required: true}
+      encounter_id: {from: [hadm_id]}
+      event_time:   {from: [transfertime], required: true}
+      source_code:  {from: [curr_service], required: true}
+      source_name:  {from: [curr_service]}
+
+  # -- conditions -----------------------------------------------------------------
+  # Two sources rather than one because code_system is a property of the source: an
+  # ICD-9 code and an ICD-10 code that spell the same are not the same code.
+  #
+  # These rows carry no time of their own. `hadm_dischtime` is used as the event time,
+  # and that is an assumption, stated here: a discharge diagnosis is recorded at or
+  # before discharge, never after. The alternative -- admittime -- would place a
+  # diagnosis before the evidence for it existed, which is the direction that leaks.
+  diagnoses_icd9:
+    adapter: parquet
+    file_glob: "diagnoses_icd9.parquet"
+    shape: point_event
+    event_kind: condition
+    code_system: ICD9CM
+    required: false
+    fields:
+      person_id:       {from: [subject_id], required: true}
+      encounter_id:    {from: [hadm_id]}
+      event_time:      {from: [hadm_dischtime], required: true}
+      available_time:  {from: [hadm_dischtime]}
+      source_code:     {from: [icd_code], required: true}
+      source_name:     {from: [long_title]}
+      sequence_number: {from: [seq_num]}
+
+  diagnoses_icd10:
+    adapter: parquet
+    file_glob: "diagnoses_icd10.parquet"
+    shape: point_event
+    event_kind: condition
+    code_system: ICD10CM
+    required: false
+    fields:
+      person_id:       {from: [subject_id], required: true}
+      encounter_id:    {from: [hadm_id]}
+      event_time:      {from: [hadm_dischtime], required: true}
+      available_time:  {from: [hadm_dischtime]}
+      source_code:     {from: [icd_code], required: true}
+      source_name:     {from: [long_title]}
+      sequence_number: {from: [seq_num]}
+
+  ed_diagnosis:
+    adapter: parquet
+    file_glob: "ed_diagnosis.parquet"
+    shape: point_event
+    event_kind: condition
+    code_system: SOURCE
+    required: false
+    fields:
+      person_id:       {from: [subject_id], required: true}
+      event_time:      {from: [stay_outtime], required: true}
+      source_code:     {from: [icd_code], required: true}
+      source_name:     {from: [icd_title]}
+      sequence_number: {from: [seq_num]}
+
+  # -- procedures -----------------------------------------------------------------
+  procedures_icd9:
+    adapter: parquet
+    file_glob: "procedures_icd9.parquet"
+    shape: point_event
+    event_kind: procedure
+    code_system: ICD9Proc
+    required: false
+    fields:
+      person_id:       {from: [subject_id], required: true}
+      encounter_id:    {from: [hadm_id]}
+      event_time:      {from: [chartdate], required: true}
+      source_code:     {from: [icd_code], required: true}
+      source_name:     {from: [long_title]}
+      sequence_number: {from: [seq_num]}
+
+  procedures_icd10:
+    adapter: parquet
+    file_glob: "procedures_icd10.parquet"
+    shape: point_event
+    event_kind: procedure
+    code_system: ICD10PCS
+    required: false
+    fields:
+      person_id:       {from: [subject_id], required: true}
+      encounter_id:    {from: [hadm_id]}
+      event_time:      {from: [chartdate], required: true}
+      source_code:     {from: [icd_code], required: true}
+      source_name:     {from: [long_title]}
+      sequence_number: {from: [seq_num]}
+
+  # -- measurements ---------------------------------------------------------------
+  labevents:
+    adapter: parquet
+    file_glob: "labevents.parquet"
+    shape: point_event
+    event_kind: measurement
+    code_system: SOURCE
+    value_expect: auto
+    required: true
+    # charttime is when the specimen was taken; storetime is when the result became
+    # visible. Keeping them apart is the whole point of available_time: without it a
+    # model reads a potassium result hours before the lab reported it.
+    fields:
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [hadm_id]}
+      event_time:     {from: [charttime], required: true}
+      available_time: {from: [storetime]}
+      source_code:    {from: [itemid], required: true}
+      source_name:    {from: [lab_name]}
+      value:          {from: [value]}
+      unit:           {from: [valueuom]}
+      value_low:      {from: [ref_range_lower]}
+      value_high:     {from: [ref_range_upper]}
+      status:         {from: [flag]}
+
+  microbiologyevents:
+    adapter: parquet
+    file_glob: "microbiologyevents.parquet"
+    shape: point_event
+    event_kind: measurement
+    code_system: SOURCE
+    value_expect: text
+    required: false
+    fields:
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [hadm_id]}
+      event_time:     {from: [charttime, chartdate], required: true}
+      available_time: {from: [storetime]}
+      source_code:    {from: [test_name], required: true}
+      source_name:    {from: [spec_type_desc]}
+      value:          {from: [interpretation]}
+
+  ed_vitalsign:
+    adapter: parquet
+    file_glob: "ed_vitalsign.parquet"
+    shape: component_measurements
+    event_kind: measurement
+    code_system: SOURCE
+    required: false
+    fields:
+      person_id:    {from: [subject_id], required: true}
+      encounter_id: {from: [stay_id]}
+      display_name: {from: [stay_id], required: true}
+      event_time:   {from: [charttime], required: true}
+    untimed_values: []
+
+  # omr carries a date and no time; triage carries neither. Both go down the untimed
+  # path -- quarantined with a reason rather than dated by guesswork.
+  omr:
+    adapter: parquet
+    file_glob: "omr.parquet"
+    shape: point_event
+    event_kind: measurement
+    code_system: SOURCE
+    required: false
+    fields:
+      person_id:       {from: [subject_id], required: true}
+      event_time:      {from: [chartdate], required: true}
+      source_code:     {from: [result_name], required: true}
+      source_name:     {from: [result_name]}
+      value:           {from: [result_value]}
+      sequence_number: {from: [seq_num]}
+
+  ed_triage:
+    adapter: parquet
+    file_glob: "ed_triage.parquet"
+    shape: person_attributes
+    event_kind: demographic
+    required: false
+    fields:
+      person_id: {from: [subject_id], required: true}
+    # A wide row of real vital signs with no time anywhere on it. The ED stay's intime
+    # is on the row and would be a plausible guess; guessing is exactly what the
+    # untimed path exists to prevent.
+    untimed_values:
+      - {column: temperature, code: ED_TRIAGE_TEMPERATURE, unit: "[degF]"}
+      - {column: heartrate,   code: ED_TRIAGE_HEARTRATE,   unit: "/min"}
+      - {column: resprate,    code: ED_TRIAGE_RESPRATE,    unit: "/min"}
+      - {column: o2sat,       code: ED_TRIAGE_O2SAT,       unit: "%"}
+      - {column: sbp,         code: ED_TRIAGE_SBP,         unit: "mm[Hg]"}
+      - {column: dbp,         code: ED_TRIAGE_DBP,         unit: "mm[Hg]"}
+      - {column: acuity,      code: ED_TRIAGE_ACUITY,      unit: null}
+
+  # -- medications ----------------------------------------------------------------
+  # Orders and administrations stay separate, as in the reference export: a prescribed
+  # drug and a given drug are different facts about a patient.
+  prescriptions:
+    adapter: parquet
+    file_glob: "prescriptions.parquet"
+    shape: point_event
+    event_kind: drug_order
+    code_system: SOURCE
+    required: false
+    fields:
+      person_id:    {from: [subject_id], required: true}
+      encounter_id: {from: [hadm_id]}
+      event_time:   {from: [starttime], required: true}
+      end_time:     {from: [stoptime]}
+      source_code:  {from: [drug], required: true}
+      source_name:  {from: [prod_strength]}
+      dose:         {from: [dose_val_rx]}
+      unit:         {from: [dose_unit_rx]}
+      route:        {from: [route]}
+
+  emar:
+    adapter: parquet
+    file_glob: "emar.parquet"
+    shape: point_event
+    event_kind: drug_admin
+    code_system: SOURCE
+    required: false
+    fields:
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [hadm_id]}
+      event_time:     {from: [charttime], required: true}
+      available_time: {from: [storetime]}
+      source_code:    {from: [medication], required: true}
+      source_name:    {from: [medication]}
+      status:         {from: [event_txt]}
+      sequence_number: {from: [emar_seq]}
+
+  ed_pyxis:
+    adapter: parquet
+    file_glob: "ed_pyxis.parquet"
+    shape: point_event
+    event_kind: drug_admin
+    code_system: SOURCE
+    required: false
+    fields:
+      person_id:   {from: [subject_id], required: true}
+      event_time:  {from: [charttime], required: true}
+      source_code: {from: [name], required: true}
+      source_name: {from: [name]}
+
+  poe:
+    adapter: parquet
+    file_glob: "poe.parquet"
+    shape: point_event
+    event_kind: drug_order
+    code_system: SOURCE
+    required: false
+    # Provider order entry covers every order type, not only drugs. The order type is
+    # the code; nothing here pretends to know which of them are medications.
+    fields:
+      person_id:       {from: [subject_id], required: true}
+      encounter_id:    {from: [hadm_id]}
+      event_time:      {from: [ordertime], required: true}
+      source_code:     {from: [order_type], required: true}
+      source_name:     {from: [order_subtype]}
+      status:          {from: [order_status]}
+      sequence_number: {from: [poe_seq]}
+
+  # -- notes ----------------------------------------------------------------------
+  # The text this export does have, and the reference export did not. One row is one
+  # whole note rather than one line, so these are point events carrying text.
+  note_radiology:
+    adapter: parquet
+    file_glob: "note_radiology.parquet"
+    shape: point_event
+    event_kind: note
+    code_system: SOURCE
+    value_expect: text
+    required: false
+    fields:
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [hadm_id]}
+      event_time:     {from: [charttime], required: true}
+      available_time: {from: [storetime]}
+      source_code:    {from: [note_type], required: true}
+      source_name:    {from: [note_type]}
+      text:           {from: [text]}
+      sequence_number: {from: [note_seq]}
+
+  note_discharge:
+    adapter: parquet
+    file_glob: "note_discharge.parquet"
+    shape: point_event
+    event_kind: note
+    code_system: SOURCE
+    value_expect: text
+    required: false
+    fields:
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [hadm_id]}
+      event_time:     {from: [charttime], required: true}
+      available_time: {from: [storetime]}
+      source_code:    {from: [note_type], required: true}
+      source_name:    {from: [note_type]}
+      text:           {from: [text]}
+      sequence_number: {from: [note_seq]}
+
+# No extraction anchors: MIMIC rows are not repeated per index study, so there is no
+# anchor column and nothing for the anchor checks to find.
+anchors: null
+
+# No cohort partitions, so no labels. The label checks report that they had nothing to
+# examine rather than passing vacuously.
+labels: []
+
+omop:
+  backend: duckdb
+  cdm_version: "5.4"
+  person_birth_policy:
+    # Strict, and it passes: MIMIC supplies anchor_age with the year it was current in,
+    # so year_of_birth is computed, not guessed. This is the same policy that blocks
+    # the reference export entirely.
+    mode: strict
+  observation_period_rule: "first_to_last_trustworthy_event_date/v1"
+  source_name: mimiciv
+  cdm_holder: "PhysioNet / MIT Laboratory for Computational Physiology"
+  source_release_date: "2024-10-11"
+
+meds:
+  splits: [["train", 0.8], ["tuning", 0.1], ["held_out", 0.1]]
+  split_salt: "mimiciv/meds-split/v1"
+  shard_size: 1
+  include_membership_label: false
+
+execution:
+  bucket_count: 64
+  workers: 16
+  chunk_rows: 200000
+
+owner_answers:
+  batch_relationship: "single extract, no batches"
+  imaging_reports_included: true
+  imaging_note: >-
+    Radiology report text is included (mimic-iv-note 2.2). The images themselves are a
+    separate PhysioNet resource and are not part of this conversion.
+  vocabulary_source: "Athena OMOP vocabulary v5.0 27-FEB-26"
+  answered_by: "PhysioNet published documentation"
+  answered_on: "2026-08-23"
