@@ -220,6 +220,52 @@ names for every role, no anchor concept at all — and it converts end to end th
 `datasets/generic_ehr.yaml`. A grep test forbids hospital-specific strings and hardcoded
 concept ids anywhere in `src/`.
 
+It is also tested against a real second dataset. `datasets/mimiciv.yaml` converts
+MIMIC-IV v3.1 (hosp + ed) and v2.2 notes — 21 sources, 304,123,813 source rows — with no
+MIMIC-specific conversion code. Because MIMIC is a normalized relational database and a
+hospital extract is not, `tools/prepare_mimiciv.py` denormalizes it first, using
+projections and lookup joins only, asserting that no join changes cardinality, and
+writing a manifest of input and output hashes so lineage is unbroken across that step.
+
+```bash
+python tools/prepare_mimiciv.py --mimic-root .../mimiciv/3.1 \
+  --ed-root .../mimic-iv-ed/2.2/ed --note-root .../mimic-iv-note/2.2/note \
+  --out $MIMICIV_DATA_ROOT/mimiciv
+MIMICIV_DATA_ROOT=... ehr2cdm inspect --dataset datasets/mimiciv.yaml
+```
+
+The prepared files derive from PhysioNet credentialed data and must not be
+redistributed. The YAML is a recipe, not data.
+
+Adding the second dataset found three defects that development against one dataset had
+not — a blocker that fired on the *best* case, a discovery path that could not see
+columnar inputs, and a validator that reported every check passed on a build whose
+canonical, OMOP and MEDS layers had all failed. See `docs/FAULT_CATALOGUE.md`.
+
+## Does the check suite detect anything?
+
+Thirty-four checks passing on the pipeline that produced the data is weak evidence. The
+other direction is measured: `src/ehr2cdm/faults.py` holds seventeen corruptions, each
+drawn from an incident that actually happened here, each silent by construction — row
+counts plausible, schemas valid, a spot check on a few patients clean.
+
+```bash
+python tools/run_fault_experiment.py --dataset datasets/ctpe_shape.yaml \
+  --built $EHR_WORK_ROOT/ctpe_shape --work /tmp/faultlab \
+  --out results/faults.json --slow
+```
+
+| | faults detected |
+|---|---:|
+| Suite before the experiment (30 checks) | **13 / 17** |
+| Suite after the four checks it motivated (34 checks) | **17 / 17** |
+
+The first row is the one that carries information, and `docs/FAULT_CATALOGUE.md` says
+why: a detector written in response to a fault is guaranteed to catch it. All four
+misses were the same shape — a check reading an artifact the fault did not touch. The
+experiment runs on the PHI-free fixture, so it reproduces from a clone, and it is a CI
+gate.
+
 ## Verifying the numbers in the design spec
 
 Section 2 of the design spec claims every input fact was measured. That claim is
