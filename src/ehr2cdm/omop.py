@@ -924,4 +924,8 @@ def _write_pending(layout: WorkLayout, unresolved: Sequence[TermRequest], vocabu
                 "context": f"domain={DOMAIN_FOR_KIND.get(term.event_kind) or ''}",
             }
         )
-    return write_pending(layout, items)
+    # This is the only caller holding the complete current unmapped set, so it is the
+    # only one allowed to retire what the vocabulary has since resolved. Without this
+    # the queue only ever grows: terms mapped by a later run stay listed forever and a
+    # reviewer works through items that no longer need reviewing.
+    return write_pending(layout, items, retire_absent=True)

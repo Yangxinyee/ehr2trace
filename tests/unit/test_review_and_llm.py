@@ -14,6 +14,7 @@ import pytest
 from ehr2cdm.llm import CandidateRanking, LlmCall, LlmClient, is_safe_sample, load_template
 from ehr2cdm.paths import WorkLayout
 from ehr2cdm.review import (
+    PENDING_FIELDS,
     compile_decisions,
     item_id,
     read_decisions,
@@ -53,6 +54,57 @@ def test_pending_ids_are_stable_across_reproposal(layout: WorkLayout):
     assert rows["I50.9"]["id"] == first
     assert rows["I50.9"]["occurrences"] == "99"
     assert len(rows) == 2
+
+
+def test_a_partial_reproposal_does_not_retire_the_rest_of_the_queue(layout: WorkLayout):
+    """`propose --limit` looks at a subset. The items it did not look at are not done."""
+    write_pending(layout, [proposal("I50.9"), proposal("E11.9"), proposal("J45.909")])
+    write_pending(layout, [proposal("I50.9")])  # a later, narrower propose run
+    assert len(read_pending(layout, open_only=True)) == 3
+
+
+def test_the_omop_build_retires_terms_the_vocabulary_has_since_mapped(layout: WorkLayout):
+    """The queue must shrink when a rerun maps a term, or reviewers work on dead items."""
+    write_pending(layout, [proposal("I50.9"), proposal("E11.9"), proposal("J45.909")])
+    # a rerun with a real vocabulary: only E11.9 is still unmapped
+    write_pending(layout, [proposal("E11.9")], retire_absent=True)
+
+    assert [r["source_string"] for r in read_pending(layout, open_only=True)] == ["E11.9"]
+    # nothing is deleted: ids stay stable and the history is still there
+    rows = {r["source_string"]: r for r in read_pending(layout)}
+    assert len(rows) == 3
+    assert rows["I50.9"]["status"] == "resolved"
+
+
+def test_a_retired_term_that_comes_back_unmapped_reopens(layout: WorkLayout):
+    """A vocabulary downgrade or a config change can un-resolve a term."""
+    write_pending(layout, [proposal("I50.9")])
+    write_pending(layout, [], retire_absent=True)
+    assert read_pending(layout, open_only=True) == []
+    write_pending(layout, [proposal("I50.9")], retire_absent=True)
+    assert [r["source_string"] for r in read_pending(layout, open_only=True)] == ["I50.9"]
+
+
+def test_a_queue_written_before_status_existed_reads_as_open(layout: WorkLayout):
+    """Old files have no status column; every row in them was awaiting review."""
+    path = layout.review_dir / "pending.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    legacy = [f for f in PENDING_FIELDS if f != "status"]
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=legacy)
+        writer.writeheader()
+        writer.writerow({**{k: "" for k in legacy}, "id": "deadbeefdeadbeef", "source_string": "I50.9"})
+
+    assert [r["status"] for r in read_pending(layout)] == ["open"]
+    assert len(read_pending(layout, open_only=True)) == 1
+
+
+def test_a_resolved_item_is_not_reported_as_undecided(layout: WorkLayout):
+    """Nobody needs to decide on a term the vocabulary already mapped."""
+    write_pending(layout, [proposal("I50.9"), proposal("E11.9")])
+    write_pending(layout, [proposal("E11.9")], retire_absent=True)
+    rows = {r["source_string"]: r["id"] for r in read_pending(layout)}
+    assert undecided_ids(layout) == {rows["E11.9"]}
 
 
 def test_item_id_ignores_case_and_spacing_but_not_the_string():

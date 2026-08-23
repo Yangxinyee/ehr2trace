@@ -13,6 +13,11 @@ answer "who approved this mapping, and when" for any published row.
 
 An item's id is a hash of what is being asked about, so re-proposing after new data
 arrives does not renumber decisions a human already made.
+
+The queue also has to shrink. A term the vocabulary maps on a later run no longer needs
+a reviewer, and leaving it listed turns the backlog into a number nobody trusts. Such an
+item is marked ``resolved`` rather than deleted -- ids stay stable, and what was asked
+stays traceable -- but it leaves the open queue.
 """
 
 from __future__ import annotations
@@ -39,7 +44,14 @@ PENDING_FIELDS = [
     "context",
     "proposed_by",
     "proposed_rationale",
+    #: 'open' = still unmapped and worth a reviewer's time; 'resolved' = a later run
+    #: mapped it without human help. Resolved rows stay in the file so that ids remain
+    #: stable and a decision made earlier can still be traced, but they leave the queue.
+    "status",
 ]
+
+OPEN = "open"
+RESOLVED = "resolved"
 
 DECISION_FIELDS = [
     "id",
@@ -71,20 +83,44 @@ def item_id(kind: str, code_system: str, source_string: str) -> str:
     return sha256_hex(f"{kind}|{code_system}|{normalize_term(source_string)}")[:16]
 
 
-def write_pending(layout: WorkLayout, items: Sequence[dict[str, Any]]) -> Path:
-    """Write or extend the pending queue, keeping already-listed items stable."""
+def write_pending(
+    layout: WorkLayout, items: Sequence[dict[str, Any]], *, retire_absent: bool = False
+) -> Path:
+    """Write or extend the pending queue, keeping already-listed items stable.
+
+    ``retire_absent`` is for the one caller that passes the *complete* current set of
+    unmapped terms -- the OMOP build. Anything already in the file and absent from that
+    set has since been mapped, so it is marked resolved and drops out of the queue.
+    Every other caller proposes a subset (``propose --limit``) and must leave the rest
+    alone, which is why this is opt-in rather than the default: retiring on a partial
+    set would silently empty the queue down to whatever the last ``propose`` looked at.
+
+    Nothing is ever deleted. Ids stay stable, and a decision a human already recorded
+    against a now-resolved item can still be traced back to what was asked.
+    """
     path = layout.review_dir / "pending.csv"
     path.parent.mkdir(parents=True, exist_ok=True)
     existing: dict[str, dict[str, Any]] = {}
     if path.exists():
         with open(path, newline="", encoding="utf-8") as fh:
             for row in csv.DictReader(fh):
+                # files written before 'status' existed carry no such column
+                row.setdefault("status", "")
                 existing[row["id"]] = row
 
+    seen: set[str] = set()
     for item in items:
         row = {k: item.get(k, "") for k in PENDING_FIELDS}
         row["id"] = item_id(item.get("kind", "terminology"), item.get("code_system", ""), item.get("source_string", ""))
+        row["status"] = OPEN
         existing[row["id"]] = row
+        seen.add(row["id"])
+
+    for key, row in existing.items():
+        if retire_absent and key not in seen:
+            row["status"] = RESOLVED
+        elif not row.get("status"):
+            row["status"] = OPEN
 
     tmp = path.with_suffix(".csv.partial")
     with open(tmp, "w", newline="", encoding="utf-8") as fh:
@@ -106,12 +142,18 @@ def _ensure_decisions(layout: WorkLayout) -> Path:
     return path
 
 
-def read_pending(layout: WorkLayout) -> list[dict[str, str]]:
+def read_pending(layout: WorkLayout, *, open_only: bool = False) -> list[dict[str, str]]:
+    """Every row in the queue, or only the ones still awaiting a reviewer.
+
+    A row written before ``status`` existed has no such column; it is read as open,
+    which is what it was.
+    """
     path = layout.review_dir / "pending.csv"
     if not path.exists():
         return []
     with open(path, newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
+        rows = [{**row, "status": row.get("status") or OPEN} for row in csv.DictReader(fh)]
+    return [r for r in rows if r["status"] == OPEN] if open_only else rows
 
 
 def read_decisions(layout: WorkLayout) -> dict[str, dict[str, str]]:
@@ -177,10 +219,11 @@ def compile_decisions(layout: WorkLayout, mappings_dir: Path) -> int:
 
 
 def undecided_ids(layout: WorkLayout) -> set[str]:
+    """Open items nobody has accepted. A resolved item needs no decision."""
     decisions = read_decisions(layout)
     return {
         row["id"]
-        for row in read_pending(layout)
+        for row in read_pending(layout, open_only=True)
         if decisions.get(row["id"], {}).get("decision", "").strip().lower() != "accept"
     }
 

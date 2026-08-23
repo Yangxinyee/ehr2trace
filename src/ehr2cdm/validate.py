@@ -1075,6 +1075,9 @@ def _undecided_not_published(l: Layers) -> CheckResult:
     pending = read_pending(l.layout)
     if not pending:
         return _skip("no review queue")
+    # Resolved rows are still checked -- one must not have acquired a mapping without a
+    # decision either -- but only open ones are a backlog worth reporting.
+    still_open = [r for r in pending if r["status"] == "open"]
     decisions = read_decisions(l.layout)
     registry = MappingRegistry.load(Path.cwd() / "mappings")
     leaked = []
@@ -1087,8 +1090,9 @@ def _undecided_not_published(l: Layers) -> CheckResult:
     return CheckResult(
         "",
         not leaked,
-        f"{len(pending):,} items pending review, none of them compiled into mappings"
+        f"{len(still_open):,} items pending review "
+        f"({len(pending) - len(still_open):,} since resolved), none compiled into mappings"
         if not leaked
         else f"undecided items reached mappings/: {leaked[:5]}",
-        {"pending": len(pending), "decided": len(decisions)},
+        {"pending": len(still_open), "resolved": len(pending) - len(still_open), "decided": len(decisions)},
     )

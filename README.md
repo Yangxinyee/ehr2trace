@@ -175,6 +175,12 @@ having no vocabulary at all — so they are worth catching up front.
 `mappings/` is the only thing that can turn a source string into a concept id, its only
 writer is `compile`, and `compile` only reads decisions a human accepted.
 
+The queue shrinks as well as grows. When a rerun maps a term without human help, the
+`omop` build marks that row `resolved` and it drops out of the open queue -- the row
+itself stays, so ids remain stable and an earlier decision is still traceable. Only
+`omop` may retire items, because it is the one caller that sees the complete unmapped
+set; `propose --limit` looks at a subset and must leave the rest alone.
+
 Add `--llm` to have a local model rank the recalled candidates. Whether that is worth
 doing is a measurement, not an opinion:
 
