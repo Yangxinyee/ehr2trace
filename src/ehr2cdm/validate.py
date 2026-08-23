@@ -656,19 +656,36 @@ def _identity(l: Layers) -> CheckResult:
 
 
 def _omop_connection(l: Layers):
+    """A connection to a *populated* OMOP database, or None.
+
+    An empty database is not a passing OMOP build. A partial run can leave the file
+    behind with its tables created and nothing in them, and every check that counts
+    violations then finds none and reports success -- "every clinical row resolves to
+    one of the 0 published persons" is true and worthless. Treating empty as absent
+    turns that whole class of vacuous pass into a skip, which is what it is.
+    """
     path = l.layout.omop_dir / "omop.duckdb"
     if not path.exists():
         return None
     import duckdb
 
-    return duckdb.connect(str(path), read_only=True)
+    con = duckdb.connect(str(path), read_only=True)
+    try:
+        populated = con.execute("SELECT count(*) FROM person").fetchone()[0]
+    except Exception:
+        con.close()
+        return None
+    if not populated:
+        con.close()
+        return None
+    return con
 
 
 @check("OMOP_EVERY_ROW_HAS_LINEAGE")
 def _omop_lineage(l: Layers) -> CheckResult:
     con = _omop_connection(l)
     if con is None:
-        return _skip("OMOP not built")
+        return _skip("OMOP not built or empty")
     try:
         tables = {
             "person": "person_id",
@@ -712,7 +729,7 @@ def _omop_lineage(l: Layers) -> CheckResult:
 def _omop_concepts(l: Layers) -> CheckResult:
     con = _omop_connection(l)
     if con is None:
-        return _skip("OMOP not built")
+        return _skip("OMOP not built or empty")
     try:
         from ehr2cdm.terminology import Vocabulary
 
@@ -780,7 +797,7 @@ def _omop_foreign_keys(l: Layers) -> CheckResult:
     """
     con = _omop_connection(l)
     if con is None:
-        return _skip("OMOP not built")
+        return _skip("OMOP not built or empty")
     try:
         dangling: dict[str, int] = {}
         for table in (
@@ -824,7 +841,7 @@ def _omop_foreign_keys(l: Layers) -> CheckResult:
 def _omop_primary_keys(l: Layers) -> CheckResult:
     con = _omop_connection(l)
     if con is None:
-        return _skip("OMOP not built")
+        return _skip("OMOP not built or empty")
     try:
         duplicates: dict[str, int] = {}
         for table, pk in (
@@ -874,7 +891,7 @@ def _omop_birth_year_reproducible(l: Layers) -> CheckResult:
     """
     con = _omop_connection(l)
     if con is None:
-        return _skip("OMOP not built")
+        return _skip("OMOP not built or empty")
     try:
         policy = l.cfg.omop.person_birth_policy
         if policy.mode != "approved_approximation" or not policy.age_as_of_date:
@@ -932,7 +949,7 @@ def _omop_birth_year_reproducible(l: Layers) -> CheckResult:
 def _omop_birth_policy(l: Layers) -> CheckResult:
     con = _omop_connection(l)
     if con is None:
-        return _skip("OMOP not built")
+        return _skip("OMOP not built or empty")
     try:
         policy = l.cfg.omop.person_birth_policy
         people = con.execute("SELECT count(*) FROM person").fetchone()[0]

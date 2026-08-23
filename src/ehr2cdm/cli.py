@@ -335,13 +335,26 @@ def validate(
     layout = _layout(cfg)
     results = run_checks(cfg, layout, include_slow=all_checks)
     failed = [r for r in results if not r.passed]
+    skipped = [r for r in results if r.skipped]
+    passed = [r for r in results if r.passed and not r.skipped]
     if as_json:
         _echo_json([r.__dict__ for r in results])
     else:
         for r in results:
-            mark = "PASS" if r.passed else "FAIL"
+            mark = "SKIP" if r.skipped else ("PASS" if r.passed else "FAIL")
             typer.echo(f"  [{mark}] {r.check_id}: {r.detail}")
-        typer.echo(f"\n{len(results) - len(failed)}/{len(results)} checks passed")
+        # A skipped check is not a passed check. Counting the two together once
+        # reported a full house on a run whose canonical, OMOP and MEDS layers had all
+        # failed to build -- the single most misleading thing this tool has ever said.
+        typer.echo(
+            f"\n{len(passed)} passed, {len(skipped)} skipped, {len(failed)} failed"
+            f"  ({len(results)} checks)"
+        )
+        if skipped:
+            typer.echo(
+                f"  {len(skipped)} check(s) had nothing to examine. A layer that was not "
+                "built is not a layer that passed."
+            )
     raise typer.Exit(code=1 if failed else 0)
 
 

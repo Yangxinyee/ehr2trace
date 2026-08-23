@@ -113,18 +113,20 @@ sources:
       race:         {from: [race]}
 
   services:
+    # A service transfer is a change of care context, which is what visit_occurrence
+    # records. `observation` would be the closer OMOP domain, but the canonical event
+    # kinds are a closed set with a publisher behind each one, and inventing a kind for
+    # this would mean an OMOP table nothing writes to.
     adapter: parquet
     file_glob: "services.parquet"
-    shape: point_event
-    event_kind: observation
-    code_system: SOURCE
+    shape: visit
+    event_kind: visit
     required: false
     fields:
       person_id:    {from: [subject_id], required: true}
       encounter_id: {from: [hadm_id]}
       event_time:   {from: [transfertime], required: true}
-      source_code:  {from: [curr_service], required: true}
-      source_name:  {from: [curr_service]}
+      visit_type:   {from: [curr_service]}
 
   # -- conditions -----------------------------------------------------------------
   # Two sources rather than one because code_system is a property of the source: an
