@@ -72,8 +72,18 @@ class StageTask:
 
     @property
     def digest(self) -> str:
+        # bucket_count is no longer inside config_hash -- it says how to split the work,
+        # not what to produce. It still belongs here: it decides which subject lands in
+        # which bucket file, so a run resumed under a different partitioning must not
+        # reuse these outputs.
         return task_hash(
-            "stage", CODE_VERSION, self.config_hash, self.partition_id, self.source_id, *sorted(self.inputs)
+            "stage",
+            CODE_VERSION,
+            self.config_hash,
+            self.partition_id,
+            self.source_id,
+            self.bucket_count,
+            *sorted(self.inputs),
         )
 
 
@@ -216,10 +226,13 @@ class CanonicalTask:
     config_hash: str
     timezone_name: str | None
     timezone_assumed: bool
+    bucket_count: int
     mapping_version: str = DEFAULT_MAPPING_VERSION
 
     @property
     def digest(self) -> str:
+        # `bucket` alone is not enough to identify this unit of work: bucket 5 of 64 and
+        # bucket 5 of 256 hold different subjects and would otherwise share an address.
         return task_hash(
             "canonical",
             CODE_VERSION,
@@ -228,6 +241,7 @@ class CanonicalTask:
             self.mapping_version,
             self.timezone_name or "",
             self.timezone_assumed,
+            self.bucket_count,
             self.bucket,
         )
 
@@ -257,6 +271,7 @@ def plan_canonical(cfg: DatasetConfig, layout: WorkLayout, config_path: Path, tz
             config_hash=cfg.config_hash(),
             timezone_name=tz,
             timezone_assumed=tz_assumed,
+            bucket_count=cfg.execution.bucket_count,
         )
         for b in buckets
     ]

@@ -442,8 +442,12 @@ meds:
   include_membership_label: false
 
 execution:
+  # 4, not 16: canonical construction holds one subject bucket per worker in memory and
+  # this dataset's buckets are large enough that sixteen of them were OOM-killed. These
+  # settings are outside the content address, so changing them costs nothing already
+  # built.
   bucket_count: 64
-  workers: 16
+  workers: 4
   chunk_rows: 200000
 
 owner_answers:

@@ -18,7 +18,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -364,9 +364,23 @@ class DatasetConfig(BaseModel):
     def subject_salt(self) -> str:
         return os.environ.get(self.identity.subject_salt_env, "")
 
+    #: Settings that say *how* to run, never *what* to produce. They are excluded from
+    #: the content address because merging is order-independent by construction, so no
+    #: combination of them can change a produced byte -- and including them meant that
+    #: lowering the worker count to survive an out-of-memory kill invalidated a
+    #: fifty-three-minute ingest whose output would have been identical either way.
+    #:
+    #: ``bucket_count`` is the subtle one. It cannot change the merged canonical layer,
+    #: but it does decide which subject lands in which bucket file, so it must still
+    #: enter the per-task digests -- otherwise a resumed run would happily reuse a
+    #: bucket computed under a different partitioning. See ``StageTask.digest``.
+    OPERATIONAL_FIELDS: ClassVar[tuple[str, ...]] = ("execution",)
+
     def canonical_json(self) -> str:
         """Config content in a stable textual form; the basis of ``config_hash``."""
         payload = self.model_dump(mode="json", by_alias=True)
+        for field_name in self.OPERATIONAL_FIELDS:
+            payload.pop(field_name, None)
         return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
     def config_hash(self) -> str:
