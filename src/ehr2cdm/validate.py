@@ -914,8 +914,15 @@ def _omop_birth_year_reproducible(l: Layers) -> CheckResult:
             rows, schema=["person_id", "year_of_birth", "event_id"], orient="row"
         ).unique()
 
+        # Only persons whose year was actually derived from an age. One with a recorded
+        # date of birth is not reproducible from a reference year and must not be
+        # compared against one.
+        with_dates = set(
+            l.events.filter(pl.col("source_code") == "BIRTH_DATE")["subject_id"].to_list()
+        )
         ages = (
             l.events.filter(pl.col("source_code") == "AGE")
+            .filter(~pl.col("subject_id").is_in(list(with_dates)) if with_dates else pl.lit(True))
             .select("event_id", "subject_id", pl.col("value_number").alias("age"))
             .drop_nulls("age")
         )

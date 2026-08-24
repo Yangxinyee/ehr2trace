@@ -376,7 +376,9 @@ def _publish_person(con, cfg: DatasetConfig) -> int:
                min(CASE WHEN upper(e.source_code) = 'RACE' THEN e.value_text END) AS race_source_value,
                min(CASE WHEN upper(e.source_code) = 'ETHNICITY' THEN e.value_text END) AS ethnicity_source_value,
                min(CASE WHEN upper(e.source_code) = 'AGE' THEN e.value_number END) AS age,
-               count(DISTINCT CASE WHEN upper(e.source_code) = 'AGE' THEN e.value_number END) AS age_variants
+               count(DISTINCT CASE WHEN upper(e.source_code) = 'AGE' THEN e.value_number END) AS age_variants,
+               min(CASE WHEN upper(e.source_code) = 'BIRTH_DATE' THEN e.value_text END) AS birth_date,
+               count(DISTINCT CASE WHEN upper(e.source_code) = 'BIRTH_DATE' THEN e.value_text END) AS birth_date_variants
         FROM evt e
         WHERE e.event_kind = 'demographic'
         GROUP BY e.subject_id
@@ -391,14 +393,29 @@ def _publish_person(con, cfg: DatasetConfig) -> int:
         """
     )
 
+    # A real date of birth is a fact and needs no policy. Where the source carries one,
+    # it is used under either mode -- including strict, which exists to publish when the
+    # data supports it and refuse when it does not, not to refuse unconditionally. This
+    # was wrong until a dataset that supplies one arrived: `birth_date` was a declared
+    # field role that nothing read, so a patient with a recorded date of birth was
+    # withheld exactly like one with nothing at all.
+    from_date = "CAST(year(CAST(a.birth_date AS DATE)) AS INTEGER)"
+    has_date = "a.birth_date IS NOT NULL AND a.birth_date_variants = 1"
+
     if policy.mode == "approved_approximation":
         reference_year = datetime.strptime(policy.age_as_of_date, "%Y-%m-%d").year
-        birth_expr = f"CAST({reference_year} - a.age AS INTEGER)"
-        eligible = "a.age IS NOT NULL AND a.age_variants = 1"
+        # The date wins where both exist: an age plus a reference year is an
+        # approximation of what the date states outright.
+        birth_expr = (
+            f"CASE WHEN {has_date} THEN {from_date} "
+            f"ELSE CAST({reference_year} - a.age AS INTEGER) END"
+        )
+        eligible = f"{has_date} OR (a.age IS NOT NULL AND a.age_variants = 1)"
     else:
-        # Strict: nothing in this export can produce a defensible year of birth.
-        birth_expr = "CAST(NULL AS INTEGER)"
-        eligible = "false"
+        # Strict: a recorded birth date, or nothing. An age alone cannot produce a
+        # defensible year of birth without a reference date, and there is none.
+        birth_expr = f"CASE WHEN {has_date} THEN {from_date} ELSE CAST(NULL AS INTEGER) END"
+        eligible = has_date
 
     con.execute(
         f"""
@@ -444,13 +461,19 @@ def _publish_person(con, cfg: DatasetConfig) -> int:
     )
     published = _count(con, "person")
     if policy.mode == "approved_approximation":
+        # Only the years actually estimated from an age. A patient whose record carries
+        # a real date of birth is not an approximation, and flagging them as one would
+        # misreport the very thing the flag exists to make visible.
         con.execute(
-            """
+            f"""
             INSERT INTO etl_audit.quality_issue
             SELECT 'DERIVED_APPROXIMATE_BIRTH_YEAR', 'warning', 'omop', p.subject_id, NULL, NULL,
                    NULL, NULL,
                    'year_of_birth estimated from an age with no birthday known; may be off by one year'
-            FROM person s JOIN pmap p ON p.person_id = s.person_id
+            FROM person s
+            JOIN pmap p ON p.person_id = s.person_id
+            JOIN person_attrs a ON a.subject_id = p.subject_id
+            WHERE NOT ({has_date})
             """
         )
     total = int(con.execute("SELECT count(*) FROM person_attrs").fetchone()[0])

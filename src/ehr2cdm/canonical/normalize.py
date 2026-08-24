@@ -626,6 +626,7 @@ def shape_person_attributes(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
                 )
                 out.link(event_id, row)
 
+        out.extend(_emit_birth_date(ctx, row))
         out.extend(_emit_death(ctx, row))
         out.extend(_emit_untimed(ctx, row))
     return out
@@ -698,6 +699,58 @@ def shape_visit(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
 # --------------------------------------------------------------------------------
 # shared emitters
 # --------------------------------------------------------------------------------
+
+
+def _emit_birth_date(ctx: ShapeContext, row: Row) -> Emission:
+    """A birth date, when the row carries one.
+
+    ``birth_date`` was a declared field role that nothing consumed: a dataset supplying
+    a real date of birth was treated exactly like one supplying nothing, and the strict
+    birth policy withheld every patient from PERSON. That is the opposite of what strict
+    mode is for -- it exists to publish when the data supports it and refuse when it
+    does not, and here the data supported it.
+
+    The date is stored as text rather than a time, because a birth date is an attribute
+    of a person and not something that happened during their record. It carries no
+    event time for the same reason.
+    """
+    out = Emission()
+    raw = row.raw("birth_date")
+    if raw is None:
+        return out
+    try:
+        naive = parse_naive(raw, ctx.time)
+    except QuarantineRow as q:
+        out.quarantine_row(row, q.issue, q.detail, ctx.source_id)
+        return out
+    if naive is None:
+        return out
+    iso = naive.date().isoformat()
+    event_id = event_identity(
+        ctx,
+        subject_id=row.subject_id,
+        event_kind=str(EventKind.demographic),
+        code_system=ctx.spec.code_system,
+        source_code="BIRTH_DATE",
+        event_time=None,
+        encounter_id=None,
+        value=None,
+    )
+    out.events.append(
+        make_event(
+            ctx,
+            row,
+            event_id=event_id,
+            event_kind=str(EventKind.demographic),
+            event_time=None,
+            code_system=ctx.spec.code_system,
+            source_code="BIRTH_DATE",
+            source_name="birth date",
+            value_text=iso,
+        )
+    )
+    out.link(event_id, row)
+    return out
 
 
 def _emit_death(ctx: ShapeContext, row: Row) -> Emission:

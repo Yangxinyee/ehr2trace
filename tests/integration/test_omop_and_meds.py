@@ -330,3 +330,124 @@ def test_all_checks_pass_on_the_published_output(published):
     failed = [r for r in results if not r.passed]
     assert not failed, [f"{r.check_id}: {r.detail}" for r in failed]
     assert len(results) >= 20
+
+
+# -- a recorded date of birth is a fact, not a policy question ---------------------
+
+
+def _with_birth_dates(cfg, layout, tmp_path, dates: dict[int, str]):
+    """Add a BIRTH_DATE demographic event for the given subjects and rebuild OMOP.
+
+    Injected at the canonical layer rather than in the fixture files so the test states
+    exactly one thing: what the OMOP person builder does when a birth date is present.
+    """
+    import polars as pl
+
+    from ehr2cdm.paths import WorkLayout
+
+    scratch = tmp_path / "birthdates"
+    from ehr2cdm.faults import clone_work_tree
+
+    clone_work_tree(layout.root, scratch)
+    target = WorkLayout(root=scratch, dataset_id=cfg.dataset_id)
+
+    path = target.canonical_path("events")
+    events = pl.read_parquet(path)
+    template = events.filter(pl.col("event_kind") == "demographic").head(1).to_dicts()[0]
+    rows = []
+    for i, (subject_id, iso) in enumerate(dates.items()):
+        row = dict(template)
+        row.update(
+            {
+                "event_id": f"birthdate-{i}",
+                "subject_id": subject_id,
+                "event_kind": "demographic",
+                "source_code": "BIRTH_DATE",
+                "source_name": "birth date",
+                "value_text": iso,
+                "value_number": None,
+                "event_time": None,
+            }
+        )
+        rows.append(row)
+    merged = pl.concat([events, pl.DataFrame(rows, schema=events.schema)])
+    tmp = path.with_suffix(".parquet.mutating")
+    merged.write_parquet(tmp)
+    tmp.replace(path)
+    return target
+
+
+def test_strict_mode_publishes_a_patient_who_has_a_recorded_birth_date(published, tmp_path):
+    """Strict withholds for lack of a derivable year, not on principle.
+
+    `birth_date` was a declared field role that nothing consumed, so a dataset carrying
+    real dates of birth was treated exactly like one carrying none and strict mode
+    withheld every patient. That is the opposite of what the gate is for.
+    """
+    import duckdb
+
+    layout, _o, _m = published
+    cfg = load_dataset_config(CONFIG)
+    subjects = duckdb.connect(str(layout.omop_dir / "omop.duckdb"), read_only=True)
+    known = [r[0] for r in subjects.execute("SELECT subject_id FROM pmap LIMIT 2").fetchall()] \
+        if _has_pmap(subjects) else []
+    subjects.close()
+    if not known:
+        import polars as pl
+
+        known = pl.read_parquet(layout.canonical_path("events"))["subject_id"].unique().to_list()[:2]
+
+    target = _with_birth_dates(cfg, layout, tmp_path, {known[0]: "1961-04-02", known[1]: "1948-11-19"})
+    strict = cfg.model_copy(
+        update={"omop": cfg.omop.model_copy(update={"person_birth_policy": type(cfg.omop.person_birth_policy)()})}
+    )
+    result = build_omop(strict, target, vocabulary_dir=None)
+
+    assert result["tables"]["person"] == 2, "strict withheld patients who have a birth date"
+    c = duckdb.connect(str(target.omop_dir / "omop.duckdb"), read_only=True)
+    try:
+        years = sorted(r[0] for r in c.execute("SELECT year_of_birth FROM person").fetchall())
+        approximated = c.execute(
+            "SELECT count(*) FROM etl_audit.quality_issue "
+            "WHERE issue_type = 'DERIVED_APPROXIMATE_BIRTH_YEAR'"
+        ).fetchone()[0]
+    finally:
+        c.close()
+    assert years == [1948, 1961]
+    assert approximated == 0, "a recorded birth date is not an approximation"
+
+
+def test_a_recorded_birth_date_beats_an_age_under_the_approximation_policy(published, tmp_path):
+    """An age plus a reference year approximates what the date says outright."""
+    import duckdb
+    import polars as pl
+
+    layout, _o, _m = published
+    cfg = load_dataset_config(CONFIG)
+    subject = pl.read_parquet(layout.canonical_path("events"))["subject_id"].unique().to_list()[0]
+
+    target = _with_birth_dates(cfg, layout, tmp_path, {subject: "1955-06-30"})
+    build_omop(cfg, target, vocabulary_dir=None)
+
+    c = duckdb.connect(str(target.omop_dir / "omop.duckdb"), read_only=True)
+    try:
+        year = c.execute(
+            "SELECT s.year_of_birth FROM person s JOIN pmap p ON p.person_id = s.person_id "
+            "WHERE p.subject_id = ?", [subject]
+        ).fetchone()
+        flagged = c.execute(
+            "SELECT count(*) FROM etl_audit.quality_issue q JOIN pmap p ON p.subject_id = q.subject_id "
+            "WHERE q.issue_type = 'DERIVED_APPROXIMATE_BIRTH_YEAR' AND q.subject_id = ?", [subject]
+        ).fetchone()[0]
+    finally:
+        c.close()
+    assert year is not None and year[0] == 1955
+    assert flagged == 0, "the year came from a date, so it must not be flagged as estimated"
+
+
+def _has_pmap(con) -> bool:
+    try:
+        con.execute("SELECT 1 FROM pmap LIMIT 1").fetchone()
+        return True
+    except Exception:
+        return False
