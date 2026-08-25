@@ -39,6 +39,12 @@ from ehr2cdm.terminology import Candidate
 PROMPT_DIR = Path(__file__).resolve().parents[2] / "prompts"
 MAX_RETRIES = 2
 
+#: Room for one ranked candidate: an id, a rank and a short rationale.
+TOKENS_PER_CANDIDATE = 48
+#: Ceiling, so a pathological candidate list cannot turn one call into a minute of
+#: generation.
+MAX_RANKING_TOKENS = 4096
+
 #: Patterns that must never leave the machine inside a sample value. Conservative on
 #: purpose: a sample that trips any of these is dropped rather than redacted, because
 #: a partial redaction still leaks the shape of an identifier.
@@ -298,8 +304,15 @@ class LlmClient:
             "required": ["ranking", "rationale"],
             "additionalProperties": False,
         }
+        # The reply has to carry one object per candidate, each with a required
+        # rationale, so a fixed budget silently truncates as soon as the candidate list
+        # grows. At eight candidates 768 tokens was ample and every call succeeded; at
+        # thirty-two it cut the JSON mid-object, and 265 of 300 calls failed validation,
+        # retried, truncated again and were recorded as the model declining to answer.
+        budget = min(MAX_RANKING_TOKENS, 256 + TOKENS_PER_CANDIDATE * max(1, len(candidates)))
         result = self._ask(
-            "terminology_ranking", json.dumps(payload, sort_keys=True), schema, CandidateRanking, max_tokens=768
+            "terminology_ranking", json.dumps(payload, sort_keys=True), schema, CandidateRanking,
+            max_tokens=budget
         )
         if result is None:
             return None

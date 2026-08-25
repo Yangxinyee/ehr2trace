@@ -411,3 +411,32 @@ def test_the_retry_shows_the_model_what_it_actually_said(monkeypatch):
     assert assistant and assistant[0]["content"] == _FailThenSucceed.BAD, (
         "the invalid reply was not sent back"
     )
+
+
+def test_the_ranking_token_budget_grows_with_the_candidate_list(monkeypatch):
+    """A fixed budget truncates the reply as soon as the list gets long.
+
+    The schema requires one object per candidate, each with a rationale. At eight
+    candidates a flat 768 tokens was ample and every call succeeded; at thirty-two it
+    cut the JSON mid-object and 265 of 300 calls were recorded as the model declining
+    to answer, when in fact it had never been given room to finish.
+    """
+    client = LlmClient(base_url="http://127.0.0.1:8000/v1", model="m")
+    seen: list[int] = []
+
+    def fake_post(messages, schema, name, max_tokens=512):
+        seen.append(max_tokens)
+        return {"ranking": [{"concept_id": 1, "rank": 1, "rationale": "x"}], "rationale": "x"}
+
+    monkeypatch.setattr(client, "_post", fake_post)
+
+    def candidates(n: int):
+        return [Candidate(concept_id=i + 1, concept_name=f"c{i}", domain_id="Condition",
+                          vocabulary_id="SNOMED", score=1.0) for i in range(n)]
+
+    client.rank_candidates("chest pain", "Condition", candidates(8))
+    client.rank_candidates("chest pain", "Condition", candidates(32))
+
+    assert seen[1] > seen[0], "the budget did not grow with the candidate list"
+    # Enough for one object per candidate, or the reply cannot be complete.
+    assert seen[1] >= 32 * 40
