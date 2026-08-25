@@ -221,8 +221,22 @@ names for every role, no anchor concept at all — and it converts end to end th
 concept ids anywhere in `src/`.
 
 It is also tested against a real second dataset. `datasets/mimiciv.yaml` converts
-MIMIC-IV v3.1 (hosp + ed) and v2.2 notes — 21 sources, 304,123,813 source rows — with no
-MIMIC-specific conversion code. Because MIMIC is a normalized relational database and a
+MIMIC-IV v3.1 (hosp + ed) and v2.2 notes with no MIMIC-specific conversion code:
+
+| | |
+|---|---:|
+| Source rows | 304,123,813 |
+| Canonical events | 296,595,466 |
+| Event ↔ source-row links | 301,135,325 |
+| Subjects | 364,673 |
+| Persons published to OMOP | 364,627 |
+| MEDS shards | 364,673 |
+| Rows quarantined rather than guessed at | 6,557,159 |
+| Validation | 30 passed, 5 skipped, 0 failed |
+
+The five skips are honest ones: MIMIC has no extraction anchors and no cohort
+partitions, so four checks have nothing to examine, and its birth years come from the
+data rather than from an age, so the fifth has nothing to recompute. Because MIMIC is a normalized relational database and a
 hospital extract is not, `tools/prepare_mimiciv.py` denormalizes it first, using
 projections and lookup joins only, asserting that no join changes cardinality, and
 writing a manifest of input and output hashes so lineage is unbroken across that step.
@@ -237,10 +251,32 @@ MIMICIV_DATA_ROOT=... ehr2cdm inspect --dataset datasets/mimiciv.yaml
 The prepared files derive from PhysioNet credentialed data and must not be
 redistributed. The YAML is a recipe, not data.
 
-Adding the second dataset found three defects that development against one dataset had
-not — a blocker that fired on the *best* case, a discovery path that could not see
-columnar inputs, and a validator that reported every check passed on a build whose
-canonical, OMOP and MEDS layers had all failed. See `docs/FAULT_CATALOGUE.md`.
+Adding the second dataset found defects that development against one dataset could not:
+a blocker that fired on the *best* case, a discovery path that could not see columnar
+inputs, a validator that reported every check passed on a build whose canonical, OMOP
+and MEDS layers had all failed, two out-of-core promises that had never been true, and
+the one below.
+
+### A conversion that passed everything and mapped nothing
+
+MIMIC-IV writes ICD-10-CM without the decimal point (`F17210`); the vocabulary writes
+`F17.210`. Literal matching mapped **182 of 19,440** diagnosis codes — the
+three-character ones, which have no dot to disagree about — and turned the other 99%
+into `concept_id = 0`.
+
+Every check passed, because `concept_id = 0` is valid OMOP for "no matching concept".
+The ids existed, the domains fitted, the source values survived, and the unmapped terms
+were queued for review. The build reported, truthfully, that "69,907 distinct terms had
+no concept and went to review rather than becoming 0 silently" — a sentence that reads
+as diligence and describes nineteen thousand mappable diagnoses lost to punctuation.
+
+`TERMINOLOGY_COVERAGE_PLAUSIBLE` now catches the class: a code system naming an
+*installed* vocabulary that maps almost none of its codes has had a lookup failure, not
+a discovery that its data is unmappable. Local lab names, which belong to no standard
+vocabulary, are excluded on exactly that criterion. The lookup gained a second pass that
+ignores punctuation, accepted only where exactly one vocabulary code reduces to the same
+string — checked at query time, not assumed. Coverage went to **87.9%**, and recovered
+mappings record that they depended on ignoring punctuation.
 
 ## Does the check suite detect anything?
 
