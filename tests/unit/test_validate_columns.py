@@ -19,16 +19,17 @@ from ehr2cdm.schema import (
     ANCHOR_SCHEMA,
     CANONICAL_EVENT_SCHEMA,
     COHORT_MEMBERSHIP_SCHEMA,
-    EVENT_SOURCE_SCHEMA,
     QUARANTINE_SCHEMA,
 )
 from ehr2cdm.validate import READ_COLUMNS
 
 SOURCE = Path(__file__).resolve().parents[2] / "src" / "ehr2cdm" / "validate.py"
 
+#: event_source is deliberately absent: it is never materialised at all. Its `event_id`
+#: column alone is 18 GB on MIMIC-IV, so the checks that read it do so in the query
+#: engine, over the parquet file, where the join can spill.
 SCHEMAS = {
     "events": CANONICAL_EVENT_SCHEMA,
-    "event_source": EVENT_SOURCE_SCHEMA,
     "anchors": ANCHOR_SCHEMA,
     "cohort_membership": COHORT_MEMBERSHIP_SCHEMA,
     "quarantine": QUARANTINE_SCHEMA,
@@ -61,10 +62,11 @@ def test_the_whitelist_only_names_real_columns(table: str):
     assert not unknown, f"{table}: whitelist names columns that do not exist: {unknown}"
 
 
-def test_the_largest_columns_are_left_out():
+def test_the_largest_tables_are_not_materialised_at_all():
     """The point of the exercise, pinned so it cannot quietly regress."""
-    assert "source_row_id" not in READ_COLUMNS["event_source"], (
-        "one string per lineage link, and no check reads it"
+    assert "event_source" not in READ_COLUMNS, (
+        "the link table must not be loaded: 301 million rows whose event_id column is "
+        "18 GB, joined against an events column of the same size"
     )
     assert "raw_row" not in READ_COLUMNS["quarantine"], "the entire raw text of every quarantined row"
     assert "source_name" not in READ_COLUMNS["events"]

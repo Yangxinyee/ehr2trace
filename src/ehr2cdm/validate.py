@@ -42,6 +42,7 @@ from typing import Any, Callable
 
 import polars as pl
 
+from ehr2cdm.analytics import HEAVY_THREADS, analytic_connection
 from ehr2cdm.config import DatasetConfig
 from ehr2cdm.paths import WorkLayout
 from ehr2cdm.schema import EventKind, QualityFlag
@@ -88,7 +89,6 @@ READ_COLUMNS: dict[str, tuple[str, ...]] = {
         "end_time", "code_system", "source_code", "value_number", "value_text",
         "quality_flags", "source_id",
     ),
-    "event_source": ("event_id", "partition_id"),
     "anchors": ("subject_id", "anchor_date", "anchor_time", "anchor_time_known", "partition_id"),
     "cohort_membership": ("subject_id", "partition_id", "membership_label", "label_scope"),
     "quality_issue": (),
@@ -103,7 +103,16 @@ class Layers:
     cfg: DatasetConfig
     layout: WorkLayout
     events: pl.DataFrame | None
-    links: pl.DataFrame | None
+    #: The link table is not materialised. Its `event_id` column alone is 18 GB on
+    #: MIMIC-IV -- 301 million forty-character hashes -- and every check that reads it
+    #: joins it against an events column of the same size. Those joins happen in the
+    #: query engine, over the parquet file, where they can spill; what is kept here is
+    #: only what a check needs to decide whether to skip and what to report.
+    links_path: Path | None
+    link_count: int | None
+    #: The events parquet itself, for the checks that scan it in the engine rather than
+    #: holding it: the `event_id` column alone is 18 GB here.
+    events_path: Path | None
     anchors: pl.DataFrame | None
     memberships: pl.DataFrame | None
     issues: pl.DataFrame | None
@@ -124,12 +133,18 @@ class Layers:
             present = set(pl.scan_parquet(path).collect_schema().names())
             return pl.read_parquet(path, columns=[c for c in wanted if c in present])
 
+        import pyarrow.parquet as pq
+
+        links_path = layout.canonical_path("event_source")
+        events_path = layout.canonical_path("events")
         manifest_path = layout.manifest_dir / "inputs.json"
         return cls(
             cfg=cfg,
             layout=layout,
             events=read("events"),
-            links=read("event_source"),
+            links_path=links_path if links_path.exists() else None,
+            link_count=pq.ParquetFile(links_path).metadata.num_rows if links_path.exists() else None,
+            events_path=events_path if events_path.exists() else None,
             anchors=read("anchors"),
             memberships=read("cohort_membership"),
             issues=read("quality_issue"),
@@ -247,34 +262,48 @@ def _coverage(l: Layers) -> CheckResult:
     )
 
 
+def _lineage_counts(l: Layers) -> tuple[int, int, int]:
+    """Orphaned events, dangling links, and events with more than one source row.
+
+    One pass in the query engine rather than three joins in memory. Doing this with
+    frames meant holding two columns of 300 million forty-character hashes plus a hash
+    table over them, which is what put this command past 150 GB.
+    """
+    with analytic_connection(l.layout.root / "_validate_scratch", threads=HEAVY_THREADS) as con:
+        con.execute(f"CREATE VIEW evt AS SELECT event_id FROM read_parquet('{l.events_path}')")
+        con.execute(f"CREATE VIEW lnk AS SELECT event_id FROM read_parquet('{l.links_path}')")
+        con.execute("CREATE OR REPLACE TEMP TABLE per_event AS "
+                    "SELECT event_id, count(*) AS n FROM lnk GROUP BY event_id")
+        orphans = con.execute(
+            "SELECT count(*) FROM evt ANTI JOIN per_event USING (event_id)"
+        ).fetchone()[0]
+        dangling = con.execute(
+            "SELECT count(*) FROM per_event ANTI JOIN evt USING (event_id)"
+        ).fetchone()[0]
+        duplicated = con.execute("SELECT count(*) FROM per_event WHERE n > 1").fetchone()[0]
+    return int(orphans), int(dangling), int(duplicated)
+
+
 @check("EVENT_LINEAGE_COMPLETE")
 def _lineage_complete(l: Layers) -> CheckResult:
-    if l.events is None or l.links is None:
+    if l.events is None or l.links_path is None:
         return _skip("canonical layer not built")
-    # An anti-join, not two Python sets. Building `set(...to_list())` over a link table
-    # materialises one Python string object per row; at MIMIC-IV's 301 million links
-    # that is what killed this command at 159 GB, while the Arrow frames it was built
-    # from cost a fraction of it.
-    orphans = l.events.select("event_id").join(
-        l.links.select("event_id").unique(), on="event_id", how="anti"
-    ).height
+    orphans, _dangling, _dup = _lineage_counts(l)
     return CheckResult(
         "",
         not orphans,
         "every canonical event traces to at least one source row"
         if not orphans
         else f"{orphans:,} events have no source row",
-        {"events": l.events.height, "links": l.links.height},
+        {"events": l.events.height, "links": l.link_count},
     )
 
 
 @check("LINK_TARGETS_EXIST")
 def _links_resolve(l: Layers) -> CheckResult:
-    if l.events is None or l.links is None:
+    if l.events is None or l.links_path is None:
         return _skip("canonical layer not built")
-    dangling = l.links.select("event_id").unique().join(
-        l.events.select("event_id"), on="event_id", how="anti"
-    ).height
+    _orphans, dangling, _dup = _lineage_counts(l)
     return CheckResult(
         "", not dangling, "no dangling lineage links" if not dangling else f"{dangling:,} dangling links"
     )
@@ -283,20 +312,19 @@ def _links_resolve(l: Layers) -> CheckResult:
 @check("FAN_OUT_AND_DEDUP")
 def _fan_out(l: Layers) -> CheckResult:
     """Reported, never asserted equal: these relations are legitimately not one-to-one."""
-    if l.events is None or l.links is None:
+    if l.events is None or l.links_path is None:
         return _skip("canonical layer not built")
-    per_event = l.links.group_by("event_id").len()
-    duplicated = int((per_event["len"] > 1).sum())
+    _orphans, _dangling, duplicated = _lineage_counts(l)
     return CheckResult(
         "",
         True,
-        f"{l.events.height:,} events from {l.links.height:,} links; "
+        f"{l.events.height:,} events from {l.link_count:,} links; "
         f"{duplicated:,} events have more than one source row",
         {
             "events": l.events.height,
-            "links": l.links.height,
+            "links": l.link_count,
             "events_with_duplicates": duplicated,
-            "fan_out": round(l.links.height / l.events.height, 4) if l.events.height else 0.0,
+            "fan_out": round(l.link_count / l.events.height, 4) if l.events.height else 0.0,
         },
     )
 
@@ -321,7 +349,7 @@ def _rows_accounted(l: Layers) -> CheckResult:
     were accounted for than existed -- which is how this check failed the first time it
     ran.
     """
-    if l.manifest is None or l.links is None:
+    if l.manifest is None or l.links_path is None:
         return _skip("canonical layer not built")
     parsed = sum(i["rows_parsed"] for i in l.manifest["inputs"])
     if not parsed:
