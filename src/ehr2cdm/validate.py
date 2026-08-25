@@ -251,14 +251,19 @@ def _coverage(l: Layers) -> CheckResult:
 def _lineage_complete(l: Layers) -> CheckResult:
     if l.events is None or l.links is None:
         return _skip("canonical layer not built")
-    linked = set(l.links["event_id"].to_list())
-    orphans = [e for e in l.events["event_id"].to_list() if e not in linked]
+    # An anti-join, not two Python sets. Building `set(...to_list())` over a link table
+    # materialises one Python string object per row; at MIMIC-IV's 301 million links
+    # that is what killed this command at 159 GB, while the Arrow frames it was built
+    # from cost a fraction of it.
+    orphans = l.events.select("event_id").join(
+        l.links.select("event_id").unique(), on="event_id", how="anti"
+    ).height
     return CheckResult(
         "",
         not orphans,
         "every canonical event traces to at least one source row"
         if not orphans
-        else f"{len(orphans)} events have no source row",
+        else f"{orphans:,} events have no source row",
         {"events": l.events.height, "links": l.links.height},
     )
 
@@ -267,10 +272,11 @@ def _lineage_complete(l: Layers) -> CheckResult:
 def _links_resolve(l: Layers) -> CheckResult:
     if l.events is None or l.links is None:
         return _skip("canonical layer not built")
-    known = set(l.events["event_id"].to_list())
-    dangling = [e for e in set(l.links["event_id"].to_list()) if e not in known]
+    dangling = l.links.select("event_id").unique().join(
+        l.events.select("event_id"), on="event_id", how="anti"
+    ).height
     return CheckResult(
-        "", not dangling, "no dangling lineage links" if not dangling else f"{len(dangling)} dangling links"
+        "", not dangling, "no dangling lineage links" if not dangling else f"{dangling:,} dangling links"
     )
 
 
@@ -454,22 +460,26 @@ def _event_subjects_issued(l: Layers) -> CheckResult:
     path = l.layout.identity_dir / "subject_map.parquet"
     if not path.exists() or l.events is None:
         return _skip("identity or events not built")
-    issued = set(pl.read_parquet(path)["subject_id"].to_list())
+    issued = pl.read_parquet(path, columns=["subject_id"])
     strays: dict[str, int] = {}
     for name, frame in (("events", l.events), ("anchors", l.anchors), ("cohort_membership", l.memberships)):
         if frame is None or frame.height == 0 or "subject_id" not in frame.columns:
             continue
-        present = set(frame["subject_id"].drop_nulls().to_list())
-        unknown = present - issued
+        # Distinct first, then anti-join. There are a few hundred thousand subjects and
+        # a few hundred million events, so materialising one Python object per event to
+        # find them would cost three orders of magnitude more than the answer is worth.
+        unknown = (
+            frame.select("subject_id").drop_nulls().unique().join(issued, on="subject_id", how="anti").height
+        )
         if unknown:
-            strays[name] = len(unknown)
+            strays[name] = unknown
     return CheckResult(
         "",
         not strays,
-        f"every subject id in the canonical layer is one of the {len(issued):,} the identity map issued"
+        f"every subject id in the canonical layer is one of the {issued.height:,} the identity map issued"
         if not strays
         else f"subject ids never issued by identity resolution: {strays}",
-        {"issued": len(issued), "strays": strays},
+        {"issued": issued.height, "strays": strays},
     )
 
 
@@ -607,13 +617,13 @@ def _orders_vs_admin(l: Layers) -> CheckResult:
         return _skip("canonical layer not built")
     orders = l.events.filter(pl.col("event_kind") == str(EventKind.drug_order))
     admins = l.events.filter(pl.col("event_kind") == str(EventKind.drug_admin))
-    overlap = set(orders["event_id"].to_list()) & set(admins["event_id"].to_list())
+    overlap = orders.select("event_id").join(admins.select("event_id"), on="event_id", how="semi").height
     return CheckResult(
         "",
         not overlap,
         f"{orders.height:,} orders and {admins.height:,} administrations, no shared events"
         if not overlap
-        else f"{len(overlap)} events are both an order and an administration",
+        else f"{overlap:,} events are both an order and an administration",
         {"drug_order": orders.height, "drug_admin": admins.height},
     )
 
