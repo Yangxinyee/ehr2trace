@@ -26,6 +26,7 @@ import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from ehr2cdm.analytics import analytic_connection
 from ehr2cdm.canonical.anchors import emit_anchors
 from ehr2cdm.canonical.dedup import (
     apply_duplicate_flags,
@@ -495,26 +496,14 @@ def merge_buckets(layout: WorkLayout, digests: dict[int, str]) -> dict[str, int]
     a hundred million rows, and a merge that only works while it fits in RAM is a merge
     that fails on the next dataset.
 
-    That last sentence was aspirational until MIMIC-IV falsified it. An in-memory DuckDB
-    connection has no temp directory configured, and without one it cannot spill a sort
-    to disk -- so the merge grew to 195 GB resident and the kernel killed it, on exactly
-    the "next dataset" the docstring predicted. Giving the engine somewhere to spill is
-    what makes the claim true; the memory ceiling is set from what the machine actually
-    has rather than left at the default fraction, because the default assumes it is the
-    only thing running.
+    That last sentence was aspirational until MIMIC-IV falsified it: an in-memory
+    connection with nowhere to spill grew to 195 GB and the kernel killed it, on exactly
+    the "next dataset" the docstring predicted. :func:`analytic_connection` is what makes
+    the claim true, and it lives in one place because the MEDS build made the identical
+    promise and broke it the same way.
     """
-    import duckdb
-
     counts: dict[str, int] = {}
-    scratch = layout.root / "_merge_scratch"
-    scratch.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect()
-    try:
-        con.execute("PRAGMA preserve_insertion_order = false")
-        con.execute("SET temp_directory = ?", [str(scratch)])
-        limit_gb = _merge_memory_limit_gb()
-        if limit_gb:
-            con.execute(f"SET memory_limit = '{limit_gb}GB'")
+    with analytic_connection(layout.root / "_merge_scratch") as con:
         for name, schema in MERGE_TABLES.items():
             files = [
                 str(layout.bucket_dir(bucket) / digests[bucket] / f"{name}.parquet")
@@ -547,24 +536,4 @@ def merge_buckets(layout: WorkLayout, digests: dict[int, str]) -> dict[str, int]
             counts[name] = int(
                 con.execute(f"SELECT count(*) FROM read_parquet('{target}')").fetchone()[0]
             )
-    finally:
-        con.close()
-        shutil.rmtree(scratch, ignore_errors=True)
     return counts
-
-
-def _merge_memory_limit_gb() -> int | None:
-    """Roughly half of physical memory, or None if it cannot be determined.
-
-    DuckDB defaults to about 80% of RAM, which is a reasonable default for a process
-    that is the only thing on the machine and a poor one here: the merge runs in the
-    same session as everything else, and 80% of this machine was enough for the kernel
-    to choose our process to kill.
-    """
-    try:
-        pages = os.sysconf("SC_PHYS_PAGES")
-        page_size = os.sysconf("SC_PAGE_SIZE")
-    except (ValueError, OSError, AttributeError):
-        return None
-    total_gb = pages * page_size / (1024**3)
-    return max(2, int(total_gb * 0.5))

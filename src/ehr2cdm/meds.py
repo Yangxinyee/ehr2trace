@@ -33,6 +33,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 import meds as meds_spec
+from ehr2cdm.analytics import analytic_connection
 from ehr2cdm.config import DatasetConfig
 from ehr2cdm.hashing import split_of
 from ehr2cdm.paths import WorkLayout, write_table_atomic
@@ -93,14 +94,14 @@ SHARD_BATCH_ROWS = 200_000
 
 
 def build_meds(cfg: DatasetConfig, layout: WorkLayout) -> dict[str, Any]:
-    import duckdb
 
     vocabulary = Vocabulary.open(_vocab_dir())
     mappings = MappingRegistry.load(Path.cwd() / "mappings")
 
-    con = duckdb.connect()
-    try:
-        con.execute("PRAGMA preserve_insertion_order = false")
+    # The join below groups a link table of hundreds of millions of rows and orders
+    # every event in the dataset. It needs somewhere to spill; without it this was
+    # killed at 178 GB resident on MIMIC-IV.
+    with analytic_connection(layout.meds_dir / "_scratch") as con:
         con.execute(f"CREATE VIEW evt AS SELECT * FROM read_parquet('{layout.canonical_path('events')}')")
         con.execute(f"CREATE VIEW lnk AS SELECT * FROM read_parquet('{layout.canonical_path('event_source')}')")
         distinct, resolved = _build_term_map(con, vocabulary, mappings)
@@ -122,8 +123,6 @@ def build_meds(cfg: DatasetConfig, layout: WorkLayout) -> dict[str, Any]:
         shards, events = _write_shards(rows_path, data_dir, splits, cfg.meds.shard_size)
         code_counts = _write_code_metadata(con, rows_path, layout)
         rows_path.unlink()
-    finally:
-        con.close()
 
     write_table_atomic(
         pa.table(
