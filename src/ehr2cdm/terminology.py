@@ -456,7 +456,102 @@ def resolve_terms_batch(
 
     resolved.update(hits)
     unresolved = [t for t in pending if t.key not in hits]
+    if unresolved:
+        second, unresolved = _resolve_unpunctuated(con, unresolved)
+        resolved.update(second)
     return resolved, unresolved
+
+
+#: Characters that are presentation, not identity, in a code: `F17.210` and `F17210`
+#: are the same ICD-10-CM code written two ways.
+_PUNCTUATION = str.maketrans("", "", ". -/")
+
+
+def _unpunctuated(code: str) -> str:
+    return code.upper().translate(_PUNCTUATION)
+
+
+def _resolve_unpunctuated(con, pending: Sequence[TermRequest]):
+    """Second pass for codes that differ from the vocabulary only in punctuation.
+
+    MIMIC-IV writes ICD-10-CM as `F17210`; the vocabulary writes `F17.210`. Matching on
+    the literal string mapped 197 of 19,440 codes -- the three-character ones, which
+    have no decimal point to disagree about -- and turned the other 99% into
+    `concept_id = 0`. That is legal OMOP and it is not a true statement about the data.
+
+    A match is only accepted where exactly one vocabulary code reduces to the same
+    string. The uniqueness is checked here rather than assumed: it holds for ICD-10-CM
+    today, and a vocabulary in which it did not would otherwise silently pick one of
+    two different codes.
+    """
+    resolved: dict[tuple[str, str], ConceptMatch] = {}
+    by_stripped: dict[tuple[str, str], list[TermRequest]] = {}
+    for term in pending:
+        by_stripped.setdefault((term.code_system, _unpunctuated(term.source_code)), []).append(term)
+    if not by_stripped:
+        return resolved, list(pending)
+
+    con.execute(
+        "CREATE OR REPLACE TEMP TABLE _stripped (code_system VARCHAR, stripped VARCHAR)"
+    )
+    con.executemany("INSERT INTO _stripped VALUES (?, ?)", sorted(by_stripped))
+    rows = con.execute(
+        """
+        WITH candidates AS (
+            SELECT s.code_system, s.stripped, c.concept_code,
+                   CAST(c.concept_id AS BIGINT) AS source_concept_id,
+                   c.standard_concept, c.concept_name, c.domain_id, c.vocabulary_id
+            FROM _stripped s
+            JOIN CONCEPT c
+              ON c.vocabulary_id = s.code_system
+             AND upper(replace(replace(replace(replace(c.concept_code, '.', ''), '-', ''), '/', ''), ' ', '')) = s.stripped
+             AND (c.invalid_reason IS NULL OR c.invalid_reason = '')
+        ),
+        unambiguous AS (
+            SELECT code_system, stripped FROM candidates
+            GROUP BY code_system, stripped HAVING count(DISTINCT concept_code) = 1
+        )
+        SELECT c.code_system, c.stripped,
+               CASE WHEN c.standard_concept = 'S' THEN c.source_concept_id ELSE CAST(m.concept_id AS BIGINT) END,
+               CASE WHEN c.standard_concept = 'S' THEN c.concept_name ELSE m.concept_name END,
+               CASE WHEN c.standard_concept = 'S' THEN c.domain_id ELSE m.domain_id END,
+               CASE WHEN c.standard_concept = 'S' THEN c.vocabulary_id ELSE m.vocabulary_id END,
+               c.source_concept_id,
+               c.standard_concept = 'S' AS was_already_standard
+        FROM candidates c
+        JOIN unambiguous u USING (code_system, stripped)
+        LEFT JOIN CONCEPT_RELATIONSHIP r
+               ON r.concept_id_1 = CAST(c.source_concept_id AS VARCHAR)
+              AND r.relationship_id = 'Maps to'
+              AND (r.invalid_reason IS NULL OR r.invalid_reason = '')
+        LEFT JOIN CONCEPT m ON m.concept_id = r.concept_id_2 AND m.standard_concept = 'S'
+        WHERE c.standard_concept = 'S' OR m.concept_id IS NOT NULL
+        """
+    ).fetchall()
+    con.execute("DROP TABLE IF EXISTS _stripped")
+
+    for code_system, stripped, concept_id, name, domain, vocab, source_id, direct in rows:
+        if concept_id is None:
+            continue
+        for term in by_stripped.get((code_system, stripped), ()):
+            expected = DOMAIN_FOR_KIND.get(term.event_kind or "")
+            if expected and domain != expected:
+                continue
+            if term.key in resolved:
+                continue
+            resolved[term.key] = ConceptMatch(
+                concept_id=int(concept_id),
+                concept_name=name or "",
+                domain_id=domain or "",
+                vocabulary_id=vocab or "",
+                standard_concept="S",
+                source_concept_id=None if direct else int(source_id),
+                # Recorded distinctly, so a reviewer can see which mappings depended on
+                # ignoring punctuation rather than on the code as written.
+                path="unpunctuated_code" if direct else "unpunctuated_mapped_relationship",
+            )
+    still = [t for t in pending if t.key not in resolved]
+    return resolved, still
 
 
 def resolve_terms(

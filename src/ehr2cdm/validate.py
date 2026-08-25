@@ -859,6 +859,99 @@ def _omop_concepts(l: Layers) -> CheckResult:
         con.close()
 
 
+@check("TERMINOLOGY_COVERAGE_PLAUSIBLE")
+def _terminology_coverage(l: Layers) -> CheckResult:
+    """A real code system that maps almost nothing is broken, not empty.
+
+    `concept_id = 0` is legal OMOP and means "no matching concept", so a conversion in
+    which *every* diagnosis failed to map passes every structural check ever written:
+    the ids exist, the domains fit, the source values survive, and the unmapped terms
+    are honestly queued for review. Nothing said the queue should not have been that
+    long.
+
+    MIMIC-IV is the case in point. It writes ICD-10-CM as `F17210`; the vocabulary
+    writes `F17.210`. 197 of 19,440 codes matched -- the three-character ones, which
+    have no decimal point to disagree about -- and the other 99% became zero. That is a
+    punctuation mismatch presented as nineteen thousand clinically unmappable diagnoses.
+
+    A local laboratory name belongs to no standard vocabulary and legitimately maps to
+    nothing, so this applies only to code systems naming a vocabulary that is installed.
+    For those, a rate near zero is a lookup failure. The threshold sits far below any
+    plausible real coverage: this detects catastrophe, not imperfection.
+    """
+    if l.events is None:
+        return _skip("canonical layer not built")
+    from ehr2cdm.review import read_pending
+
+    vocabularies = _known_vocabularies(l)
+    if not vocabularies:
+        return _skip("no vocabulary installed to judge coverage against")
+    pending = read_pending(l.layout, open_only=True)
+    if not pending:
+        return _skip("no review queue: nothing to compare against")
+
+    unmapped: dict[str, int] = {}
+    for row in pending:
+        system = row.get("code_system") or ""
+        if system in vocabularies:
+            unmapped[system] = unmapped.get(system, 0) + 1
+
+    totals = (
+        l.events.filter(pl.col("code_system").is_in(sorted(vocabularies)))
+        .group_by("code_system")
+        .agg(pl.col("source_code").n_unique().alias("codes"))
+    )
+    if totals.height == 0:
+        return _skip("no source code carries an installed code system")
+
+    failures, report = [], {}
+    for row in totals.iter_rows(named=True):
+        system, total = row["code_system"], row["codes"]
+        mapped = max(0, total - unmapped.get(system, 0))
+        rate = mapped / total if total else 0.0
+        report[system] = {"codes": total, "mapped": mapped, "rate": round(rate, 4)}
+        if total >= MIN_CODES_TO_JUDGE and rate < MIN_PLAUSIBLE_COVERAGE:
+            failures.append(f"{system}: {mapped:,}/{total:,} ({rate:.1%})")
+    return CheckResult(
+        "",
+        not failures,
+        "every installed code system maps a plausible share of its codes: "
+        + ", ".join(f"{k} {v['rate']:.0%}" for k, v in sorted(report.items()))
+        if not failures
+        else "a standard code system mapped almost nothing, which is a lookup failure "
+        f"rather than unmappable data: {failures}",
+        report,
+    )
+
+
+#: Below this many distinct codes the rate is noise rather than evidence.
+MIN_CODES_TO_JUDGE = 100
+#: Far below any plausible real coverage. This detects catastrophe, not imperfection.
+MIN_PLAUSIBLE_COVERAGE = 0.10
+
+
+def _known_vocabularies(l: Layers) -> set[str]:
+    """Code systems this dataset declares that name a vocabulary actually installed."""
+    import os
+
+    from ehr2cdm.terminology import Vocabulary
+
+    raw = os.environ.get("OMOP_VOCAB_DIR")
+    if not raw:
+        return set()
+    vocabulary = Vocabulary.open(Path(raw))
+    try:
+        if not getattr(vocabulary, "available", False):
+            return set()
+        declared = {s.code_system for s in l.cfg.sources.values() if s.code_system}
+        installed = {
+            r[0] for r in vocabulary.con.execute("SELECT DISTINCT vocabulary_id FROM CONCEPT").fetchall()
+        }
+        return declared & installed
+    finally:
+        vocabulary.close()
+
+
 @check("OMOP_REFERENTIAL_INTEGRITY")
 def _omop_foreign_keys(l: Layers) -> CheckResult:
     """No clinical row may reference a person or visit that was never published.
