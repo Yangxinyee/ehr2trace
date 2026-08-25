@@ -27,6 +27,13 @@ from typing import Iterator
 MEMORY_FRACTION = 0.5
 MIN_LIMIT_GB = 2
 
+#: Threads for a heavy grouped aggregation. Not the core count: a hash aggregate keeps
+#: per-thread state, so on a 48-core machine the same query needs several times the
+#: memory it would on eight, and the operators that cannot spill -- a grouped ``list()``
+#: is the one that bit us -- hit the ceiling that much sooner. DuckDB's own advice when
+#: it runs out is to reduce this first.
+HEAVY_THREADS = 8
+
 
 def memory_limit_gb() -> int | None:
     """Roughly half of physical memory, or None where it cannot be determined."""
@@ -40,7 +47,7 @@ def memory_limit_gb() -> int | None:
 
 
 @contextmanager
-def analytic_connection(scratch_dir: Path) -> Iterator["object"]:
+def analytic_connection(scratch_dir: Path, threads: int | None = None) -> Iterator["object"]:
     """An in-memory connection with somewhere to spill, cleaned up on exit.
 
     ``scratch_dir`` should sit inside the work root rather than the system temp
@@ -57,6 +64,8 @@ def analytic_connection(scratch_dir: Path) -> Iterator["object"]:
         limit = memory_limit_gb()
         if limit:
             con.execute(f"SET memory_limit = '{limit}GB'")
+        if threads:
+            con.execute(f"SET threads = {int(threads)}")
         yield con
     finally:
         con.close()

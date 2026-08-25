@@ -33,7 +33,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 import meds as meds_spec
-from ehr2cdm.analytics import analytic_connection
+from ehr2cdm.analytics import HEAVY_THREADS, analytic_connection
 from ehr2cdm.config import DatasetConfig
 from ehr2cdm.hashing import split_of
 from ehr2cdm.paths import WorkLayout, write_table_atomic
@@ -98,17 +98,20 @@ def build_meds(cfg: DatasetConfig, layout: WorkLayout) -> dict[str, Any]:
     vocabulary = Vocabulary.open(_vocab_dir())
     mappings = MappingRegistry.load(Path.cwd() / "mappings")
 
-    # The join below groups a link table of hundreds of millions of rows and orders
-    # every event in the dataset. It needs somewhere to spill; without it this was
-    # killed at 178 GB resident on MIMIC-IV.
-    with analytic_connection(layout.meds_dir / "_scratch") as con:
+    # The work below collapses a link table of hundreds of millions of rows and orders
+    # every event in the dataset. It needs somewhere to spill -- without it this was
+    # killed at 178 GB resident on MIMIC-IV -- and a bounded thread count, because a
+    # hash aggregate keeps per-thread state and 48 of them do not fit whatever the
+    # budget says.
+    scratch = layout.meds_dir / "_scratch"
+    with analytic_connection(scratch, threads=HEAVY_THREADS) as con:
         con.execute(f"CREATE VIEW evt AS SELECT * FROM read_parquet('{layout.canonical_path('events')}')")
         con.execute(f"CREATE VIEW lnk AS SELECT * FROM read_parquet('{layout.canonical_path('event_source')}')")
         distinct, resolved = _build_term_map(con, vocabulary, mappings)
 
         rows_path = layout.meds_dir / "_rows.parquet"
         rows_path.parent.mkdir(parents=True, exist_ok=True)
-        _materialize_rows(con, rows_path)
+        _materialize_rows(con, rows_path, scratch)
 
         subjects = [int(r[0]) for r in con.execute(
             f"SELECT DISTINCT subject_id FROM read_parquet('{rows_path}') ORDER BY subject_id"
@@ -197,19 +200,34 @@ def _build_term_map(con, vocabulary, mappings: MappingRegistry) -> tuple[int, in
     return len(terms), len(resolved)
 
 
-def _materialize_rows(con, out_path: Path) -> None:
+def _materialize_rows(con, out_path: Path, scratch_dir: Path) -> None:
     """Join, code and order every event once, out of core.
 
     The ordering is the sharding contract: subjects in order, each subject's events in
     time order, ties broken deterministically so two runs produce identical bytes.
+
+    Collapsing the lineage links runs as its own pass rather than as a CTE inside the
+    join. A grouped ``list()`` is one of the operators that cannot spill -- the
+    accumulating lists have to be held -- so on MIMIC-IV's 301 million links it hit the
+    memory ceiling while also competing with the sort it fed. Given the budget to
+    itself, and written to disk before the join reads it back, each half fits.
     """
     assumed = str(QualityFlag.AVAILABILITY_ASSUMED)
+    links_path = scratch_dir / "links.parquet"
+    links_path.parent.mkdir(parents=True, exist_ok=True)
+    con.execute(
+        f"""
+        COPY (
+            SELECT event_id, list_sort(list(source_row_id)) AS source_row_ids
+            FROM lnk GROUP BY event_id
+        ) TO '{links_path}' (FORMAT PARQUET, COMPRESSION ZSTD)
+        """
+    )
     con.execute(
         f"""
         COPY (
             WITH links AS (
-                SELECT event_id, list_sort(list(source_row_id)) AS source_row_ids
-                FROM lnk GROUP BY event_id
+                SELECT event_id, source_row_ids FROM read_parquet('{links_path}')
             )
             SELECT e.subject_id,
                    e.event_time AS time,

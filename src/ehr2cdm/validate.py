@@ -71,6 +71,31 @@ def check(check_id: str, slow: bool = False):
     return deco
 
 
+#: The columns the checks in this module actually read, per canonical table.
+#:
+#: Loading the whole canonical layer eagerly worked until a dataset arrived where it
+#: did not: on MIMIC-IV, `validate` was killed by the kernel at 159 GB resident, holding
+#: 296 million events and 301 million lineage links complete with every column neither
+#: it nor any check ever looked at -- the raw source text of each quarantined row, and a
+#: source row id per link, being the two largest.
+#:
+#: `test_validate_columns.py` asserts this stays in step with the checks, so a check
+#: that starts reading a new column fails the test rather than failing at runtime on
+#: whichever dataset is big enough to notice.
+READ_COLUMNS: dict[str, tuple[str, ...]] = {
+    "events": (
+        "event_id", "subject_id", "event_kind", "event_time", "available_time",
+        "end_time", "code_system", "source_code", "value_number", "value_text",
+        "quality_flags", "source_id",
+    ),
+    "event_source": ("event_id", "partition_id"),
+    "anchors": ("subject_id", "anchor_date", "anchor_time", "anchor_time_known", "partition_id"),
+    "cohort_membership": ("subject_id", "partition_id", "membership_label", "label_scope"),
+    "quality_issue": (),
+    "quarantine": ("partition_id", "source_id", "reason", "person_source_id"),
+}
+
+
 @dataclass
 class Layers:
     """Whatever has been built so far. Checks for missing layers skip, not fail."""
@@ -89,7 +114,15 @@ class Layers:
     def load(cls, cfg: DatasetConfig, layout: WorkLayout) -> "Layers":
         def read(name: str) -> pl.DataFrame | None:
             path = layout.canonical_path(name)
-            return pl.read_parquet(path) if path.exists() else None
+            if not path.exists():
+                return None
+            wanted = READ_COLUMNS.get(name)
+            if wanted is None:
+                return pl.read_parquet(path)
+            # Only the columns the checks read. Projection happens in the parquet
+            # reader, so the columns left out are never decompressed at all.
+            present = set(pl.scan_parquet(path).collect_schema().names())
+            return pl.read_parquet(path, columns=[c for c in wanted if c in present])
 
         manifest_path = layout.manifest_dir / "inputs.json"
         return cls(
