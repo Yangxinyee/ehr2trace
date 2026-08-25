@@ -350,3 +350,64 @@ def test_lexical_recall_surfaces_candidates_without_adopting_them(tmp_path: Path
         assert all(c.concept_id != 45571738 for c in candidates)
     finally:
         vocab.close()
+
+
+# -- the retry path, which for a long time could not succeed ----------------------
+
+
+class _FailThenSucceed:
+    """An endpoint that rejects the first reply, then accepts, recording what it saw.
+
+    Mirrors the real transport: it records the raw reply on the client before trying to
+    parse it, which is what makes the bad text available to the retry.
+    """
+
+    #: what the model "said" on the failing attempt -- truncated JSON, as a real one is
+    BAD = '{"role": "event_time",'
+
+    def __init__(self, good: dict, client):
+        self.good = good
+        self.client = client
+        self.seen: list[list[dict]] = []
+
+    def __call__(self, messages, schema, name, max_tokens=512):
+        self.seen.append([dict(m) for m in messages])
+        if len(self.seen) == 1:
+            self.client._last_content = self.BAD
+            raise ValueError("not valid JSON")
+        self.client._last_content = "{}"
+        return self.good
+
+
+def test_a_retry_keeps_the_conversation_roles_alternating(monkeypatch):
+    """Two user turns in a row is a hard error for several chat templates.
+
+    Gemma's rejects it outright -- "Conversation roles must alternate" -- so every
+    retry became a failed call rather than a retry. It went unnoticed because the first
+    task measured never needed one; the first task that did lost 265 of 300 calls.
+    """
+    client = LlmClient(base_url="http://127.0.0.1:8000/v1", model="m")
+    endpoint = _FailThenSucceed({"role": "event_time", "confidence": 0.9, "rationale": "ok"}, client)
+    monkeypatch.setattr(client, "_post", endpoint)
+
+    result = client.propose_column_role("labs", "Collection_time", {"samples": []})
+    assert result is not None, "the retry did not succeed"
+
+    second = endpoint.seen[1]
+    roles = [m["role"] for m in second]
+    for earlier, later in zip(roles, roles[1:]):
+        assert not (earlier == "user" and later == "user"), f"two user turns in a row: {roles}"
+    assert "assistant" in roles, "the model's own reply must go back before the correction"
+
+
+def test_the_retry_shows_the_model_what_it_actually_said(monkeypatch):
+    """A correction with no reference to the bad output is a weaker prompt than it looks."""
+    client = LlmClient(base_url="http://127.0.0.1:8000/v1", model="m")
+    endpoint = _FailThenSucceed({"role": "event_time", "confidence": 0.9, "rationale": "ok"}, client)
+    monkeypatch.setattr(client, "_post", endpoint)
+
+    client.propose_column_role("labs", "Collection_time", {"samples": []})
+    assistant = [m for m in endpoint.seen[1] if m["role"] == "assistant"]
+    assert assistant and assistant[0]["content"] == _FailThenSucceed.BAD, (
+        "the invalid reply was not sent back"
+    )

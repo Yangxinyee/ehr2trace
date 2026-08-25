@@ -107,6 +107,9 @@ class LlmClient:
     seed: int = 0
     supports_json_schema: bool | None = None
     calls: list[LlmCall] = field(default_factory=list)
+    #: raw text of the most recent reply, so a retry can hand the model back what it
+    #: actually said rather than only telling it that something was wrong
+    _last_content: str = ""
 
     @classmethod
     def from_env(cls) -> "LlmClient":
@@ -177,6 +180,7 @@ class LlmClient:
         content = body["choices"][0]["message"]["content"]
         usage = body.get("usage") or {}
         self._last_usage = (usage.get("prompt_tokens"), usage.get("completion_tokens"))
+        self._last_content = content
         return json.loads(content)
 
     def _ask(
@@ -197,6 +201,7 @@ class LlmClient:
             template=template, template_sha256=template_hash, input_sha256=sha256_hex(prompt)
         )
         self._last_usage = (None, None)
+        self._last_content = ""
         for attempt in range(1, MAX_RETRIES + 2):
             record.attempts = attempt
             try:
@@ -209,6 +214,15 @@ class LlmClient:
                 record.error = type(exc).__name__
                 if attempt > MAX_RETRIES:
                     break
+                # The model's own reply goes back as an assistant turn before the
+                # correction. Appending only the correction leaves two user turns in a
+                # row, which several chat templates -- Gemma's among them -- reject
+                # outright with "Conversation roles must alternate". That made every
+                # retry a hard failure instead of a retry, and it went unnoticed because
+                # the first task measured never needed one: the recorded metrics for
+                # those runs read `retried: 0`. The first task that did need retries
+                # lost 265 of 300 calls to it.
+                messages.append({"role": "assistant", "content": self._last_content or ""})
                 messages.append(
                     {
                         "role": "user",
