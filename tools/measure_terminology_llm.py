@@ -96,7 +96,15 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=300, help="how many terms to evaluate")
     ap.add_argument("--k", type=int, default=8, help="candidates recalled per term")
     ap.add_argument("--seed", type=int, default=20260823)
-    ap.add_argument("--no-llm", action="store_true", help="measure lexical recall only")
+    ap.add_argument("--no-llm", action="store_true", help="measure recall only")
+    ap.add_argument(
+        "--candidates-from",
+        type=Path,
+        default=None,
+        help="a measure_retrieval.py result file. Rank the candidates it retrieved "
+        "instead of lexically recalled ones, over the identical terms, so retrieval and "
+        "ranking can be varied one at a time.",
+    )
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
 
@@ -105,12 +113,23 @@ def main() -> None:
     events = pl.read_parquet(layout.canonical_path("events"))
     vocabulary = Vocabulary.open(args.vocab)
 
-    pool = truth_set(events, vocabulary, args.code_system, args.event_kind)
-    if not pool:
-        raise SystemExit(f"no {args.code_system}/{args.event_kind} terms resolve; nothing to measure against")
-    random.Random(args.seed).shuffle(pool)
-    sample = pool[: args.n]
     domain = DOMAIN_FOR_KIND.get(args.event_kind)
+    supplied: dict[str, list] = {}
+    if args.candidates_from:
+        prior = json.loads(args.candidates_from.read_text())
+        sample = [
+            {"source_code": "", "text": r["text"], "true_concept_id": r["true_concept_id"],
+             "true_concept_name": ""}
+            for r in prior["rows"]
+        ]
+        supplied = {r["text"]: r.get("candidates", []) for r in prior["rows"]}
+        print(f"{len(sample)} terms and their candidates reused from {args.candidates_from.name}")
+    else:
+        pool = truth_set(events, vocabulary, args.code_system, args.event_kind)
+        if not pool:
+            raise SystemExit(f"no {args.code_system}/{args.event_kind} terms resolve; nothing to measure against")
+        random.Random(args.seed).shuffle(pool)
+        sample = pool[: args.n]
 
     client = None
     if not args.no_llm:
@@ -121,7 +140,16 @@ def main() -> None:
     rows: list[dict] = []
     t0 = time.time()
     for i, item in enumerate(sample, 1):
-        candidates = vocabulary.candidates(item["text"], domain, limit=args.k)
+        if supplied:
+            from ehr2cdm.terminology import Candidate
+
+            candidates = [
+                Candidate(concept_id=c["concept_id"], concept_name=c["concept_name"],
+                          domain_id=domain or "", vocabulary_id="", score=0.0)
+                for c in supplied.get(item["text"], [])[: args.k]
+            ]
+        else:
+            candidates = vocabulary.candidates(item["text"], domain, limit=args.k)
         ids = [c.concept_id for c in candidates]
         in_candidates = item["true_concept_id"] in ids
         lexical_pick = ids[0] if ids else None
@@ -165,6 +193,7 @@ def main() -> None:
     summary = {
         "dataset": cfg.dataset_id,
         "code_system": args.code_system,
+        "candidate_source": args.candidates_from.name if args.candidates_from else "lexical",
         "event_kind": args.event_kind,
         "domain": domain,
         "model": os.environ.get("LLM_MODEL", "") if client else None,
