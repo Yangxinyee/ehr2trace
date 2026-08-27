@@ -37,3 +37,9 @@ jobs:
       # detected by something.
       - name: Fault detection
         run: pytest tests/integration/test_fault_detection.py -q
+
+      # The other half of that number. A suite that fires on a correct build detects
+      # every fault and is worthless, and determinism is claimed in the first sentence
+      # of the paper, so both are checked rather than intended.
+      - name: Determinism and false alarms
+        run: pytest tests/integration/test_reproducibility.py -q

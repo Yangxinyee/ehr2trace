@@ -25,7 +25,18 @@ from tests.integration.test_generic_ehr_pipeline import CONFIG, run_pipeline
 
 
 @pytest.fixture(scope="module")
-def published(tmp_path_factory) -> tuple[WorkLayout, dict, dict]:
+def monkeypatch_module():
+    """`monkeypatch` is function-scoped; this fixture is not."""
+    with pytest.MonkeyPatch.context() as patch:
+        yield patch
+
+
+@pytest.fixture(scope="module")
+def published(tmp_path_factory, monkeypatch_module) -> tuple[WorkLayout, dict, dict]:
+    # `vocabulary_dir=None` means "whatever the environment says", so a developer with a
+    # vocabulary installed used to fail the no-vocabulary assertions below. The test is
+    # about the vocabulary being absent, so it has to make it absent.
+    monkeypatch_module.delenv("OMOP_VOCAB_DIR", raising=False)
     layout = run_pipeline(tmp_path_factory.mktemp("publish"), workers=1)
     cfg = load_dataset_config(CONFIG)
     omop_result = build_omop(cfg, layout, vocabulary_dir=None)
