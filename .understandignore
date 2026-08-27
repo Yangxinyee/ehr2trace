@@ -1,0 +1,5 @@
+# .understandignore — extra exclusions for understand-anything
+# (node_modules/, .venv/, __pycache__/, *.zip are already excluded by default)
+.venv-llm/
+.pytest_cache/
+*.egg-info/

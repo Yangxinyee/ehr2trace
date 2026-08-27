@@ -26,3 +26,8 @@ docs/standards/*.pdf
 # Licensed vocabulary download (multi-GB, not ours to redistribute)
 vocabulary_download_*.zip
 omop_vocab/
+
+# Understand Anything knowledge graph scratch files
+.ua/intermediate/
+.ua/.trash-*/
+.ua/diff-overlay.json
