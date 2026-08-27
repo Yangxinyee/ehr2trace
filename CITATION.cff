@@ -10,7 +10,7 @@ authors:
     email: yangxinye2001@gmail.com
 repository-code: https://github.com/Yangxinyee/ehr-to-omop-meds-agent
 license: Apache-2.0
-version: 0.4.0
+version: 0.5.0
 abstract: >-
   ehr2cdm converts local hospital EHR extracts (delimited text and spreadsheets)
   into OMOP CDM 5.4 and MEDS. The two targets are derived independently from a
