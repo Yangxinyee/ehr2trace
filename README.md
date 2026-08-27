@@ -280,7 +280,7 @@ mappings record that they depended on ignoring punctuation.
 
 ## Does the check suite detect anything?
 
-Thirty-four checks passing on the pipeline that produced the data is weak evidence. The
+Thirty-five checks passing on the pipeline that produced the data is weak evidence. The
 other direction is measured: `src/ehr2cdm/faults.py` holds seventeen corruptions, each
 drawn from an incident that actually happened here, each silent by construction — row
 counts plausible, schemas valid, a spot check on a few patients clean.
@@ -288,19 +288,57 @@ counts plausible, schemas valid, a spot check on a few patients clean.
 ```bash
 python tools/run_fault_experiment.py --dataset datasets/ctpe_shape.yaml \
   --built $EHR_WORK_ROOT/ctpe_shape --work /tmp/faultlab \
-  --out results/faults.json --slow
+  --out results/faults_fixture.json --slow
 ```
 
-| | faults detected |
-|---|---:|
-| Suite before the experiment (30 checks) | **13 / 17** |
-| Suite after the four checks it motivated (34 checks) | **17 / 17** |
+| | checks run | faults detected |
+|---|---:|---:|
+| OHDSI Data Quality Dashboard 2.8.9 | 2,374 | **5 / 17** |
+| Suite before the experiment | 30 | **13 / 17** |
+| Suite after the four checks it motivated | 35 | **17 / 17** |
 
-The first row is the one that carries information, and `docs/FAULT_CATALOGUE.md` says
-why: a detector written in response to a fault is guaranteed to catch it. All four
-misses were the same shape — a check reading an artifact the fault did not touch. The
-experiment runs on the PHI-free fixture, so it reproduces from a clone, and it is a CI
-gate.
+The middle row is the one that carries information, and `docs/FAULT_CATALOGUE.md` says
+why: a detector written in response to a fault is guaranteed to catch it. All four misses
+were the same shape — a check reading an artifact the fault did not touch. The experiment
+runs on the PHI-free fixture, so it reproduces from a clone, and it is a CI gate.
+
+The first row is the comparison against the standard OMOP tooling. Eight of the
+seventeen faults never reach an OMOP database at all, so they are outside what a CDM
+assessment can be pointed at; four more do reach it and survive. Reproducing it needs
+Docker (PostgreSQL plus an R image built from `tools/dqd/`):
+
+```bash
+python tools/run_dqd_experiment.py --dataset datasets/ctpe_shape.yaml \
+  --built $EHR_WORK_ROOT/ctpe_shape --work /tmp/dqdlab \
+  --out results/dqd_baseline.json
+```
+
+## Does a fault actually cost anything downstream?
+
+Detection rates measure the detector. This measures the damage: one cohort, one task, one
+model, three feature matrices differing only in the rule about when a fact became
+knowable. Dating each admission's diagnoses to the admission — what an admission-level
+diagnosis table forces — lifts held-out AUROC for in-hospital mortality from 0.844 to
+0.969, and the inflated score does not move as the prediction horizon grows, which is
+what reading an answer looks like.
+
+```bash
+python tools/run_leakage_experiment.py --meds $EHR_WORK_ROOT/mimiciv/meds \
+  --scratch /tmp/leaklab --out results/leakage_downstream.json
+```
+
+## Is the conversion reproducible, and does the suite cry wolf?
+
+The same inputs under four legal concurrency settings, compared artifact by artifact on a
+digest of row content rather than bytes — parquet embeds a writer version, so two
+identical builds differ on disk. All four agree on all 58 artifacts, and none of the 35
+checks fires on any of them.
+
+```bash
+python tools/run_reproducibility_experiment.py --dataset datasets/ctpe_shape.yaml \
+  --root-env CTPE_SHAPE_ROOT --data tests/fixtures/ctpe_shape \
+  --work /tmp/repro --out results/reproducibility.json
+```
 
 ## Verifying the numbers in the design spec
 
