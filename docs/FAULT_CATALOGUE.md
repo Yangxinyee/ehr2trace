@@ -1,6 +1,6 @@
 # Fault catalogue
 
-Thirty-four checks passing on the pipeline that produced the data proves very little.
+Thirty-five checks passing on the pipeline that produced the data proves very little.
 The question a reader should ask is the other one: when a specific corruption is
 present, does anything fire?
 
@@ -22,10 +22,21 @@ sensitivity is a property of the checks, not of the dataset's size.
 
 ## Result
 
-| | faults detected |
-|---|---:|
-| Suite as it stood before the experiment (30 checks) | **13 / 17** |
-| Suite after the four checks the experiment motivated (34 checks) | **17 / 17** |
+| | checks run | faults detected |
+|---|---:|---:|
+| OHDSI Data Quality Dashboard 2.8.9 | 2,374 | **5 / 17** |
+| Suite as it stood before the experiment | 30 | **13 / 17** |
+| Suite after the four checks the experiment motivated | 35 | **17 / 17** |
+
+The first row is the standard OMOP data-quality tooling, run on the same corrupted
+builds (`tools/run_dqd_experiment.py`). Eight of the seventeen faults never reach an OMOP
+database at all, so they are out of scope for it rather than missed; four more do reach
+it and survive. Two of those four *lower* DQD's failing-check count — deleting every
+post-death record removes the rows whose implausibility the checks were reporting.
+
+Detection is also not the same as being able to act on it. Comparing each mutated clone
+against the tree it was cloned from establishes which artifacts a fault actually damaged;
+a firing check localises the fault if it names one of them. Fourteen of seventeen do.
 
 Both numbers come from the identical harness; the "before" figure is measured by
 ignoring the four new check ids, not by checking out an older revision, so nothing else
