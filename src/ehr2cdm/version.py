@@ -4,7 +4,7 @@ Bump ``CODE_VERSION`` whenever a change alters produced bytes. Because it feeds 
 task hash, bumping it invalidates cached artifacts and forces a recompute.
 """
 
-CODE_VERSION = "0.4.0"
+CODE_VERSION = "0.5.0"
 
 # Version of the canonical-serialization + id rules (design section 5.1). Kept separate
 # from CODE_VERSION so that a pure bugfix elsewhere does not renumber every id.

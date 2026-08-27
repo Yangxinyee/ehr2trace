@@ -419,7 +419,13 @@ def resolve_terms_batch(
                CASE WHEN s.standard_concept = 'S' THEN s.domain_id ELSE m.domain_id END,
                CASE WHEN s.standard_concept = 'S' THEN s.vocabulary_id ELSE m.vocabulary_id END,
                s.source_concept_id,
-               s.standard_concept = 'S' AS was_already_standard
+               s.standard_concept = 'S' AS was_already_standard,
+               -- How many standard concepts this source code maps to. One `Maps to` row
+               -- is the common case; 26,562 ICD-10-CM codes have more than one, and
+               -- which of them a run picks must not depend on the query plan.
+               count(DISTINCT CASE WHEN s.standard_concept = 'S' THEN s.source_concept_id
+                                   ELSE CAST(m.concept_id AS BIGINT) END)
+                 OVER (PARTITION BY s.code_system, s.source_code) AS competing
         FROM src s
         LEFT JOIN CONCEPT_RELATIONSHIP r
                ON r.concept_id_1 = CAST(s.source_concept_id AS VARCHAR)
@@ -428,12 +434,17 @@ def resolve_terms_batch(
         LEFT JOIN CONCEPT m
                ON m.concept_id = r.concept_id_2 AND m.standard_concept = 'S'
         WHERE s.standard_concept = 'S' OR m.concept_id IS NOT NULL
+        -- The loop below keeps the first row per code. Without a total order that is
+        -- whichever row the engine emitted first, which varies with the thread count --
+        -- so two runs of the same build mapped the same code to different concepts.
+        ORDER BY s.code_system, s.source_code, concept_id
         """
     ).fetchall()
     con.execute("DROP TABLE IF EXISTS _terms")
 
     hits: dict[tuple[str, str], ConceptMatch] = {}
-    for code_system, source_code, event_kind, concept_id, name, domain, vocab, source_id, direct in rows:
+    for (code_system, source_code, event_kind, concept_id, name, domain, vocab, source_id,
+         direct, competing) in rows:
         if concept_id is None:
             continue
         expected = DOMAIN_FOR_KIND.get(event_kind or "")
@@ -451,7 +462,7 @@ def resolve_terms_batch(
             vocabulary_id=vocab or "",
             standard_concept="S",
             source_concept_id=None if direct else int(source_id),
-            path="exact_code" if direct else "mapped_relationship",
+            path=_path("exact_code" if direct else "mapped_relationship", competing),
         )
 
     resolved.update(hits)
@@ -460,6 +471,18 @@ def resolve_terms_batch(
         second, unresolved = _resolve_unpunctuated(con, unresolved)
         resolved.update(second)
     return resolved, unresolved
+
+
+def _path(path: str, competing: int | None) -> str:
+    """Name the route a mapping took, and say when the route had a fork in it.
+
+    A source code with several `Maps to` targets genuinely maps to all of them; this
+    converter publishes one concept per event, so it takes the lowest concept id and
+    records that it did. The suffix is what makes the choice reviewable instead of
+    silent -- a reviewer can list every mapping that had an alternative, which is not
+    something a `concept_id` column can be asked afterwards.
+    """
+    return f"{path}_ambiguous" if competing and competing > 1 else path
 
 
 #: Characters that are presentation, not identity, in a code: `F17.210` and `F17210`
@@ -517,7 +540,10 @@ def _resolve_unpunctuated(con, pending: Sequence[TermRequest]):
                CASE WHEN c.standard_concept = 'S' THEN c.domain_id ELSE m.domain_id END,
                CASE WHEN c.standard_concept = 'S' THEN c.vocabulary_id ELSE m.vocabulary_id END,
                c.source_concept_id,
-               c.standard_concept = 'S' AS was_already_standard
+               c.standard_concept = 'S' AS was_already_standard,
+               count(DISTINCT CASE WHEN c.standard_concept = 'S' THEN c.source_concept_id
+                                   ELSE CAST(m.concept_id AS BIGINT) END)
+                 OVER (PARTITION BY c.code_system, c.stripped) AS competing
         FROM candidates c
         JOIN unambiguous u USING (code_system, stripped)
         LEFT JOIN CONCEPT_RELATIONSHIP r
@@ -526,11 +552,15 @@ def _resolve_unpunctuated(con, pending: Sequence[TermRequest]):
               AND (r.invalid_reason IS NULL OR r.invalid_reason = '')
         LEFT JOIN CONCEPT m ON m.concept_id = r.concept_id_2 AND m.standard_concept = 'S'
         WHERE c.standard_concept = 'S' OR m.concept_id IS NOT NULL
+        -- See the first pass: `unambiguous` guarantees one source code, not one target,
+        -- so without this the winner among several targets was the engine's choice.
+        ORDER BY c.code_system, c.stripped, 3
         """
     ).fetchall()
     con.execute("DROP TABLE IF EXISTS _stripped")
 
-    for code_system, stripped, concept_id, name, domain, vocab, source_id, direct in rows:
+    for (code_system, stripped, concept_id, name, domain, vocab, source_id,
+         direct, competing) in rows:
         if concept_id is None:
             continue
         for term in by_stripped.get((code_system, stripped), ()):
@@ -548,7 +578,10 @@ def _resolve_unpunctuated(con, pending: Sequence[TermRequest]):
                 source_concept_id=None if direct else int(source_id),
                 # Recorded distinctly, so a reviewer can see which mappings depended on
                 # ignoring punctuation rather than on the code as written.
-                path="unpunctuated_code" if direct else "unpunctuated_mapped_relationship",
+                path=_path(
+                    "unpunctuated_code" if direct else "unpunctuated_mapped_relationship",
+                    competing,
+                ),
             )
     still = [t for t in pending if t.key not in resolved]
     return resolved, still
