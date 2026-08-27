@@ -16,7 +16,13 @@ from pathlib import Path
 
 import polars as pl
 
-from ehr2cdm.digest import changed, digest_frame, digest_parquet, mentions
+from ehr2cdm.digest import (
+    changed,
+    digest_frame,
+    digest_meds_data,
+    digest_parquet,
+    mentions,
+)
 
 
 def _frame() -> pl.DataFrame:
@@ -94,3 +100,48 @@ def test_reordering_rows_is_invisible_to_the_digest():
     # for exactly this reason.
     frame = _frame()
     assert digest_frame(frame) == digest_frame(frame.sort("subject_id"))
+
+
+def _meds_tree(root: Path) -> Path:
+    """A minimal MEDS layout: two shards in two splits."""
+    meds = root / "meds"
+    for split, subject in (("train", 11), ("held_out", 22)):
+        directory = meds / "data" / split
+        directory.mkdir(parents=True)
+        pl.DataFrame({"subject_id": [subject, subject], "code": ["A", "B"]}).write_parquet(
+            directory / "000000.parquet"
+        )
+    return meds
+
+
+def test_a_meds_tree_copied_elsewhere_digests_the_same(tmp_path: Path):
+    # The first full-scale run of this function reported every MIMIC-IV shard as changed,
+    # because DuckDB's `filename` is absolute and the rebuild lived in a clone directory.
+    # An instrument that cannot tell a moved file from a changed one measures nothing.
+    import shutil
+
+    original = _meds_tree(tmp_path / "a")
+    copy = tmp_path / "b" / "meds"
+    copy.parent.mkdir()
+    shutil.copytree(original, copy)
+    assert digest_meds_data(original) == digest_meds_data(copy)
+
+
+def test_a_shard_in_the_wrong_split_changes_the_meds_digest(tmp_path: Path):
+    # The relative path still has to count: which split a subject is in is part of the
+    # output, and moving a shard between splits must not compare equal.
+    original = _meds_tree(tmp_path / "a")
+    moved = _meds_tree(tmp_path / "b")
+    shard = moved / "data" / "held_out" / "000000.parquet"
+    (moved / "data" / "tuning").mkdir(parents=True)
+    shard.rename(moved / "data" / "tuning" / "000000.parquet")
+    assert digest_meds_data(original) != digest_meds_data(moved)
+
+
+def test_a_changed_shard_still_changes_the_meds_digest(tmp_path: Path):
+    original = _meds_tree(tmp_path / "a")
+    edited = _meds_tree(tmp_path / "b")
+    pl.DataFrame({"subject_id": [11, 11], "code": ["A", "C"]}).write_parquet(
+        edited / "data" / "train" / "000000.parquet"
+    )
+    assert digest_meds_data(original) != digest_meds_data(edited)

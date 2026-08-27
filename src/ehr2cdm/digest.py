@@ -137,7 +137,11 @@ def digest_meds_data(meds_dir: Path, temp_dir: Path | None = None) -> str:
     property is measurable at full scale.
 
     The shard set is part of the output, so the file name is hashed alongside the rows: a
-    build that loses a subject must not compare equal to one that kept it.
+    build that loses a subject must not compare equal to one that kept it. It is hashed
+    *relative to the MEDS root*, because DuckDB's `filename` is absolute -- and comparing
+    a tree against a clone of it in another directory then reports a difference on every
+    row, which is what the first full-scale run of this function did. An instrument that
+    cannot tell a moved file from a changed one is not measuring reproducibility.
     """
     import duckdb
 
@@ -154,8 +158,12 @@ def digest_meds_data(meds_dir: Path, temp_dir: Path | None = None) -> str:
         expr = " || '\x1f' || ".join(
             f'coalesce(CAST("{c}" AS VARCHAR), \'\\x00\')' for c in columns
         )
+        # `+ 1` drops the separator as well as the prefix, leaving `train/000123.parquet`.
+        prefix = len(str(Path(meds_dir) / "data")) + 1
         count, total = con.execute(
-            f"""SELECT count(*), coalesce(sum(hash(filename || '\x1e' || {expr})::HUGEINT), 0)
+            f"""SELECT count(*),
+                       coalesce(sum(hash(substr(filename, {prefix + 1}) || '\x1e' || {expr})
+                                    ::HUGEINT), 0)
                 FROM read_parquet('{glob}', filename = true)"""
         ).fetchone()
         header = hashlib.sha256(
