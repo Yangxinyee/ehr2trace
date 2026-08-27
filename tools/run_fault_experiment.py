@@ -33,6 +33,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ehr2cdm.config import load_dataset_config  # noqa: E402
+from ehr2cdm.digest import changed, fingerprint, mentions  # noqa: E402
 from ehr2cdm.faults import FAULTS, clone_work_tree  # noqa: E402
 from ehr2cdm.paths import WorkLayout  # noqa: E402
 from ehr2cdm.validate import run_checks  # noqa: E402
@@ -40,6 +41,10 @@ from ehr2cdm.validate import run_checks  # noqa: E402
 
 def check_state(cfg, layout: WorkLayout, slow: bool) -> dict[str, bool]:
     return {r.check_id: r.passed for r in run_checks(cfg, layout, include_slow=slow)}
+
+
+def check_details(cfg, layout: WorkLayout, slow: bool) -> dict[str, str]:
+    return {r.check_id: r.detail for r in run_checks(cfg, layout, include_slow=slow)}
 
 
 def main() -> None:
@@ -67,6 +72,10 @@ def main() -> None:
     excluded = set(args.exclude_check)
     baseline_layout = WorkLayout(root=args.built, dataset_id=cfg.dataset_id)
     baseline = {k: v for k, v in check_state(cfg, baseline_layout, args.slow).items() if k not in excluded}
+    # The clean tree's artifact digests. Diffing a mutated clone against these says which
+    # artifacts a fault actually damaged, without each fault having to declare it -- and a
+    # fault's own account of its blast radius is exactly the thing not to trust here.
+    baseline_fingerprint = fingerprint(baseline_layout)
     if excluded:
         print(f"ignoring {len(excluded)} check(s): {sorted(excluded)}")
     clean_failures = sorted(k for k, ok in baseline.items() if not ok)
@@ -88,16 +97,19 @@ def main() -> None:
             effect = f"injection failed: {type(exc).__name__}: {exc}"
         skipped = effect.startswith("skipped")
 
-        after = (
-            {k: v for k, v in check_state(cfg, layout, args.slow).items() if k not in excluded}
-            if not skipped
-            else {}
-        )
+        damaged = [] if skipped else changed(baseline_fingerprint, fingerprint(layout))
+        detail = {} if skipped else check_details(cfg, layout, args.slow)
+        after = {k: v for k, v in check_state(cfg, layout, args.slow).items() if k not in excluded} if not skipped else {}
         # A detector is a check that passes clean and fails dirty. Anything already
         # failing on the clean build tells us nothing about this fault.
         detectors = sorted(k for k, ok in after.items() if not ok and baseline.get(k, False))
         expected_hit = sorted(set(f.expect) & set(detectors))
         expected_miss = sorted(set(f.expect) - set(detectors))
+        # Detection is not the same as being able to act on it. A check that fires but
+        # names no damaged artifact leaves an engineer with a failing build and nowhere to
+        # start, which is the limitation this column exists to measure rather than concede.
+        pointing = {c: mentions(f"{c} {detail.get(c, '')}", damaged) for c in detectors}
+        pointing = {c: v for c, v in pointing.items() if v}
 
         results.append(
             {
@@ -115,6 +127,9 @@ def main() -> None:
                 "expected_hit": expected_hit,
                 "expected_missed": expected_miss,
                 "unexpected_detectors": sorted(set(detectors) - set(f.expect)),
+                "damaged_artifacts": damaged,
+                "detectors_naming_a_damaged_artifact": sorted(pointing),
+                "localised": bool(pointing),
                 "seconds": round(time.time() - t0, 1),
             }
         )
@@ -136,6 +151,10 @@ def main() -> None:
         "faults_detected": sum(1 for r in ran if r["detected"]),
         "faults_missed": sorted(r["fault_id"] for r in ran if not r["detected"]),
         "detection_rate": round(sum(1 for r in ran if r["detected"]) / len(ran), 3) if ran else None,
+        "faults_localised": sum(1 for r in ran if r["localised"]),
+        "faults_detected_but_not_localised": sorted(
+            r["fault_id"] for r in ran if r["detected"] and not r["localised"]
+        ),
         "results": results,
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
