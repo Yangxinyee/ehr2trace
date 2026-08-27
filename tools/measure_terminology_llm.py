@@ -29,8 +29,10 @@ import json
 import os
 import random
 import sys
+import threading
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -98,6 +100,14 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=20260823)
     ap.add_argument("--no-llm", action="store_true", help="measure recall only")
     ap.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="terms ranked in parallel. Each worker gets its own client, because the "
+        "retry path keeps the model's last reply on the client and sharing one across "
+        "threads would let two terms correct each other's answer.",
+    )
+    ap.add_argument(
         "--candidates-from",
         type=Path,
         default=None,
@@ -105,12 +115,26 @@ def main() -> None:
         "instead of lexically recalled ones, over the identical terms, so retrieval and "
         "ranking can be varied one at a time.",
     )
+    ap.add_argument(
+        "--terms-from",
+        type=Path,
+        default=None,
+        help="a term file with the same row shape (make_loinc_synonym_terms.py). Use it "
+        "when the held-out terms come from the vocabulary rather than from the built "
+        "events, which is the only way to get an answer key for laboratory strings.",
+    )
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
 
     cfg = load_dataset_config(args.dataset)
     layout = WorkLayout(root=args.built, dataset_id=cfg.dataset_id)
-    events = pl.read_parquet(layout.canonical_path("events"))
+    # The events are only needed to derive terms. When the terms are supplied there is no
+    # reason to read a 71 GB table to ignore it.
+    events = (
+        pl.read_parquet(layout.canonical_path("events"))
+        if not (args.terms_from or args.candidates_from)
+        else pl.DataFrame()
+    )
     vocabulary = Vocabulary.open(args.vocab)
 
     domain = DOMAIN_FOR_KIND.get(args.event_kind)
@@ -124,6 +148,12 @@ def main() -> None:
         ]
         supplied = {r["text"]: r.get("candidates", []) for r in prior["rows"]}
         print(f"{len(sample)} terms and their candidates reused from {args.candidates_from.name}")
+    elif args.terms_from:
+        supplied_terms = json.loads(args.terms_from.read_text())
+        # Already sampled and ordered by the tool that built the file, so it is not
+        # reshuffled here -- two arms reading the same file must see the same terms.
+        sample = supplied_terms["rows"][: args.n]
+        print(f"{len(sample)} held-out terms read from {args.terms_from.name}")
     else:
         pool = truth_set(events, vocabulary, args.code_system, args.event_kind)
         if not pool:
@@ -137,9 +167,22 @@ def main() -> None:
         if not client.probe():
             raise SystemExit("the endpoint could not be probed for schema-constrained output")
 
-    rows: list[dict] = []
+    local = threading.local()
+    # The vocabulary wraps one database connection, which is not safe to share. Ranking
+    # is what the parallelism is for; candidate lookup is fast and stays serialised.
+    vocabulary_lock = threading.Lock()
+
+    def client_for_thread():
+        """One client per worker. See --concurrency."""
+        if not hasattr(local, "client"):
+            local.client = LlmClient.from_env()
+        return local.client
+
     t0 = time.time()
-    for i, item in enumerate(sample, 1):
+    done = [0]
+    progress = threading.Lock()
+
+    def evaluate(item: dict) -> dict:
         if supplied:
             from ehr2cdm.terminology import Candidate
 
@@ -149,14 +192,13 @@ def main() -> None:
                 for c in supplied.get(item["text"], [])[: args.k]
             ]
         else:
-            candidates = vocabulary.candidates(item["text"], domain, limit=args.k)
+            with vocabulary_lock:
+                candidates = vocabulary.candidates(item["text"], domain, limit=args.k)
         ids = [c.concept_id for c in candidates]
-        in_candidates = item["true_concept_id"] in ids
-        lexical_pick = ids[0] if ids else None
 
         model_pick, rationale, failed = None, "", False
         if client is not None and candidates:
-            ranking = client.rank_candidates(item["text"], domain, candidates)
+            ranking = client_for_thread().rank_candidates(item["text"], domain, candidates)
             if ranking is None:
                 failed = True
             else:
@@ -164,24 +206,35 @@ def main() -> None:
                 model_pick = ordered[0].concept_id if ordered else None
                 rationale = ranking.rationale
 
-        rows.append(
-            {
-                "source_code": item["source_code"],
-                "text": item["text"],
-                "true_concept_id": item["true_concept_id"],
-                "true_concept_name": item["true_concept_name"],
-                "n_candidates": len(candidates),
-                "true_in_candidates": in_candidates,
-                "lexical_pick": lexical_pick,
-                "lexical_correct": lexical_pick == item["true_concept_id"],
-                "model_pick": model_pick,
-                "model_correct": model_pick == item["true_concept_id"],
-                "model_failed": failed,
-                "model_rationale": rationale[:200],
-            }
-        )
-        if i % 25 == 0:
-            print(f"  {i}/{len(sample)}  ({time.time() - t0:.0f}s)", flush=True)
+        with progress:
+            done[0] += 1
+            if done[0] % 25 == 0:
+                print(f"  {done[0]}/{len(sample)}  ({time.time() - t0:.0f}s)", flush=True)
+
+        return {
+            "source_code": item["source_code"],
+            "text": item["text"],
+            "true_concept_id": item["true_concept_id"],
+            "true_concept_name": item["true_concept_name"],
+            "n_candidates": len(candidates),
+            "true_in_candidates": item["true_concept_id"] in ids,
+            "lexical_pick": ids[0] if ids else None,
+            "lexical_correct": (ids[0] if ids else None) == item["true_concept_id"],
+            "model_pick": model_pick,
+            "model_correct": model_pick == item["true_concept_id"],
+            "model_failed": failed,
+            "model_rationale": rationale[:200],
+        }
+
+    workers = max(1, args.concurrency if client is not None else 1)
+    if workers == 1:
+        rows = [evaluate(item) for item in sample]
+    else:
+        # The executor preserves submission order in its results, so the output file is
+        # identical whatever the worker count -- which matters because these numbers are
+        # reported as reproducible.
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            rows = list(pool.map(evaluate, sample))
 
     vocabulary.close()
 
@@ -193,6 +246,7 @@ def main() -> None:
     summary = {
         "dataset": cfg.dataset_id,
         "code_system": args.code_system,
+        "term_source": args.terms_from.name if args.terms_from else "built_events",
         "candidate_source": args.candidates_from.name if args.candidates_from else "lexical",
         "event_kind": args.event_kind,
         "domain": domain,
@@ -200,6 +254,7 @@ def main() -> None:
         "n_terms": n,
         "k": args.k,
         "seed": args.seed,
+        "concurrency": workers,
         # The ceiling. Outside this set the answer was never on the table, so neither
         # arm could have picked it and reporting accuracy over everything would
         # understate both equally and hide the real bottleneck.
