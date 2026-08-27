@@ -340,6 +340,19 @@ python tools/run_reproducibility_experiment.py --dataset datasets/ctpe_shape.yam
   --work /tmp/repro --out results/reproducibility.json
 ```
 
+A four-subject fixture is evidence about the code, not about the scale it is claimed to
+work at. Running the same comparison on MIMIC-IV — discard the OMOP database and the
+364,673 MEDS shards from a hard-linked clone, rebuild, compare — found a real defect:
+26,562 ICD-10-CM codes map to several standard concepts, and with no `ORDER BY` on the
+resolution query the thread count decided which one was published. Fixed in 0.5.0; both
+layers now reproduce.
+
+```bash
+python tools/measure_scale_cost.py --dataset datasets/mimiciv.yaml \
+  --built $EHR_WORK_ROOT/mimiciv --work /tmp/scalelab \
+  --stages omop,meds --out results/cost.json
+```
+
 ## Verifying the numbers in the design spec
 
 Section 2 of the design spec claims every input fact was measured. That claim is
