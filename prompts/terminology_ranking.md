@@ -1,5 +1,7 @@
 You are ranking candidate standard concepts for one source string from a hospital data
-export. The candidates were retrieved from a local vocabulary by lexical search.
+export. The candidates were retrieved from a local vocabulary. Retrieval may be lexical or
+by embedding similarity, so a candidate's position in the list carries little
+information and should not be read as evidence.
 
 You may only rank the candidates you are given.
 
