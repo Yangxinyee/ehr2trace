@@ -94,6 +94,8 @@ def _terminology() -> dict[str, str]:
     loinc_composed = _load("loinc_compose_dense_medgemma_k8.json")["model_top1_pct_overall"]
     loinc_lexical = _load("loinc_lexical_k8.json")["lexical_top1_pct_overall"]
     loinc_reranked = _load("loinc_medgemma_k8.json")["model_top1_pct_overall"]
+    qwen_lexical = _load("loinc_qwen3-32b_k8.json")["model_top1_pct_overall"]
+    qwen_composed = _load("loinc_compose_dense_qwen3-32b_k8.json")["model_top1_pct_overall"]
     terms = _load("loinc_synonym_terms.json")
     return {
         "conditionComposeDelta": f"{condition_composed - condition_dense:.1f}",
@@ -101,6 +103,8 @@ def _terminology() -> dict[str, str]:
         "loincRerankDelta": f"{loinc_reranked - loinc_lexical:.1f}",
         "loincDenseRecall": f"{_load('retrieval_bge-m3_measurement.json')['recall_at_k_pct']['8']:.1f}",
         "conditionDenseRecall": f"{_load('retrieval_bge-m3_condition.json')['recall_at_k_pct']['8']:.1f}",
+        "loincQwenRerankDelta": f"{qwen_lexical - loinc_lexical:.1f}",
+        "loincQwenComposeDelta": f"{qwen_composed - loinc_dense:.1f}",
         "loincEligible": _thousands(terms["eligible_synonyms"]),
         "loincPool": _thousands(_load("retrieval_bge-m3_measurement.json")["pool_size"]),
     }

@@ -24,13 +24,22 @@ TASKS = {
             ("terminology_medgemma_k{k}.json", "MedGemma-27B", "27B"),
             ("terminology_qwen3-32b_k{k}.json", "Qwen3-32B", "32B"),
         ),
-        "compose": "compose_dense_medgemma_k{k}.json",
+        "compose": (
+            ("compose_dense_medgemma_k{k}.json", "MedGemma-27B", "27B"),
+            ("compose_dense_qwen3-32b_k{k}.json", "Qwen3-32B", "32B"),
+        ),
     },
     "measurement": {
         "lexical": "loinc_lexical_k{k}.json",
         "dense": "retrieval_bge-m3_measurement.json",
-        "rankers": (("loinc_medgemma_k{k}.json", "MedGemma-27B", "27B"),),
-        "compose": "loinc_compose_dense_medgemma_k{k}.json",
+        "rankers": (
+            ("loinc_medgemma_k{k}.json", "MedGemma-27B", "27B"),
+            ("loinc_qwen3-32b_k{k}.json", "Qwen3-32B", "32B"),
+        ),
+        "compose": (
+            ("loinc_compose_dense_medgemma_k{k}.json", "MedGemma-27B", "27B"),
+            ("loinc_compose_dense_qwen3-32b_k{k}.json", "Qwen3-32B", "32B"),
+        ),
     },
 }
 
@@ -64,10 +73,12 @@ def main() -> None:
         # top-1 over the recalled subset, for comparability with the ranking arms
         of_recalled = round(100.0 * dense["top1_pct"] / recall, 1) if recall else None
         arms.append(("dense", "vector similarity", recall, of_recalled, dense["top1_pct"], "568M"))
-    comp = load(r / spec["compose"].format(k=k))
-    if comp:
-        arms.append(("dense", "MedGemma-27B", comp["recall_at_k_pct"],
-                     comp["model_top1_pct_when_recalled"], comp["model_top1_pct_overall"], "27B"))
+    for pattern, name, params in spec["compose"]:
+        comp = load(r / pattern.format(k=k))
+        if comp:
+            arms.append(("dense", name, comp["recall_at_k_pct"],
+                         comp["model_top1_pct_when_recalled"], comp["model_top1_pct_overall"],
+                         params))
 
     if not arms:
         raise SystemExit(f"no result files for task {args.task} at k={k}")
