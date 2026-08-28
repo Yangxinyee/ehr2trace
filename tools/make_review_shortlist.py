@@ -9,10 +9,15 @@ already in front of them.
 So this does the part a machine can do and stops:
 
   1. rank the queue by how many rows each term decides, and take the head
-  2. retrieve candidates densely, because the strings that need help here are
+  2. expand the abbreviation first, if a model is available. Dense retrieval finds the
+     right concept readily once the string says what it means and reliably fails while
+     it does not: `K SERUM` retrieved vitamin K in all eight candidates and `potassium
+     serum` retrieved serum potassium first. The model writes a *query* here, never a
+     concept id, which is the narrowest useful place to put it
+  3. retrieve candidates densely, because the strings that need help here are
      abbreviations (`NA`, `K`, `HGB`) and lexical matching against a standard vocabulary
      is close to hopeless on them by construction
-  3. optionally re-rank with a local model, which on laboratory strings is worth
+  4. optionally re-rank with the same model, which on laboratory strings is worth
      +9.3 points and on diagnosis descriptions is worth -4.4 (see the paper); it is
      therefore opt-in per run rather than always on
 
@@ -50,7 +55,8 @@ SHEET_FIELDS = [
     "id", "decision", "concept_id", "concept_name", "domain_id", "vocabulary_id",
     "reviewer", "decided_on", "note",
     "source_string", "source_name", "event_kind", "occurrences", "rows_share_pct",
-    "retrieved_by", "model_pick_rank", "model_rationale",
+    "retrieved_by", "expansion", "expansion_confidence",
+    "model_pick_rank", "model_rationale", "flag",
 ]
 for _i in range(1, SHOWN + 1):
     SHEET_FIELDS += [f"cand{_i}_id", f"cand{_i}_name", f"cand{_i}_vocab", f"cand{_i}_score"]
@@ -72,6 +78,36 @@ def select(pending: list[dict], kinds: set[str], top: int) -> list[dict]:
     return sorted(chosen.values(), key=lambda r: -r["occurrences"])
 
 
+def expand(rows: list[dict], concurrency: int) -> None:
+    """Ask the model what each local string means. It writes a query, not an answer."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    from ehr2cdm.llm import LlmClient
+
+    local = threading.local()
+
+    def client():
+        if not hasattr(local, "c"):
+            local.c = LlmClient.from_env()
+        return local.c
+
+    def one(row: dict) -> None:
+        domain = DOMAIN_FOR_KIND.get(row.get("event_kind") or "")
+        if not domain:
+            return
+        result = client().expand_term(
+            row.get("source_string") or "", row.get("source_name") or "", domain
+        )
+        if result is None or not (result.expansion or "").strip():
+            return
+        row["expansion"] = result.expansion.strip()
+        row["expansion_confidence"] = round(float(result.confidence), 2)
+
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
+        list(pool.map(one, rows))
+
+
 def query_text(row: dict) -> tuple[str, str]:
     """What to hand the retriever, and a note saying which field it came from.
 
@@ -80,8 +116,13 @@ def query_text(row: dict) -> tuple[str, str]:
     the abbreviation is what a human would search for and the label is what actually
     carries the meaning, and throwing either away loses a real signal.
     """
+    expansion = (row.get("expansion") or "").strip()
     code = (row.get("source_string") or "").strip()
     name = (row.get("source_name") or "").strip()
+    if expansion:
+        # The expansion replaces rather than joins the abbreviation: leaving `K` in the
+        # query is what pulled the whole neighbourhood towards vitamin K.
+        return expansion, "expansion"
     if name and name.lower() != code.lower():
         return f"{code} {name}", "code+name"
     return code or name, "code"
@@ -161,6 +202,17 @@ def retrieve(rows: list[dict], vocab: Path, model_dir: Path, device: str, batch:
             ]
 
 
+#: Phrases the ranking prompt invites when nothing fits. Matching on the model's own
+#: words is crude; the alternative is trusting a pre-filled answer it disowned.
+_NO_MATCH = ("none of the candidates", "no candidate", "none match", "does not match",
+             "none of these", "no good match", "not a good match")
+
+
+def _says_no_match(rationale: str) -> bool:
+    text = (rationale or "").lower()
+    return any(phrase in text for phrase in _NO_MATCH)
+
+
 def rerank(rows: list[dict], concurrency: int) -> None:
     """Ask a local model to reorder each candidate list. Advisory, never authoritative."""
     import threading
@@ -189,6 +241,7 @@ def rerank(rows: list[dict], concurrency: int) -> None:
         ranking = client().rank_candidates(query_text(row)[0], domain, candidates)
         if ranking is None:
             row["model_rationale"] = "model returned no usable ranking"
+            row["flag"] = "NO_RANKING"
             return
         ordered = sorted(ranking.ranking, key=lambda c: c.rank)
         if not ordered:
@@ -202,6 +255,12 @@ def rerank(rows: list[dict], concurrency: int) -> None:
             c for c in row["candidates"] if c["concept_id"] not in {o.concept_id for o in ordered}
         ]
         row["model_rationale"] = (ranking.rationale or "")[:300]
+        # The model is told to say so when nothing fits, and it does -- on `BILI TOTAL`
+        # it wrote "none of the candidates match the clinical meaning of total
+        # bilirubin" while the sheet pre-filled the top candidate anyway. Retrieval
+        # failed there; the reviewer needs to be told, not handed a wrong default.
+        if _says_no_match(row["model_rationale"]):
+            row["flag"] = "NO_CANDIDATE_FITS"
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         list(pool.map(one, rows))
@@ -218,6 +277,8 @@ def main() -> None:
     ap.add_argument("--k", type=int, default=8, help="candidates retrieved per term")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--batch", type=int, default=256)
+    ap.add_argument("--expand", action="store_true",
+                    help="expand each abbreviation with LLM_MODEL before retrieving")
     ap.add_argument("--llm", action="store_true", help="re-rank the candidates with LLM_MODEL")
     ap.add_argument("--concurrency", type=int, default=16)
     ap.add_argument("--out", type=Path, required=True)
@@ -232,6 +293,10 @@ def main() -> None:
     print(f"{len(rows)} of {len(pending)} terms, deciding {covered:,} of {total_rows:,} rows "
           f"({100 * covered / max(1, total_rows):.1f}%)", flush=True)
 
+    if args.expand:
+        print("expanding abbreviations", flush=True)
+        expand(rows, args.concurrency)
+        print(f"  expanded {sum(1 for r in rows if r.get('expansion'))}/{len(rows)}", flush=True)
     retrieve(rows, args.vocab, args.model, args.device, args.batch, args.cache_dir, args.k)
     if args.llm:
         print("re-ranking", flush=True)
@@ -244,13 +309,16 @@ def main() -> None:
         for row in rows:
             candidates = row.get("candidates") or []
             best = candidates[0] if candidates else {}
+            flagged = row.get("flag") == "NO_CANDIDATE_FITS"
             record = {
                 "id": row["id"],
                 # Deliberately empty. `compile` ignores anything that is not `accept`, and
                 # a sheet that arrives pre-accepted is not a review.
                 "decision": "",
-                "concept_id": best.get("concept_id", ""),
-                "concept_name": best.get("concept_name", ""),
+                # Left empty when the model disowned every candidate: pre-filling one
+                # there invites an accept on an answer nothing stands behind.
+                "concept_id": "" if flagged else best.get("concept_id", ""),
+                "concept_name": "" if flagged else best.get("concept_name", ""),
                 "domain_id": DOMAIN_FOR_KIND.get(row.get("event_kind") or "") or "",
                 "vocabulary_id": best.get("vocabulary_id", ""),
                 "reviewer": "", "decided_on": "", "note": "",
@@ -260,8 +328,11 @@ def main() -> None:
                 "occurrences": row["occurrences"],
                 "rows_share_pct": round(100 * row["occurrences"] / max(1, total_rows), 3),
                 "retrieved_by": query_text(row)[1],
+                "expansion": row.get("expansion", ""),
+                "expansion_confidence": row.get("expansion_confidence", ""),
                 "model_pick_rank": row.get("model_pick_rank", ""),
                 "model_rationale": row.get("model_rationale", ""),
+                "flag": row.get("flag", ""),
             }
             for i in range(SHOWN):
                 c = candidates[i] if i < len(candidates) else {}
@@ -283,6 +354,8 @@ def main() -> None:
         "k": args.k,
         "reranked": bool(args.llm),
         "terms_with_no_candidate": sum(1 for r in rows if not r.get("candidates")),
+        "expanded": sum(1 for r in rows if r.get("expansion")),
+        "flagged_no_candidate_fits": sum(1 for r in rows if r.get("flag") == "NO_CANDIDATE_FITS"),
     }, indent=2))
     print(f"-> {args.out}\n-> {summary}")
 

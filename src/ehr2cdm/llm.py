@@ -66,6 +66,19 @@ class ColumnProposal(BaseModel):
     rationale: str = Field(default="")
 
 
+class TermExpansion(BaseModel):
+    """The clinical term a local abbreviation stands for.
+
+    This is a *query*, not an answer. The concept still comes from the vocabulary and
+    the decision still comes from a person; expanding the string only decides what gets
+    searched for, which is the step where `K SERUM` was retrieving vitamin K.
+    """
+
+    expansion: str = Field(description="the full clinical term, or the original string")
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    rationale: str = Field(default="")
+
+
 class RankedCandidate(BaseModel):
     concept_id: int
     rank: int
@@ -268,6 +281,31 @@ class LlmClient:
         # A role and one sentence; there is nothing here worth a long answer.
         return self._ask(
             "column_semantics", json.dumps(payload, sort_keys=True), schema, ColumnProposal, max_tokens=192
+        )
+
+    def expand_term(self, source_string: str, source_name: str, domain: str | None) -> TermExpansion | None:
+        """Write out what a local abbreviation means, so retrieval can find it.
+
+        Dense retrieval over concept names recovers the right concept readily once the
+        string says what it means, and reliably fails while it does not: on the reference
+        export `K SERUM` retrieved vitamin K in all eight candidates, and `potassium
+        serum` retrieved serum potassium first. The model is the only component that
+        knows the shorthand, and this is the narrowest place to use it -- it writes a
+        query, never a concept id.
+        """
+        payload = {"source_string": source_string, "source_name": source_name, "domain": domain or ""}
+        schema = {
+            "type": "object",
+            "properties": {
+                "expansion": {"type": "string"},
+                "confidence": {"type": "number"},
+                "rationale": {"type": "string"},
+            },
+            "required": ["expansion", "confidence", "rationale"],
+            "additionalProperties": False,
+        }
+        return self._ask(
+            "term_expansion", json.dumps(payload, sort_keys=True), schema, TermExpansion, max_tokens=192
         )
 
     def rank_candidates(
