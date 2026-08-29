@@ -29,7 +29,7 @@ import html
 import json
 from pathlib import Path
 
-SHOWN = 5
+SHOWN = 8
 
 PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -86,7 +86,7 @@ label.opt input { margin:0 }
     <select id="filter">
       <option value="all">All terms</option>
       <option value="undecided">Undecided only</option>
-      <option value="flagged">Flagged: no candidate fits</option>
+      <option value="flagged">Flagged: check carefully</option>
       <option value="measurement">Laboratory only</option>
     </select>
     <input id="who" placeholder="your name (goes in decisions.csv)"
@@ -122,17 +122,17 @@ function render() {
   for (const r of ROWS) {
     const st = state[r.id] || {};
     if (mode === "undecided" && st.decision) continue;
-    if (mode === "flagged" && r.flag !== "NO_CANDIDATE_FITS") continue;
+    if (mode === "flagged" && r.flag !== "CHECK_CAREFULLY") continue;
     if (mode === "measurement" && r.event_kind !== "measurement") continue;
 
     const card = document.createElement("div");
     card.className = "card" + (st.decision === "accept" ? " decided" : "")
-      + (r.flag === "NO_CANDIDATE_FITS" ? " flagged" : "");
+      + (r.flag === "CHECK_CAREFULLY" ? " flagged" : "");
     let h = `<div class="head"><span class="term">${esc(r.source_string)}</span>`;
     if (r.source_name && r.source_name !== r.source_string)
       h += `<span class="expn">${esc(r.source_name)}</span>`;
     if (r.expansion) h += `<span class="expn">&rarr; ${esc(r.expansion)}</span>`;
-    if (r.flag === "NO_CANDIDATE_FITS") h += `<span class="flag">no candidate fits</span>`;
+    if (r.flag === "CHECK_CAREFULLY") h += `<span class="flag">check carefully</span>`;
     h += `<span class="count">${nf(r.occurrences)} rows &middot; ${esc(r.event_kind)}</span></div>`;
     if (r.model_rationale) h += `<p class="why">${esc(r.model_rationale)}</p>`;
 

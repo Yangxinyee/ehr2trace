@@ -14,9 +14,13 @@ So this does the part a machine can do and stops:
      it does not: `K SERUM` retrieved vitamin K in all eight candidates and `potassium
      serum` retrieved serum potassium first. The model writes a *query* here, never a
      concept id, which is the narrowest useful place to put it
-  3. retrieve candidates densely, because the strings that need help here are
-     abbreviations (`NA`, `K`, `HGB`) and lexical matching against a standard vocabulary
-     is close to hopeless on them by construction
+  3. retrieve candidates both densely and lexically, and merge. Neither alone is enough
+     and the two fail on different things. Dense retrieval handles the abbreviations
+     (`NA`, `K`, `HGB`) that lexical matching cannot touch. Lexical matching handles the
+     compositional drug names that dense retrieval cannot: RxNorm calls lactated
+     Ringer's `Calcium Chloride ... / Sodium Chloride 6 MG/ML Irrigation Solution
+     [Lactated Ringer'S Irrigation]`, and the only recognisable words are 150 characters
+     in, past where the encoder truncates
   4. optionally re-rank with the same model, which on laboratory strings is worth
      +9.3 points and on diagnosis descriptions is worth -4.4 (see the paper); it is
      therefore opt-in per run rather than always on
@@ -49,7 +53,9 @@ from ehr2cdm.terminology import DOMAIN_FOR_KIND  # noqa: E402
 
 #: How many candidates to show a reviewer. Five fits on a screen; past that the sheet
 #: stops being readable, which defeats the point of making one.
-SHOWN = 5
+#: Candidate columns written to the sheet. The ranker sees the full merged list
+#: (`--show`); this is how many survive into the file a person reads.
+SHOWN = 8
 
 SHEET_FIELDS = [
     "id", "decision", "concept_id", "concept_name", "domain_id", "vocabulary_id",
@@ -173,6 +179,108 @@ def embed(texts: list[str], model_dir: Path, device: str, batch: int, cache: Pat
     return array
 
 
+#: Words that say how a drug was given rather than what it was. A token match treats
+#: them as evidence: `LACTATED RINGERS IV BOLUS` retrieves `COCHLIOBOLUS LUNATUS`.
+_FORM_WORDS = frozenset("""
+iv ivpb po pr im sq subq intravenous intravenously oral orally injection injectable
+infusion bolus solution soln syringe vial bag premix premixed tab tabs tablet capsule
+cap caps supp suppository cream ointment patch drops spray inhaler neb nebulizer
+pf preservative free continuous drip push each ml mg mcg gm gram units unit
+""".split())
+
+
+def core_form(text: str) -> str:
+    """The substance words, with route, form and strength taken out.
+
+    Not a general normaliser -- it is the crude filter that makes a token match usable on
+    an order description, and it is applied only to build an *extra* query. The unstripped
+    forms are still searched, so nothing is lost if this strips too much.
+    """
+    import re
+
+    cleaned = re.sub(r"[()\[\],/%]", " ", (text or "").lower())
+    words = [
+        w for w in cleaned.split()
+        if w not in _FORM_WORDS and not any(ch.isdigit() for ch in w) and len(w) > 1
+    ]
+    return " ".join(words)
+
+
+def retrieve_lexically(rows: list[dict], vocab_dir: Path, k: int) -> None:
+    """Attach `lexical` candidates, from the vocabulary's own text search.
+
+    Queried on the expansion and, separately, on the source string: the expansion carries
+    the meaning but also carries route and form words that derail a token match --
+    `LACTATED RINGERS IV BOLUS` retrieves `COCHLIOBOLUS LUNATUS` because `BOLUS` is a
+    token. Both queries are cheap and the union is what gets ranked.
+    """
+    from ehr2cdm.terminology import Vocabulary
+
+    vocabulary = Vocabulary.open(vocab_dir)
+    if not getattr(vocabulary, "available", False):
+        return
+    try:
+        for row in rows:
+            domain = DOMAIN_FOR_KIND.get(row.get("event_kind") or "")
+            if not domain:
+                continue
+            queries = list(dict.fromkeys(
+                q for q in (core_form(row.get("expansion") or ""),
+                            (row.get("expansion") or "").strip(),
+                            core_form(row.get("source_name") or ""),
+                            (row.get("source_name") or "").strip(),
+                            (row.get("source_string") or "").strip()) if q
+            ))
+            # Kept per query and round-robined below, not concatenated. Concatenating let
+            # a bad query fill the quota before a good one was reached: for `LACTATED
+            # RINGERS IV BOLUS` the unstripped query returns things that merely share the
+            # words `intravenous` and `solution`, and the stripped one returns the answer.
+            per_query = [
+                [{"concept_id": c.concept_id, "concept_name": c.concept_name,
+                  "vocabulary_id": c.vocabulary_id, "score": round(float(c.score), 4),
+                  "found_by": "lexical"}
+                 for c in vocabulary.candidates(q, domain, limit=k)]
+                for q in queries
+            ]
+            seen: dict[int, dict] = {}
+            for rank in range(k):
+                for results in per_query:
+                    if rank < len(results):
+                        seen.setdefault(results[rank]["concept_id"], results[rank])
+            row["lexical"] = list(seen.values())[: 2 * k]
+    finally:
+        vocabulary.close()
+
+
+def merge(rows: list[dict], keep: int) -> None:
+    """Interleave the dense and lexical lists, best-first, deduplicated by concept.
+
+    Interleaved rather than concatenated because the ranker sees a fixed number of
+    candidates: appending one list to the other would let whichever went first crowd the
+    other out entirely, which is the failure this merge exists to prevent.
+    """
+    for row in rows:
+        dense = list(row.get("candidates") or [])
+        lexical = list(row.get("lexical") or [])
+        for c in dense:
+            c.setdefault("found_by", "dense")
+        merged: dict[int, dict] = {}
+        for i in range(max(len(dense), len(lexical))):
+            for source in (dense, lexical):
+                if i < len(source):
+                    existing = merged.get(source[i]["concept_id"])
+                    if existing is None:
+                        merged[source[i]["concept_id"]] = dict(source[i])
+                    elif existing["found_by"] != source[i]["found_by"]:
+                        # Found by both. Worth saying: agreement between two retrievers
+                        # that fail on different things is the strongest signal here.
+                        existing["found_by"] = "both"
+            if len(merged) >= keep:
+                break
+        row["candidates"] = list(merged.values())[:keep]
+        row.pop("lexical", None)
+
+
 def retrieve(rows: list[dict], vocab: Path, model_dir: Path, device: str, batch: int,
              cache_dir: Path, k: int) -> None:
     """Attach `candidates` to each row, densely retrieved within its own domain."""
@@ -197,7 +305,8 @@ def retrieve(rows: list[dict], vocab: Path, model_dir: Path, device: str, batch:
         for i, row in enumerate(group):
             row["candidates"] = [
                 {"concept_id": int(ids[j]), "concept_name": names[j],
-                 "vocabulary_id": vocabs[j], "score": round(float(scores[i, j]), 4)}
+                 "vocabulary_id": vocabs[j], "score": round(float(scores[i, j]), 4),
+                 "found_by": "dense"}
                 for j in order[i]
             ]
 
@@ -255,12 +364,14 @@ def rerank(rows: list[dict], concurrency: int) -> None:
             c for c in row["candidates"] if c["concept_id"] not in {o.concept_id for o in ordered}
         ]
         row["model_rationale"] = (ranking.rationale or "")[:300]
-        # The model is told to say so when nothing fits, and it does -- on `BILI TOTAL`
-        # it wrote "none of the candidates match the clinical meaning of total
-        # bilirubin" while the sheet pre-filled the top candidate anyway. Retrieval
-        # failed there; the reviewer needs to be told, not handed a wrong default.
+        # The model is told to say so when nothing fits, and it does. Worth surfacing --
+        # but only as a warning. An earlier version also blanked the pre-filled answer,
+        # and that discarded correct ones: RxNorm normalises salts, so `ONDANSETRON HCL
+        # 4 MG/2 ML` really is `ondansetron 2 MG/ML Injection`, and the model rejected it
+        # for not saying hydrochloride. Of the flags raised here, most are that kind of
+        # fussiness about salt, route, form or strength rather than a retrieval failure.
         if _says_no_match(row["model_rationale"]):
-            row["flag"] = "NO_CANDIDATE_FITS"
+            row["flag"] = "CHECK_CAREFULLY"
 
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as pool:
         list(pool.map(one, rows))
@@ -274,7 +385,9 @@ def main() -> None:
     ap.add_argument("--cache-dir", type=Path, required=True, help="where pool embeddings live")
     ap.add_argument("--kinds", default="measurement", help="event kinds to include exhaustively")
     ap.add_argument("--top", type=int, default=500, help="plus this many by rows decided")
-    ap.add_argument("--k", type=int, default=8, help="candidates retrieved per term")
+    ap.add_argument("--k", type=int, default=8, help="candidates retrieved per term, per retriever")
+    ap.add_argument("--show", type=int, default=12, help="candidates kept after merging")
+    ap.add_argument("--dense-only", action="store_true", help="skip the lexical pass")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--expand", action="store_true",
@@ -298,6 +411,12 @@ def main() -> None:
         expand(rows, args.concurrency)
         print(f"  expanded {sum(1 for r in rows if r.get('expansion'))}/{len(rows)}", flush=True)
     retrieve(rows, args.vocab, args.model, args.device, args.batch, args.cache_dir, args.k)
+    if not args.dense_only:
+        print("retrieving lexically", flush=True)
+        retrieve_lexically(rows, args.vocab, args.k)
+        merge(rows, args.show)
+        both = sum(1 for r in rows for c in (r.get("candidates") or []) if c["found_by"] == "both")
+        print(f"  {both} candidates found by both retrievers", flush=True)
     if args.llm:
         print("re-ranking", flush=True)
         rerank(rows, args.concurrency)
@@ -309,16 +428,13 @@ def main() -> None:
         for row in rows:
             candidates = row.get("candidates") or []
             best = candidates[0] if candidates else {}
-            flagged = row.get("flag") == "NO_CANDIDATE_FITS"
             record = {
                 "id": row["id"],
                 # Deliberately empty. `compile` ignores anything that is not `accept`, and
                 # a sheet that arrives pre-accepted is not a review.
                 "decision": "",
-                # Left empty when the model disowned every candidate: pre-filling one
-                # there invites an accept on an answer nothing stands behind.
-                "concept_id": "" if flagged else best.get("concept_id", ""),
-                "concept_name": "" if flagged else best.get("concept_name", ""),
+                "concept_id": best.get("concept_id", ""),
+                "concept_name": best.get("concept_name", ""),
                 "domain_id": DOMAIN_FOR_KIND.get(row.get("event_kind") or "") or "",
                 "vocabulary_id": best.get("vocabulary_id", ""),
                 "reviewer": "", "decided_on": "", "note": "",
@@ -355,7 +471,7 @@ def main() -> None:
         "reranked": bool(args.llm),
         "terms_with_no_candidate": sum(1 for r in rows if not r.get("candidates")),
         "expanded": sum(1 for r in rows if r.get("expansion")),
-        "flagged_no_candidate_fits": sum(1 for r in rows if r.get("flag") == "NO_CANDIDATE_FITS"),
+        "flagged_check_carefully": sum(1 for r in rows if r.get("flag") == "CHECK_CAREFULLY"),
     }, indent=2))
     print(f"-> {args.out}\n-> {summary}")
 

@@ -10,6 +10,11 @@ be written out before it is searched.
   in ordinary vocabulary terms. `K SERUM` becomes `potassium, serum`.
 - Keep the specimen, route or laterality if the source states one, and do not invent one
   if it does not. `LAB CHEM SODIUM` states serum; `NA` alone does not.
+- Use the name a standard vocabulary would file the thing under, not the one the ward
+  says. Drug vocabularies are built on generic ingredient names: `D5W` and `dextrose`
+  are filed under **glucose**, `Tylenol` under **acetaminophen**. Writing the ward's word
+  sends the search to whatever else happens to share it -- `dextrose in water` retrieves
+  water.
 - You are writing a **search query, not an answer**. You are never asked to name a
   concept id, and nothing you write is stored as a mapping. A later step retrieves
   candidates from the vocabulary and a human decides among them.
