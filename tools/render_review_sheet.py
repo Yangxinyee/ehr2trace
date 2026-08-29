@@ -205,11 +205,18 @@ document.getElementById("export").addEventListener("click", () => {
       st.decision === "accept" ? (st.concept_name || "") : "", st.domain_id || "",
       st.decision === "accept" ? (st.vocabulary_id || "") : "", who, today, ""].map(q).join(","));
   }
-  const blob = new Blob([lines.join("\\n") + "\\n"], { type: "text/csv" });
+  // Named so that two reviewers, or one reviewer on two days, do not silently
+  // overwrite each other in a downloads folder. `compile` reads review/decisions.csv,
+  // so this gets renamed when it is put back.
+  const safe = who.replace(/[\\\\/:*?"<>|\\s]+/g, "_").replace(/^_+|_+$/g, "");
+  const name = ["decisions", safe, today].filter(Boolean).join("_") + ".csv";
+  const blob = new Blob(["\\ufeff" + lines.join("\\n") + "\\n"],
+                        { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "decisions.csv";
+  a.download = name;
   a.click();
+  URL.revokeObjectURL(a.href);
 });
 render();
 </script></body></html>
