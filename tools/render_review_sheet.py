@@ -193,7 +193,12 @@ document.getElementById("clear").addEventListener("click", () => {
 });
 document.getElementById("export").addEventListener("click", () => {
   const who = document.getElementById("who").value.trim();
-  const today = new Date().toISOString().slice(0, 10);
+  // Local clock, not toISOString(): that reports UTC, which is already the next day
+  // for anyone reviewing in the evening east of Greenwich.
+  const now = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const stamp = `${today}_${pad(now.getHours())}${pad(now.getMinutes())}`;
   const cols = ["id","decision","concept_id","concept_name","domain_id","vocabulary_id",
                 "reviewer","decided_on","note"];
   const q = v => `"${String(v == null ? "" : v).replace(/"/g, '""')}"`;
@@ -209,7 +214,7 @@ document.getElementById("export").addEventListener("click", () => {
   // overwrite each other in a downloads folder. `compile` reads review/decisions.csv,
   // so this gets renamed when it is put back.
   const safe = who.replace(/[\\\\/:*?"<>|\\s]+/g, "_").replace(/^_+|_+$/g, "");
-  const name = ["decisions", safe, today].filter(Boolean).join("_") + ".csv";
+  const name = ["decisions", safe, stamp].filter(Boolean).join("_") + ".csv";
   const blob = new Blob(["\\ufeff" + lines.join("\\n") + "\\n"],
                         { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
