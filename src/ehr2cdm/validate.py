@@ -671,6 +671,37 @@ def _post_death(l: Layers) -> CheckResult:
     )
 
 
+@check("END_TIME_NEVER_PRECEDES_START")
+def _end_before_start(l: Layers) -> CheckResult:
+    """An interval that ends before it starts is a source contradiction, not a duration.
+
+    Nothing downstream is protected from it: the schema accepts it, OMOP accepts it, and
+    a consumer computing a drug exposure gets a negative number with nothing to warn
+    them. The converter does not repair it -- there is no safe direction to repair it in
+    -- so the one thing that has to hold is that every such event says so.
+    """
+    if l.events is None:
+        return _skip("canonical layer not built")
+    inverted = l.events.filter(
+        pl.col("end_time").is_not_null()
+        & pl.col("event_time").is_not_null()
+        & (pl.col("end_time") < pl.col("event_time"))
+    )
+    unflagged = inverted.filter(
+        ~pl.col("quality_flags").list.contains(str(QualityFlag.END_BEFORE_START))
+    )
+    return CheckResult(
+        "",
+        unflagged.height == 0,
+        f"{inverted.height:,} events end before they start, each flagged and kept with "
+        f"the times the source gave"
+        if unflagged.height == 0
+        else f"{unflagged.height:,} of {inverted.height:,} events that end before they "
+        f"start carry no {QualityFlag.END_BEFORE_START} flag",
+        {"end_before_start": inverted.height, "unflagged": unflagged.height},
+    )
+
+
 @check("QUARANTINE_IS_EXPLAINED")
 def _quarantine_explained(l: Layers) -> CheckResult:
     if l.quarantine is None or l.quarantine.height == 0:
@@ -765,6 +796,7 @@ def _omop_lineage(l: Layers) -> CheckResult:
             "drug_exposure": "drug_exposure_id",
             "procedure_occurrence": "procedure_occurrence_id",
             "measurement": "measurement_id",
+            "observation": "observation_id",
             "note": "note_id",
             "death": "person_id",
         }
@@ -812,6 +844,7 @@ def _omop_concepts(l: Layers) -> CheckResult:
             ("drug_exposure", "drug_concept_id", "Drug"),
             ("procedure_occurrence", "procedure_concept_id", "Procedure"),
             ("measurement", "measurement_concept_id", "Measurement"),
+            ("observation", "observation_concept_id", "Observation"),
         ]
         # Checked with one join per table rather than two queries per concept. On this
         # export that is ~10,000 concepts against a 4.16-million-row vocabulary; asking
@@ -970,6 +1003,7 @@ def _omop_foreign_keys(l: Layers) -> CheckResult:
             "drug_exposure",
             "procedure_occurrence",
             "measurement",
+            "observation",
             "note",
             "death",
             "observation_period",
@@ -980,7 +1014,8 @@ def _omop_foreign_keys(l: Layers) -> CheckResult:
             ).fetchone()[0]
             if n:
                 dangling[f"{table}.person_id"] = int(n)
-        for table in ("condition_occurrence", "drug_exposure", "procedure_occurrence", "measurement", "note"):
+        for table in ("condition_occurrence", "drug_exposure", "procedure_occurrence",
+                      "measurement", "observation", "note"):
             n = con.execute(
                 f"SELECT count(*) FROM {table} t WHERE t.visit_occurrence_id IS NOT NULL "
                 "AND NOT EXISTS (SELECT 1 FROM visit_occurrence v "
@@ -1015,6 +1050,7 @@ def _omop_primary_keys(l: Layers) -> CheckResult:
             ("drug_exposure", "drug_exposure_id"),
             ("procedure_occurrence", "procedure_occurrence_id"),
             ("measurement", "measurement_id"),
+            ("observation", "observation_id"),
             ("note", "note_id"),
             ("death", "person_id"),
             ("observation_period", "observation_period_id"),
@@ -1467,7 +1503,7 @@ def _meds_availability(l: Layers) -> CheckResult:
 def _undecided_not_published(l: Layers) -> CheckResult:
     """A proposal nobody accepted must not have become a mapping."""
     from ehr2cdm.review import read_decisions, read_pending
-    from ehr2cdm.terminology import MappingRegistry
+    from ehr2cdm.terminology import MappingRegistry, mappings_directory
 
     pending = read_pending(l.layout)
     if not pending:
@@ -1476,7 +1512,7 @@ def _undecided_not_published(l: Layers) -> CheckResult:
     # decision either -- but only open ones are a backlog worth reporting.
     still_open = [r for r in pending if r["status"] == "open"]
     decisions = read_decisions(l.layout)
-    registry = MappingRegistry.load(Path.cwd() / "mappings")
+    registry = MappingRegistry.load(mappings_directory())
     leaked = []
     for row in pending:
         decision = decisions.get(row["id"], {}).get("decision", "").strip().lower()

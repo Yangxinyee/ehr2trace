@@ -36,7 +36,8 @@ from typing import Any
 
 from ehr2cdm.config import DatasetConfig
 from ehr2cdm.paths import WorkLayout
-from ehr2cdm.terminology import DOMAIN_FOR_KIND, Candidate, MappingRegistry, Vocabulary
+from ehr2cdm.terminology import (DOMAIN_FOR_KIND, Candidate, MappingRegistry, Vocabulary,
+                                 mappings_directory)
 
 GOLD_FIELDS = ["code_system", "source_string", "event_kind", "concept_id", "concept_name", "note"]
 
@@ -150,7 +151,7 @@ def measure(
         raise ValueError(f"{gold_path} has no usable rows")
 
     vocabulary = Vocabulary.open(vocabulary_dir)
-    mappings = MappingRegistry.load(Path.cwd() / "mappings")
+    mappings = MappingRegistry.load(mappings_directory())
 
     deterministic = ArmResult("deterministic_lookup")
     lexical = ArmResult("plus_lexical_recall")

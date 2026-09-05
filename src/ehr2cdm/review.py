@@ -241,11 +241,12 @@ def propose_terminology(cfg: DatasetConfig, layout: WorkLayout, limit: int = 200
     """
     import polars as pl
 
-    from ehr2cdm.terminology import DOMAIN_FOR_KIND, MappingRegistry, Vocabulary, collect_terms, resolve_terms
+    from ehr2cdm.terminology import (DOMAIN_FOR_KIND, MappingRegistry, Vocabulary, collect_terms,
+                                     mappings_directory, resolve_terms)
 
     events = pl.read_parquet(layout.canonical_path("events"))
     vocabulary = Vocabulary.open(_vocab_dir())
-    mappings = MappingRegistry.load(Path.cwd() / "mappings")
+    mappings = MappingRegistry.load(mappings_directory())
     terms = collect_terms(events.iter_rows(named=True))
     _resolved, unresolved = resolve_terms(list(terms.values()), vocabulary, mappings)
 

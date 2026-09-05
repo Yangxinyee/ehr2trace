@@ -36,7 +36,9 @@ from ehr2cdm.canonical.dedup import (
     merge_links,
     sort_events,
 )
-from ehr2cdm.canonical.normalize import Emission, Row, ShapeContext, build_role_map, get_shape
+from ehr2cdm.canonical.normalize import (
+    Emission, Row, ShapeContext, build_role_map, filter_rows, get_shape, split_codes,
+)
 from ehr2cdm.canonical.values import spec_from_config
 from ehr2cdm.config import DatasetConfig
 from ehr2cdm.paths import StreamingParquetWriter, WorkLayout, task_hash, write_table_atomic
@@ -323,6 +325,14 @@ def run_canonical_task(task: CanonicalTask) -> CanonicalResult:
         roles = build_role_map(spec, df.columns)
         for rows in _iter_subject_groups(df):
             wrapped = [Row(r, roles) for r in rows]
+            # Both are declared per source and both are no-ops unless declared. Order
+            # matters: filtering first means a split never runs on a row that was never
+            # part of this logical source.
+            wrapped = filter_rows(spec, wrapped, df.columns)
+            if spec.code_split is not None:
+                wrapped = [piece for row in wrapped for piece in split_codes(ctx, row)]
+            if not wrapped:
+                continue
             emission: Emission = shape(ctx, wrapped)
             all_events.extend(e.model_dump(mode="python") for e in emission.events)
             all_links.extend(emission.links)

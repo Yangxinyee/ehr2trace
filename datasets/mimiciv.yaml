@@ -253,7 +253,12 @@ sources:
       available_time: {from: [storetime]}
       source_code:    {from: [test_name], required: true}
       source_name:    {from: [spec_type_desc]}
-      value:          {from: [interpretation]}
+      # The organism first: what grew is the result of a culture, and the susceptibility
+      # interpretation is a fact about a different question. Mapping only the latter left
+      # 1,635,365 rows saying a culture was sent and nothing about what came back.
+      # Where nothing grew the interpretation answers instead, which conflates two facts
+      # in one field -- the cost of one column having to carry both.
+      value:          {from: [org_name, interpretation]}
 
   ed_vitalsign:
     adapter: parquet
@@ -314,15 +319,26 @@ sources:
     file_glob: "prescriptions.parquet"
     shape: point_event
     event_kind: drug_order
-    code_system: SOURCE
+    # NDC, not the free-text drug name. The name maps to nothing: the batch resolver
+    # looks a term up by code and by code-ignoring-punctuation, never by concept name,
+    # so `sodium chloride 0.9% flush` was never going to meet RxNorm. 17,740,530 of
+    # 20,292,611 rows (87.4%) carry an 11-digit NDC in exactly the form OMOP stores it,
+    # and 11,962,831 of them reach a Drug-domain standard concept -- measured against
+    # the installed vocabulary before this line was changed, not assumed.
+    #
+    # The 12.6% with no NDC fall back to the drug name. Those rows are then labelled
+    # NDC and will not resolve, which is the honest cost of a code system being a
+    # property of the source rather than of the row: they mapped to nothing before this
+    # change too, so nothing is lost, and their source string is preserved for review.
+    code_system: NDC
     required: false
     fields:
       person_id:    {from: [subject_id], required: true}
       encounter_id: {from: [hadm_id]}
       event_time:   {from: [starttime], required: true}
       end_time:     {from: [stoptime]}
-      source_code:  {from: [drug], required: true}
-      source_name:  {from: [prod_strength]}
+      source_code:  {from: [ndc, drug], required: true}
+      source_name:  {from: [drug, prod_strength]}
       dose:         {from: [dose_val_rx]}
       unit:         {from: [dose_unit_rx]}
       route:        {from: [route]}
@@ -364,8 +380,19 @@ sources:
     event_kind: drug_order
     code_system: SOURCE
     required: false
-    # Provider order entry covers every order type, not only drugs. The order type is
-    # the code; nothing here pretends to know which of them are medications.
+    # Provider order entry covers every order type, not only drugs, and declaring the
+    # whole table as drug_order made 28,915,531 of its 52,211,309 rows (55.4%) assert
+    # something untrue: a radiology order, a consult and an ADT order are not drugs.
+    # Harmless only while nothing in the drug domain mapped; the moment RxNorm or NDC
+    # lookup works, a chest CT becomes a DRUG_EXPOSURE row.
+    #
+    # The laboratory, radiology and nutrition orders dropped here are not lost facts --
+    # the labs and studies they ordered are ingested from their own tables. What is lost
+    # is the ordering event for them, which is order metadata rather than a clinical fact
+    # about the patient.
+    row_filter:
+      column: order_type
+      keep: ["Medications"]
     fields:
       person_id:       {from: [subject_id], required: true}
       encounter_id:    {from: [hadm_id]}

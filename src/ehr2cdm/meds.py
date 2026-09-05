@@ -27,7 +27,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Sequence
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -40,6 +40,7 @@ from ehr2cdm.paths import WorkLayout, write_table_atomic
 from ehr2cdm.schema import EventKind, QualityFlag
 from ehr2cdm.terminology import (
     MappingRegistry,
+    mappings_directory,
     TermRequest,
     Vocabulary,
     normalize_term,
@@ -96,7 +97,7 @@ SHARD_BATCH_ROWS = 200_000
 def build_meds(cfg: DatasetConfig, layout: WorkLayout) -> dict[str, Any]:
 
     vocabulary = Vocabulary.open(_vocab_dir())
-    mappings = MappingRegistry.load(Path.cwd() / "mappings")
+    mappings = MappingRegistry.load(mappings_directory())
 
     # The work below collapses a link table of hundreds of millions of rows and orders
     # every event in the dataset. It needs somewhere to spill -- without it this was
@@ -107,7 +108,9 @@ def build_meds(cfg: DatasetConfig, layout: WorkLayout) -> dict[str, Any]:
     with analytic_connection(scratch, threads=HEAVY_THREADS) as con:
         con.execute(f"CREATE VIEW evt AS SELECT * FROM read_parquet('{layout.canonical_path('events')}')")
         con.execute(f"CREATE VIEW lnk AS SELECT * FROM read_parquet('{layout.canonical_path('event_source')}')")
-        distinct, resolved = _build_term_map(con, vocabulary, mappings)
+        distinct, resolved = _build_term_map(
+            con, vocabulary, mappings, cfg.terminology.drug_name_noise
+        )
 
         rows_path = layout.meds_dir / "_rows.parquet"
         rows_path.parent.mkdir(parents=True, exist_ok=True)
@@ -162,7 +165,8 @@ def build_meds(cfg: DatasetConfig, layout: WorkLayout) -> dict[str, Any]:
 # --------------------------------------------------------------------------------
 
 
-def _build_term_map(con, vocabulary, mappings: MappingRegistry) -> tuple[int, int]:
+def _build_term_map(con, vocabulary, mappings: MappingRegistry,
+                    drug_name_noise: Sequence[str] = ()) -> tuple[int, int]:
     """Resolve each distinct source string once and keep its normalized form.
 
     The normalized form is what a source code looks like in the MEDS namespace, so it
@@ -180,7 +184,7 @@ def _build_term_map(con, vocabulary, mappings: MappingRegistry) -> tuple[int, in
     terms = [
         TermRequest(r[0] or "SOURCE", r[1], r[2], r[3] or "", int(r[4])) for r in rows
     ]
-    resolved, _unresolved = resolve_terms_batch(terms, vocabulary, mappings)
+    resolved, _unresolved = resolve_terms_batch(terms, vocabulary, mappings, drug_name_noise)
     con.execute(
         "CREATE TABLE term_map (code_system VARCHAR, source_code VARCHAR, "
         "concept_id BIGINT, normalized VARCHAR)"

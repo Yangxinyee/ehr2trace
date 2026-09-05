@@ -45,6 +45,7 @@ from ehr2cdm.schema import EventKind, QualityFlag
 from ehr2cdm.terminology import (
     DOMAIN_FOR_KIND,
     MappingRegistry,
+    mappings_directory,
     TermRequest,
     Vocabulary,
     resolve_terms_batch,
@@ -103,7 +104,7 @@ def build_omop(cfg: DatasetConfig, layout: WorkLayout, vocabulary_dir: Path | No
     import duckdb
 
     vocabulary = Vocabulary.open(vocabulary_dir or _env_vocabulary_dir())
-    mappings = MappingRegistry.load(Path.cwd() / "mappings")
+    mappings = MappingRegistry.load(mappings_directory())
 
     db_path = layout.omop_dir / "omop.duckdb"
     if db_path.exists():
@@ -168,7 +169,8 @@ def _register_sources(con, layout: WorkLayout) -> None:
 # --------------------------------------------------------------------------------
 
 
-def _build_term_map(con, vocabulary, mappings: MappingRegistry) -> tuple[int, int, list[TermRequest]]:
+def _build_term_map(con, vocabulary, mappings: MappingRegistry,
+                    drug_name_noise: Sequence[str] = ()) -> tuple[int, int, list[TermRequest]]:
     """Resolve every distinct source string once, not once per row.
 
     Millions of medication rows collapse to a few thousand distinct names. Dispatching
@@ -194,22 +196,33 @@ def _build_term_map(con, vocabulary, mappings: MappingRegistry) -> tuple[int, in
         )
         for r in rows
     ]
-    resolved, unresolved = resolve_terms_batch(terms, vocabulary, mappings)
+    resolved, unresolved = resolve_terms_batch(terms, vocabulary, mappings, drug_name_noise)
 
     con.execute(
+        # `path` is the route the mapping took -- exact code, punctuation-insensitive
+        # code, an approved mapping, or one of the structured drug readings. Carried on
+        # the row rather than recomputed, so a reviewer can ask the published database
+        # which mappings depended on which rule instead of re-deriving it.
         "CREATE TABLE term_map (code_system VARCHAR, source_code VARCHAR, "
-        "concept_id BIGINT, source_concept_id BIGINT)"
+        "concept_id BIGINT, source_concept_id BIGINT, domain_id VARCHAR, path VARCHAR)"
     )
     payload = []
     for term in terms:
         match = resolved.get(term.key)
         if match is None:
             continue
-        payload.append(
-            (term.code_system, term.source_code, int(match.concept_id), int(match.source_concept_id or 0))
-        )
+        # One row per standard concept the source code maps to. OMOP's tables have a row
+        # per concept, and a combination code asserts every one of its targets: keeping
+        # only the first would make a cohort query for either fact miss patients who have
+        # it. The join downstream fans out, which is the intended shape here and is why
+        # MEDS builds its own single-pick map instead of sharing this one.
+        for concept_id, domain in ((match.concept_id, match.domain_id), *match.alternates):
+            payload.append(
+                (term.code_system, term.source_code, int(concept_id),
+                 int(match.source_concept_id or 0), domain or "", match.path)
+            )
     if payload:
-        con.executemany("INSERT INTO term_map VALUES (?, ?, ?, ?)", payload)
+        con.executemany("INSERT INTO term_map VALUES (?, ?, ?, ?, ?, ?)", payload)
     return len(terms), len(resolved), unresolved
 
 
@@ -276,6 +289,7 @@ def _type_concept_map(con, mappings: MappingRegistry) -> None:
         "note",
         "note_class",
         "death",
+        "observation",
         "observation_period",
     )
     con.execute("CREATE TABLE type_concept (key VARCHAR, concept_id BIGINT)")
@@ -300,7 +314,9 @@ STAGE_EXTRA = "event_id"
 
 
 def _publish_all(con, cfg: DatasetConfig, layout: WorkLayout, vocabulary, mappings: MappingRegistry) -> BuildStats:
-    distinct, resolved, unmapped = _build_term_map(con, vocabulary, mappings)
+    distinct, resolved, unmapped = _build_term_map(
+        con, vocabulary, mappings, cfg.terminology.drug_name_noise
+    )
     _build_dose_map(con)
     _build_attribute_map(con, vocabulary, mappings)
     _type_concept_map(con, mappings)
@@ -327,6 +343,7 @@ def _publish_all(con, cfg: DatasetConfig, layout: WorkLayout, vocabulary, mappin
         con, "procedure_occurrence", "procedure_occurrence_id", _procedure_sql(con)
     )
     counts["measurement"] = _stage_and_load(con, "measurement", "measurement_id", _measurement_sql(con, cfg))
+    counts["observation"] = _stage_and_load(con, "observation", "observation_id", _observation_sql(con))
     counts["note"] = _stage_and_load(con, "note", "note_id", _note_sql(con))
     counts["death"] = _publish_death(con)
     counts["observation_period"] = _publish_observation_periods(con)
@@ -494,6 +511,66 @@ def _publish_person(con, cfg: DatasetConfig) -> int:
     return blocked
 
 
+#: Which OMOP table a mapped fact belongs in. OMOP decides this by the standard
+#: concept's domain rather than by the source column, and OBSERVATION is where a fact
+#: that is not a condition, drug, procedure or measurement goes -- a family history, a
+#: screening encounter, a socioeconomic factor. A domain with no table of its own here
+#: lands in OBSERVATION too, which is the convention and not a fallback of last resort.
+DOMAIN_TABLE = {
+    "Condition": "condition_occurrence",
+    "Drug": "drug_exposure",
+    "Procedure": "procedure_occurrence",
+    "Measurement": "measurement",
+    "Observation": "observation",
+}
+
+#: Event kinds whose rows are routed by domain. Visits, notes and deaths are built from
+#: their own structure rather than from a mapped code, so they are not re-routed: a
+#: visit's table is decided by it being a visit.
+ROUTED_KINDS = ("condition", "drug_order", "drug_admin", "procedure", "measurement", "demographic")
+
+#: The term_map join used by every routed table. A concept whose domain has no table
+#: here cannot be published faithfully anywhere -- OMOP 5.4 has an EPISODE table and this
+#: converter does not write one, so `Remission` and `Progression` have nowhere to go --
+#: and the tempting answer is to leave such a row in whichever table its source column
+#: implied. That is precisely the thing the old domain gate existed to prevent: it puts a
+#: non-Condition concept in condition_concept_id, and OMOP_CONCEPTS_EXIST_AND_FIT_THEIR
+#: _DOMAIN catches it, as it did the first time this routing ran.
+#:
+#: So the concept is not used at all. The row is published with concept_id 0, its source
+#: value intact, and it stays in the review queue -- the same treatment as a code the
+#: vocabulary never resolved, which is what it amounts to here.
+ROUTABLE_JOIN = (
+    "LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code\n"
+    "                    AND m.domain_id IN ("
+    + ", ".join(f"'{d}'" for d in DOMAIN_TABLE)
+    + ")"
+)
+
+
+def _routes_here(table: str, kinds: tuple[str, ...]) -> str:
+    """The WHERE clause deciding whether an event belongs in ``table``.
+
+    Three cases, and the middle one is the whole point:
+
+    * unmapped (no concept, or a domain with no table): it stays where its source column
+      put it, because nothing better is known -- a `concept_id = 0` row still has to live
+      somewhere, and the column it came from is the honest guess;
+    * mapped, and its domain names this table: it lands here, whichever column it came
+      from;
+    * mapped, and its domain names another table: it is not this table's row.
+    """
+    kind_list = ", ".join(f"'{k}'" for k in kinds)
+    domains = ", ".join(f"'{d}'" for d in DOMAIN_TABLE)
+    mine = ", ".join(f"'{d}'" for d, tb in DOMAIN_TABLE.items() if tb == table)
+    unrouted = f"(m.domain_id IS NULL OR m.domain_id NOT IN ({domains}))"
+    return (
+        f"(e.event_kind IN ({kind_list}) AND {unrouted})"
+        f" OR (e.event_kind IN ({', '.join(repr(k) for k in ROUTED_KINDS)})"
+        f" AND m.domain_id IN ({mine}))"
+    )
+
+
 def _visit_sql(con) -> str:
     return f"""
         SELECT CAST(row_number() OVER (ORDER BY e.event_id) AS INTEGER) AS visit_occurrence_id,
@@ -552,9 +629,9 @@ def _condition_sql(con) -> str:
         -- pointing at a person who was never published are not a CDM instance,
         -- they are dangling references with a patient's data attached.
         JOIN person pr ON pr.person_id = p.person_id
-        LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
+        {ROUTABLE_JOIN}
         LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
-        WHERE e.event_kind = '{EventKind.condition}'
+        WHERE {_routes_here('condition_occurrence', (str(EventKind.condition),))}
     """
 
 
@@ -598,10 +675,10 @@ def _drug_sql(con) -> str:
         -- pointing at a person who was never published are not a CDM instance,
         -- they are dangling references with a patient's data attached.
         JOIN person pr ON pr.person_id = p.person_id
-        LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
+        {ROUTABLE_JOIN}
         LEFT JOIN dose_map d ON d.dose_source = e.dose_source
         LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
-        WHERE e.event_kind IN ('{EventKind.drug_order}', '{EventKind.drug_admin}')
+        WHERE {_routes_here('drug_exposure', (str(EventKind.drug_order), str(EventKind.drug_admin)))}
     """
 
 
@@ -630,9 +707,9 @@ def _procedure_sql(con) -> str:
         -- pointing at a person who was never published are not a CDM instance,
         -- they are dangling references with a patient's data attached.
         JOIN person pr ON pr.person_id = p.person_id
-        LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
+        {ROUTABLE_JOIN}
         LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
-        WHERE e.event_kind = '{EventKind.procedure}'
+        WHERE {_routes_here('procedure_occurrence', (str(EventKind.procedure),))}
     """
 
 
@@ -696,9 +773,59 @@ def _measurement_sql(con, cfg: DatasetConfig) -> str:
         -- pointing at a person who was never published are not a CDM instance,
         -- they are dangling references with a patient's data attached.
         JOIN person pr ON pr.person_id = p.person_id
-        LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
+        {ROUTABLE_JOIN}
         LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
-        WHERE e.event_kind = '{EventKind.measurement}'
+        WHERE {_routes_here('measurement', (str(EventKind.measurement),))}
+    """
+
+
+def _observation_sql(con) -> str:
+    """Facts that are not conditions, drugs, procedures or measurements.
+
+    Almost everything that lands here is a Z code: a family history, a screening
+    encounter, a socioeconomic factor. None of them is a diagnosis, and until the
+    routing existed none of them was published at all -- 5,737 terms carrying 1,944,952
+    rows sat in a review queue that no reviewer could have emptied, because the question
+    was never "what does this code mean" but "which table does this kind of fact go in".
+
+    No row reaches this table without a mapped concept: an unmapped event stays in the
+    table its source column implies, so nothing arrives here merely because it failed to
+    resolve elsewhere.
+    """
+    return f"""
+        SELECT CAST(row_number() OVER (ORDER BY e.event_id) AS INTEGER) AS observation_id,
+               p.person_id,
+               CAST(m.concept_id AS INTEGER) AS observation_concept_id,
+               CAST(e.event_time AS DATE) AS observation_date,
+               e.event_time AS observation_datetime,
+               {_type_id(con, 'observation')} AS observation_type_concept_id,
+               e.value_number AS value_as_number,
+               substr(e.value_text, 1, 60) AS value_as_string,
+               0 AS value_as_concept_id,
+               0 AS qualifier_concept_id,
+               0 AS unit_concept_id,
+               CAST(NULL AS INTEGER) AS provider_id,
+               v.visit_occurrence_id,
+               CAST(NULL AS INTEGER) AS visit_detail_id,
+               substr(e.source_code, 1, 50) AS observation_source_value,
+               CAST(coalesce(m.source_concept_id, 0) AS INTEGER) AS observation_source_concept_id,
+               substr(e.unit_source, 1, 50) AS unit_source_value,
+               CAST(NULL AS VARCHAR) AS qualifier_source_value,
+               substr(coalesce(e.value_text, CAST(e.value_number AS VARCHAR)), 1, 50) AS value_source_value,
+               CAST(NULL AS BIGINT) AS observation_event_id,
+               CAST(NULL AS INTEGER) AS obs_event_field_concept_id,
+               e.event_id
+        FROM evt e
+        JOIN pmap p ON p.subject_id = e.subject_id
+        -- A patient withheld from PERSON is withheld entirely: clinical rows
+        -- pointing at a person who was never published are not a CDM instance,
+        -- they are dangling references with a patient's data attached.
+        JOIN person pr ON pr.person_id = p.person_id
+        JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
+        LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
+        WHERE e.event_kind IN ({", ".join(repr(k) for k in ROUTED_KINDS)})
+          AND m.domain_id = 'Observation'
+          AND e.event_time IS NOT NULL
     """
 
 

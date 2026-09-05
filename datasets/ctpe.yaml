@@ -55,6 +55,29 @@ partitions:
     membership_label: "no"
     batch: "29b"
 
+terminology:
+  # Site-local words that appear inside a medication name and are not part of the drug.
+  # `JHH`, `BMC`, `HCGH`, `SMH`, `SOM` and `JHM` are hospitals in this system; `UBER` and
+  # `IMS` are order-entry systems; `MBP`, `BEACON` and `PANEL` are order sets; `NS` is
+  # this pharmacy's shorthand for the saline the drug was hung in. Left in the string
+  # they stop the ingredient from being recognised at all, and they are declared here
+  # rather than in the converter because the next hospital's list is a different list.
+  drug_name_noise:
+    - JHH
+    - JHM
+    - BMC
+    - HCGH
+    - SMH
+    - SOM
+    - UBER
+    - IMS
+    - MBP
+    - NS
+    - ZZ
+    - BEACON
+    - PANEL
+    - TEMPLATE
+
 sources:
 
   all_rx:
@@ -129,6 +152,15 @@ sources:
     code_system: ICD10CM
     required: true
     # The recorded date is when the problem was first noted, not a disease onset.
+    #
+    # One cell can hold several codes -- `R78.81, B95.7, Z16.29` is three diagnoses --
+    # and matching the whole string finds nothing. 4,836 of 32,467 distinct codes are
+    # such cells, carrying 86,468 of 4,256,405 condition rows. Splitting them asserts
+    # that the codes are co-equal diagnoses; if the order turns out to rank them, this
+    # declaration is where that assumption is recorded and can be revisited.
+    code_split:
+      separator: ","
+      roles: [source_code]
     fields:
       person_id:   {from: [MRN, mrn], required: true}
       source_code: {from: [Diagnosis_Code], required: true}

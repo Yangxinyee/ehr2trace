@@ -145,9 +145,21 @@ technical one:
 1. Apply for a **UMLS licence** at <https://uts.nlm.nih.gov/uts/signup-login> — free for
    research, but approval takes time, so start here.
 2. Register at <https://athena.ohdsi.org/> and use its Download tab to request a bundle
-   containing at least **SNOMED, ICD10CM, LOINC, RxNorm, RxNorm Extension, UCUM** plus
-   the default type/gender/race vocabularies. Athena emails a link when the build is
-   ready. CPT4 is not needed here and costs an extra Java reconstitution step.
+   containing at least **SNOMED, ICD10CM, ICD9CM, ICD10PCS, ICD9Proc, LOINC, RxNorm,
+   RxNorm Extension, NDC, UCUM** plus the default type/gender/race vocabularies. Athena
+   emails a link when the build is ready. CPT4 is not needed here and costs an extra
+   Java reconstitution step.
+
+   Ask for the whole list even when the dataset in front of you declares fewer code
+   systems than that. An absent vocabulary is indistinguishable downstream from a code
+   that is genuinely unmappable: both leave `concept_id` unset and both land in the
+   review queue, so the cost of omitting one is paid by a person reading terms no
+   person should have been shown. Two concrete cases from MIMIC-IV: it spans both ICD
+   eras and codes its procedures, so a bundle carrying ICD10CM alone put **24,054**
+   billing codes into the queue purely because ICD9CM, ICD9Proc and ICD10PCS were not
+   in it; and its `prescriptions` table carries an 11-digit NDC on 87% of rows, which
+   without the NDC vocabulary stays a free-text drug name and leaves the entire drug
+   domain at zero mapped concepts.
 3. Unzip it (the `.csv` files are tab-delimited despite the extension), then check it
    before trusting it:
 
@@ -181,6 +193,23 @@ itself stays, so ids remain stable and an earlier decision is still traceable. O
 `omop` may retire items, because it is the one caller that sees the complete unmapped
 set; `propose --limit` looks at a subset and must leave the rest alone.
 
+Drug names are the exception to needing a person at all, because they are not free text.
+A hospital writes `OXYCODONE 5 MG TABLET`, and the vocabulary says the same three things
+about `oxycodone hydrochloride 5 MG Oral Tablet` -- with the strength as a *number* in
+`DRUG_STRENGTH`. So `ehr2cdm.drug_match` matches by ingredient, strength and dose form
+rather than by text similarity, deterministically and only when exactly one standard
+concept fits all three. On this export that settles 6,943 of 26,629 medication names and
+takes drug coverage from 23.7% to 76.3%; measured against 139 mappings a physician had
+already confirmed, it reproduces 92.5% of them exactly and the rest as the same drug at
+the same strength under another spelling, with no case of a different drug. The names it
+cannot settle -- compounded infusions, multi-ingredient solutions, anything with no
+strength -- still go to a person.
+
+```bash
+python3 tools/measure_drug_match.py --vocabulary "$OMOP_VOCAB_DIR" \
+    --audit "$EHR_WORK_ROOT/ctpe/review/pending.csv"       # -> results/drug_match.json
+```
+
 Add `--llm` to have a local model rank the recalled candidates. Whether that is worth
 doing is a measurement, not an opinion:
 
@@ -203,7 +232,7 @@ worked around:
 | Cohort label rule and episode binding undefined | The label stays provenance in the audit layer; it is not a clinical fact and not a training target |
 | ~~Batch relationship unconfirmed~~ | **Answered 2026-08-21**: one cohort exported twice, take the union — which is what the pipeline already did |
 | Imaging reports not in the delivery | No imaging conclusion is synthesized from an anchor date or a directory name |
-| ~~No licensed vocabulary~~ | **Installed 2026-08-22** (Athena v5.0 27-FEB-26). 41.6% of distinct terms map deterministically; the rest are in the review queue with their source values preserved |
+| ~~No licensed vocabulary~~ | **Installed 2026-08-22** (Athena v5.0 27-FEB-26). 81.9% of published rows carry a standard concept; the rest are in the review queue with their source values preserved |
 
 The second one is worth being explicit about: under the default `strict` birth-year
 policy, a patient with no derivable `year_of_birth` is withheld from OMOP **entirely** —

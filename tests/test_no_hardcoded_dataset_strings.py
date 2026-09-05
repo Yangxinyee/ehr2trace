@@ -33,6 +33,10 @@ FORBIDDEN = {
     "sheet name": re.compile(r"PFT Narrative|PFT Values|Medication Administration"),
     "cohort label": re.compile(r"pulmonary[ _]embolism|\bCTPE\b|\bCTPA\b|\bctpa\b"),
     "pe diagnosis code": re.compile(r"\bI26\.\d|\bI26\d{2}\b|\b415\.1\d?\b"),
+    # Site abbreviations reach the core through medication names rather than columns:
+    # a drug is written `MIDAZOLAM 1 MG/ML INJECTION SOLUTION JHM`, and stripping `JHM`
+    # in the converter is the same mistake as hardcoding a column, one step further in.
+    "site abbreviation": re.compile(r"\bJHH\b|\bJHM\b|\bHCGH\b|\bBMC\b|\bSMH\b|\bUBER\b|\bMBP\b"),
 }
 
 ALLOWED_PATHS = ("datasets/", "tests/fixtures/", "docs/", "sql/")
@@ -58,6 +62,8 @@ def test_the_guard_would_actually_catch_a_violation():
     assert FORBIDDEN["anchor column"].search("anchor_time = row['dos']")
     assert FORBIDDEN["patient key column"].search("person = row['MRN']")
     assert not FORBIDDEN["anchor column"].search("dose_source = row.text('dose')")
+    assert FORBIDDEN["site abbreviation"].search('NOISE = ("UBER", "MBP")')
+    assert not FORBIDDEN["site abbreviation"].search("uber_generic = False")
     assert not FORBIDDEN["patient key column"].search("person_source_id")
 
 

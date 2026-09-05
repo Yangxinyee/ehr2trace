@@ -31,6 +31,29 @@ def ctpe_config(repo_root: Path):
     return load_dataset_config(repo_root / "datasets" / "ctpe.yaml")
 
 
+@pytest.fixture(scope="session", autouse=True)
+def isolated_mappings(tmp_path_factory: pytest.TempPathFactory):
+    """Every test builds against an empty `mappings/` unless it writes one itself.
+
+    Without this a build picks up whatever is in the developer's checkout, and the
+    integration tests started failing the moment real human decisions were compiled
+    into the repo: concepts from one hospital's vocabulary appearing in a fixture
+    build, and fixture strings colliding with real approved mappings. What a test
+    asserts must not depend on which mappings happen to be sitting beside it.
+
+    Session-scoped because the builds it has to cover are: several integration tests
+    build once per module, before any function-scoped fixture has run.
+    """
+    directory = tmp_path_factory.mktemp("mappings")
+    previous = os.environ.get("EHR_MAPPINGS_DIR")
+    os.environ["EHR_MAPPINGS_DIR"] = str(directory)
+    yield directory
+    if previous is None:
+        os.environ.pop("EHR_MAPPINGS_DIR", None)
+    else:
+        os.environ["EHR_MAPPINGS_DIR"] = previous
+
+
 @pytest.fixture()
 def work_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path / "work"

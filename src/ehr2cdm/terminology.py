@@ -24,8 +24,9 @@ Two rules that are not negotiable:
 from __future__ import annotations
 
 import csv
+import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -67,6 +68,20 @@ class ConceptMatch:
     source_concept_id: int | None = None
     #: how it was reached: exact_code / mapped_relationship / approved_mapping
     path: str = "exact_code"
+    #: The other standard concepts this source code also maps to, as (id, domain).
+    #:
+    #: A source code with several `Maps to` targets asserts every one of them, and on
+    #: MIMIC-IV they are almost never nested: of 4,258 such codes only 2 have one target
+    #: as an ancestor of another, so keeping one drops a fact that the kept one does not
+    #: imply. `E1122` is "type 2 diabetes mellitus with diabetic chronic kidney disease"
+    #: and maps to `Type 2 diabetes mellitus` and `Chronic kidney disease due to type 2
+    #: diabetes mellitus`, which sit in different branches: a cohort searching for either
+    #: one alone finds nothing of the other.
+    #:
+    #: Carried rather than acted on. OMOP has a row per concept and publishes all of
+    #: them; MEDS is one event per thing that happened and publishes the primary pick,
+    #: because one recorded code is one event whatever the vocabulary says it means.
+    alternates: tuple[tuple[int, str], ...] = ()
 
 
 @dataclass
@@ -76,6 +91,19 @@ class Candidate:
     domain_id: str
     vocabulary_id: str
     score: float
+
+
+def mappings_directory() -> Path:
+    """Where the human-confirmed mappings live.
+
+    The working directory by default, which is what a person running `ehr2cdm` expects.
+    `EHR_MAPPINGS_DIR` overrides it, the same way `OMOP_VOCAB_DIR` overrides the
+    vocabulary -- a build should not silently pick up whichever mappings happen to be
+    beside the shell it was launched from, and a test should not depend on the state of
+    a developer's checkout.
+    """
+    raw = os.environ.get("EHR_MAPPINGS_DIR")
+    return Path(raw) if raw else Path.cwd() / "mappings"
 
 
 @dataclass
@@ -367,7 +395,8 @@ def collect_terms(events: Iterable[dict]) -> dict[tuple[str, str], TermRequest]:
 
 
 def resolve_terms_batch(
-    terms: Sequence[TermRequest], vocabulary, mappings: MappingRegistry
+    terms: Sequence[TermRequest], vocabulary, mappings: MappingRegistry,
+    drug_name_noise: Sequence[str] = (),
 ) -> tuple[dict[tuple[str, str], ConceptMatch], list[TermRequest]]:
     """Resolve every term in two SQL joins rather than one query per term.
 
@@ -380,18 +409,24 @@ def resolve_terms_batch(
     if not getattr(vocabulary, "available", False):
         return resolve_terms(terms, vocabulary, mappings)
 
+    con = vocabulary.con
     resolved: dict[tuple[str, str], ConceptMatch] = {}
     pending: list[TermRequest] = []
     for term in terms:
         approved = mappings.get(term.code_system, term.source_code)
-        if approved is not None:
-            resolved[term.key] = approved
+        confirmed = _confirm(con, approved) if approved is not None else None
+        if confirmed is not None:
+            resolved[term.key] = confirmed
         else:
+            # An approved mapping whose concept this vocabulary does not have is not a
+            # mapping yet. The decision was made against some vocabulary; publishing the
+            # id anyway would put a number in the output that nothing here can confirm,
+            # which is the one thing this module is not allowed to do. It goes back in
+            # the queue, and `ehr2cdm validate` reports the gap as a missing concept
+            # rather than as a mapping that quietly did nothing.
             pending.append(term)
     if not pending:
         return resolved, []
-
-    con = vocabulary.con
     con.execute(
         "CREATE OR REPLACE TEMP TABLE _terms "
         "(code_system VARCHAR, source_code VARCHAR, event_kind VARCHAR)"
@@ -447,13 +482,27 @@ def resolve_terms_batch(
          direct, competing) in rows:
         if concept_id is None:
             continue
-        expected = DOMAIN_FOR_KIND.get(event_kind or "")
-        if expected and domain != expected:
-            # Right code, wrong domain for the field it would land in. A question for a
-            # human, not something to force into a column.
-            continue
+        # The domain is carried, not gated on. It used to be a rejection: a code whose
+        # standard concept was not the domain the source column implied was dropped and
+        # queued for review, on the reasoning that forcing it into the wrong column was
+        # worse than publishing nothing. That reasoning was right about the column and
+        # wrong about the conclusion -- OMOP decides a fact's table by its concept's
+        # domain, not by the column it arrived in, and it has an OBSERVATION table for
+        # exactly the codes that are not conditions. Gating here withheld 5,737 terms
+        # carrying 1,944,952 rows, nearly all of them Z codes: family history, screening
+        # encounters, socioeconomic factors. The routing now happens where the row is
+        # written, which is the only place that can see which tables exist.
         key = (code_system, normalize_term(source_code))
         if key in hits:
+            # Same source code, another standard concept. The first is the primary pick
+            # (the query orders by concept id, so the choice is deterministic); the rest
+            # are recorded so a caller with room for them can publish them.
+            existing = hits[key]
+            if int(concept_id) != existing.concept_id:
+                hits[key] = replace(
+                    existing,
+                    alternates=existing.alternates + ((int(concept_id), domain or ""),),
+                )
             continue
         hits[key] = ConceptMatch(
             concept_id=int(concept_id),
@@ -470,7 +519,88 @@ def resolve_terms_batch(
     if unresolved:
         second, unresolved = _resolve_unpunctuated(con, unresolved)
         resolved.update(second)
+    if unresolved:
+        third, unresolved = _resolve_structured_drugs(vocabulary, unresolved, drug_name_noise)
+        resolved.update(third)
     return resolved, unresolved
+
+
+def _resolve_structured_drugs(vocabulary, pending: Sequence[TermRequest],
+                              drug_name_noise: Sequence[str] = ()):
+    """Third pass, for drug names that are strings rather than codes.
+
+    A hospital's medication file names the drug rather than coding it, so the first two
+    passes -- which look a code up -- have nothing to look up and every distinct name
+    lands in the review queue: on one export that was 26,490 names carrying 8.2 million
+    rows. The names are not free text, though. `OXYCODONE 5 MG TABLET` states an
+    ingredient, a strength and a dose form, and the vocabulary states the same three
+    things about `oxycodone hydrochloride 5 MG Oral Tablet` -- the strength as a number
+    in `DRUG_STRENGTH`. Comparing the three is exact, and it is what
+    :mod:`ehr2cdm.drug_match` does.
+
+    This stays a deterministic pass: a name resolves only when exactly one standard
+    concept has that ingredient set, that strength and that dose form. Nothing here
+    ranks, scores or approximates, and a name that fits two concepts or none is
+    returned unresolved for a person to decide.
+    """
+    from .drug_match import DrugIndex, match_drug
+
+    drugs = [t for t in pending if DOMAIN_FOR_KIND.get(t.event_kind or "") == "Drug"]
+    if not drugs:
+        return {}, list(pending)
+    index = getattr(vocabulary, "_drug_index", None)
+    if index is None:
+        try:
+            index = DrugIndex(vocabulary.con)
+        except Exception:
+            # A vocabulary without DRUG_STRENGTH cannot answer this question. That is a
+            # missing table, not a mapping failure: the terms stay unresolved and the
+            # `ehr2cdm vocabulary` check is what reports the gap.
+            return {}, list(pending)
+        vocabulary._drug_index = index
+
+    resolved: dict[tuple[str, str], ConceptMatch] = {}
+    for term in drugs:
+        name = term.source_name or term.source_code
+        _parsed, status, matches = match_drug(index, name, drug_name_noise)
+        if status != "unique":
+            continue
+        match = matches[0]
+        resolved[term.key] = ConceptMatch(
+            concept_id=match.concept_id,
+            concept_name=match.concept_name,
+            domain_id="Drug",
+            vocabulary_id=match.vocabulary_id,
+            standard_concept="S",
+            # The route is part of the record: a reviewer can list every mapping that
+            # needed the total-dose reading of a concentration, or a second spelling of
+            # a dose form, without re-deriving anything.
+            path=f"structured_drug_{match.route}",
+        )
+    return resolved, [t for t in pending if t.key not in resolved]
+
+
+def _confirm(con, approved: ConceptMatch) -> ConceptMatch | None:
+    """Check a human-approved concept id against the vocabulary actually loaded.
+
+    A mapping in `mappings/` is a person's decision, and it is still only as good as the
+    vocabulary it was made against: a concept can be retired, or the bundle in use can
+    simply not contain it. The domain and name come back from the vocabulary rather than
+    from the CSV, so a stale name in a git-tracked file cannot travel into the output.
+    """
+    row = con.execute(
+        """
+        SELECT concept_name, domain_id, vocabulary_id, standard_concept
+        FROM CONCEPT
+        WHERE concept_id = ? AND standard_concept = 'S'
+          AND (invalid_reason IS NULL OR invalid_reason = '')
+        """,
+        [str(approved.concept_id)],
+    ).fetchone()
+    if not row:
+        return None
+    return replace(approved, concept_name=row[0], domain_id=row[1], vocabulary_id=row[2],
+                   standard_concept=row[3])
 
 
 def _path(path: str, competing: int | None) -> str:
@@ -593,9 +723,16 @@ def resolve_terms(
     """Resolve terms deterministically. Whatever fails is returned, not guessed at."""
     resolved: dict[tuple[str, str], ConceptMatch] = {}
     unresolved: list[TermRequest] = []
+    available = getattr(vocabulary, "available", False)
     for term in terms:
         approved = mappings.get(term.code_system, term.source_code)
         if approved is not None:
+            if not available or not vocabulary.concept_exists(approved.concept_id):
+                # See `_confirm`: with no vocabulary there is nothing to check the id
+                # against, so the term stays unresolved rather than publishing a number
+                # taken on trust.
+                unresolved.append(term)
+                continue
             resolved[term.key] = approved
             continue
         match = vocabulary.lookup_code(term.code_system, term.source_code)

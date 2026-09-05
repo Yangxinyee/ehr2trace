@@ -55,6 +55,57 @@ class UntimedValueSpec(BaseModel):
     unit: str | None = None
 
 
+class RowFilterSpec(BaseModel):
+    """Keep only the rows of a source whose column holds one of ``keep`` (design 4.3).
+
+    Some source tables are a mixed bag that a `code_system` and an `event_kind` cannot
+    describe honestly. MIMIC-IV's provider order entry is one table holding medication
+    orders, laboratory orders, radiology orders and consults; declaring the whole of it
+    as ``drug_order`` makes 55% of its rows assert something untrue, and a filter is the
+    only thing that lets one logical source be a subset of one physical table.
+
+    Deliberately exact matching on a named column rather than an expression language: a
+    config that can compute is a config nobody can review.
+    """
+
+    model_config = Strict
+
+    column: str
+    #: values to keep, compared case-insensitively after stripping
+    keep: list[str] = Field(default_factory=list)
+
+    @field_validator("keep")
+    @classmethod
+    def _nonempty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("'keep' must list at least one value; omit row_filter to keep every row")
+        return v
+
+
+class CodeSplitSpec(BaseModel):
+    """One cell holding several codes, and the separator that divides them.
+
+    A problem-list column that reads ``R78.81, B95.7, Z16.29`` records three diagnoses.
+    Matching the whole string finds nothing, and there is no way to know from the string
+    alone whether a comma is a separator or part of a code -- so it is declared, per
+    source, rather than guessed.
+    """
+
+    model_config = Strict
+
+    separator: str = ","
+    #: the field roles whose value is split; each piece becomes its own event
+    roles: list[str] = Field(default_factory=lambda: ["source_code"])
+
+    @field_validator("roles")
+    @classmethod
+    def _known(cls, v: list[str]) -> list[str]:
+        unknown = set(v) - set(FIELD_ROLES)
+        if unknown:
+            raise ValueError(f"unknown field roles {sorted(unknown)}")
+        return v
+
+
 class AdapterOptions(BaseModel):
     model_config = Strict
 
@@ -117,6 +168,10 @@ class SourceSpec(BaseModel):
     group_by: list[str] = Field(default_factory=list)
     #: extra columns kept verbatim in the source layer and carried as attributes
     keep_columns: list[str] = Field(default_factory=list)
+    #: restrict this source to a subset of its physical table's rows
+    row_filter: "RowFilterSpec | None" = None
+    #: a cell holding several codes, and how to divide it
+    code_split: "CodeSplitSpec | None" = None
     notes: str | None = None
 
     @field_validator("adapter")
@@ -249,6 +304,26 @@ class OmopSpec(BaseModel):
     source_release_date: str | None = None
 
 
+class TerminologySpec(BaseModel):
+    """What this export's own strings mean, where the vocabulary cannot say.
+
+    The package knows English drug-name convention -- that `TABLET` is an oral tablet
+    and `MG/ML` is a concentration -- because that is true of every US EHR. It must not
+    know which three letters this hospital system abbreviates its sites to, or what it
+    calls its order-entry system; those strings differ at the next site, and a
+    medication name carrying one fails to resolve until it is removed. So they are
+    declared here rather than accumulating in the core, which is the same rule that
+    keeps column names out of it.
+    """
+
+    model_config = Strict
+
+    #: Site-local words to strip from a medication name before matching it: ward and
+    #: system abbreviations, order-set names, workflow markers. Matched whole-word and
+    #: case-insensitively.
+    drug_name_noise: list[str] = Field(default_factory=list)
+
+
 class MedsSpec(BaseModel):
     model_config = Strict
 
@@ -318,6 +393,7 @@ class DatasetConfig(BaseModel):
     labels: list[LabelSpec] = Field(default_factory=list)
     omop: OmopSpec = Field(default_factory=OmopSpec)
     meds: MedsSpec = Field(default_factory=MedsSpec)
+    terminology: TerminologySpec = Field(default_factory=TerminologySpec)
     execution: ExecutionSpec = Field(default_factory=ExecutionSpec)
     owner_answers: OwnerAnswers = Field(default_factory=OwnerAnswers)
     reference_ranges: dict[str, ReferenceRange] = Field(default_factory=dict)

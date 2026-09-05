@@ -362,3 +362,99 @@ def test_a_normal_result_time_after_collection_is_left_alone():
     event = get_shape("point_event")(ctx, rows).events[0]
     assert event.available_time == datetime(2018, 2, 22, 13, 55)
     assert str(QualityFlag.AVAILABILITY_BEFORE_EVENT) not in event.quality_flags
+
+
+# --------------------------------------------------------------------------------
+# row_filter and code_split: one logical source that is a subset of one physical table,
+# and one cell that holds several codes
+# --------------------------------------------------------------------------------
+
+
+ORDERS_SPEC = {
+    "adapter": "parquet",
+    "shape": "point_event",
+    "event_kind": "drug_order",
+    "fields": {
+        "person_id": {"from": ["PID"], "required": True},
+        "source_code": {"from": ["kind"], "required": True},
+        "event_time": {"from": ["t"], "required": True},
+    },
+}
+
+PROBLEMS_SPEC = {
+    "adapter": "delimited",
+    "shape": "point_event",
+    "event_kind": "condition",
+    "code_system": "ICD10CM",
+    "fields": {
+        "person_id": {"from": ["PID"], "required": True},
+        "source_code": {"from": ["dx"], "required": True},
+        "event_time": {"from": ["t"], "required": True},
+    },
+}
+
+RECORDS = [
+    {"PID": "PID1", "kind": "Medications", "t": "2024-01-01 08:00:00"},
+    {"PID": "PID1", "kind": "Radiology", "t": "2024-01-01 09:00:00"},
+    {"PID": "PID1", "kind": "medications", "t": "2024-01-01 10:00:00"},
+]
+
+
+def test_row_filter_keeps_only_declared_values_case_insensitively():
+    from ehr2cdm.canonical.normalize import filter_rows
+
+    ctx = make_ctx("orders", {**ORDERS_SPEC, "row_filter": {"column": "kind", "keep": ["Medications"]}})
+    rows = make_rows(ctx, RECORDS)
+    columns = {f"{COL_PREFIX}{k}" for r in RECORDS for k in r}
+    kept = filter_rows(ctx.spec, rows, columns)
+    assert [r.text("source_code") for r in kept] == ["Medications", "medications"]
+
+
+def test_no_row_filter_keeps_every_row():
+    from ehr2cdm.canonical.normalize import filter_rows
+
+    ctx = make_ctx("orders", ORDERS_SPEC)
+    rows = make_rows(ctx, RECORDS)
+    columns = {f"{COL_PREFIX}{k}" for r in RECORDS for k in r}
+    assert len(filter_rows(ctx.spec, rows, columns)) == len(RECORDS)
+
+
+def test_row_filter_naming_an_absent_column_raises_rather_than_keeping_everything():
+    """The failure mode worth a test: a typo that silently disables the filter."""
+    import pytest
+
+    from ehr2cdm.canonical.normalize import filter_rows
+
+    ctx = make_ctx("orders", {**ORDERS_SPEC, "row_filter": {"column": "order_typo", "keep": ["x"]}})
+    rows = make_rows(ctx, RECORDS)
+    columns = {f"{COL_PREFIX}{k}" for r in RECORDS for k in r}
+    with pytest.raises(ValueError, match="order_typo"):
+        filter_rows(ctx.spec, rows, columns)
+
+
+def test_code_split_turns_one_cell_into_one_row_per_code():
+    from ehr2cdm.canonical.normalize import split_codes
+
+    ctx = make_ctx("problems", {**PROBLEMS_SPEC, "code_split": {"separator": ",", "roles": ["source_code"]}})
+    rows = make_rows(ctx, [{"PID": "PID1", "dx": "R78.81, B95.7, Z16.29", "t": "2024-01-01"}])
+    pieces = split_codes(ctx, rows[0])
+    assert [p.text("source_code") for p in pieces] == ["R78.81", "B95.7", "Z16.29"]
+    # every piece keeps the rest of the row, and stays attached to the one source row
+    assert {p.source_row_id for p in pieces} == {"row1"}
+    assert {p.text("event_time") for p in pieces} == {"2024-01-01"}
+
+
+def test_code_split_leaves_a_single_code_alone():
+    from ehr2cdm.canonical.normalize import split_codes
+
+    ctx = make_ctx("problems", {**PROBLEMS_SPEC, "code_split": {"separator": ",", "roles": ["source_code"]}})
+    rows = make_rows(ctx, [{"PID": "PID1", "dx": "I26.99", "t": "2024-01-01"}])
+    assert [p.text("source_code") for p in split_codes(ctx, rows[0])] == ["I26.99"]
+
+
+def test_split_codes_is_a_no_op_without_the_declaration():
+    from ehr2cdm.canonical.normalize import split_codes
+
+    ctx = make_ctx("problems", PROBLEMS_SPEC)
+    rows = make_rows(ctx, [{"PID": "PID1", "dx": "R78.81, B95.7", "t": "2024-01-01"}])
+    assert [p.text("source_code") for p in split_codes(ctx, rows[0])] == ["R78.81, B95.7"]

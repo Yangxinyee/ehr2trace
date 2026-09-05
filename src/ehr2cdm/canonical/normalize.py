@@ -139,6 +139,69 @@ def build_role_map(spec: SourceSpec, columns: Iterable[str]) -> dict[str, list[s
     return roles
 
 
+def filter_rows(spec: SourceSpec, rows: Sequence["Row"], columns: Iterable[str]) -> list["Row"]:
+    """Keep only the rows a declared ``row_filter`` admits.
+
+    A dropped row produces no event, which is already an allowed outcome -- a
+    demographics row carrying nothing but a patient key produces none either. What the
+    design forbids is that being invisible, and it is not: SOURCE_ROWS_ACCOUNTED reports
+    every parsed row's destination, so rows removed here show up as a number that moved.
+    """
+    rf = spec.row_filter
+    if rf is None:
+        return list(rows)
+    available = {c[len(COL_PREFIX):].strip().lower(): c for c in columns if c.startswith(COL_PREFIX)}
+    column = available.get(rf.column.strip().lower())
+    if column is None:
+        # A filter naming a column the source does not have would silently keep
+        # everything, which is the opposite of what was asked for.
+        raise ValueError(
+            f"row_filter names column {rf.column!r}, which this source does not have; "
+            f"available: {sorted(available)[:20]}"
+        )
+    keep = {v.strip().lower() for v in rf.keep}
+    out = []
+    for row in rows:
+        value = row.data.get(column)
+        if value is not None and str(value).strip().lower() in keep:
+            out.append(row)
+    return out
+
+
+def split_codes(ctx: "ShapeContext", row: "Row") -> list["Row"]:
+    """One row holding several codes -> one row per code, or the row unchanged.
+
+    Each piece keeps every other column, so the three diagnoses in `R78.81, B95.7,
+    Z16.29` become three events sharing a time, an encounter and a source row. They stay
+    linked to that one row: the lineage says one source row produced three events, which
+    is what happened.
+    """
+    spec = ctx.spec.code_split
+    if spec is None:
+        return [row]
+    pieces: dict[str, list[str]] = {}
+    for role in spec.roles:
+        text = row.text(role, ctx.null_literals)
+        if text and spec.separator in text:
+            parts = [p.strip() for p in text.split(spec.separator)]
+            parts = [p for p in parts if p]
+            if len(parts) > 1:
+                pieces[role] = parts
+    if not pieces:
+        return [row]
+    width = max(len(v) for v in pieces.values())
+    out: list[Row] = []
+    for i in range(width):
+        data = dict(row.data)
+        for role, parts in pieces.items():
+            column = (row.roles.get(role) or [None])[0]
+            if column is None:
+                continue
+            data[column] = parts[i] if i < len(parts) else parts[-1]
+        out.append(Row(data, row.roles))
+    return out
+
+
 # --------------------------------------------------------------------------------
 # shape context and results
 # --------------------------------------------------------------------------------
@@ -293,6 +356,19 @@ def resolve_times(ctx: ShapeContext, row: Row) -> tuple[datetime | None, datetim
         # and the contradiction is flagged rather than quietly accepted.
         available_time = event_time
         flags.append(str(QualityFlag.AVAILABILITY_BEFORE_EVENT))
+
+    if end_time is not None and event_time is not None and end_time < event_time:
+        # The other way a source contradicts itself, and the one that is not repairable
+        # here. Availability above can be moved to the conservative side because its
+        # whole job is to keep the future out of a window; an end time has no such safe
+        # direction -- clamping it to the start invents a zero duration, swapping the two
+        # invents an interval, and dropping it destroys the only record that the source
+        # said something impossible. So the times are kept exactly as written and the
+        # contradiction is carried on the event, the way a post-death record is.
+        #
+        # This is not rare enough to treat as noise: MIMIC-IV's `prescriptions` has
+        # `stoptime` before `starttime` on 816,994 of 20,292,611 rows.
+        flags.append(str(QualityFlag.END_BEFORE_START))
 
     return event_time, available_time, end_time, flags + f1
 

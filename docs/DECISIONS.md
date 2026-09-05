@@ -87,3 +87,91 @@ Section 7.3 says each patient lives in exactly one shard and the checklist says 
 shard per patient. Those are different claims. `meds.shard_size` makes it configurable
 and the default is one patient per shard, which satisfies both readings; the
 contiguity and time-ordering checks hold either way.
+
+## Drug names are matched structurally, not by text similarity
+
+A hospital's medication file names the drug instead of coding it. `Medication_Name` is
+the only identifier the CTPE export gives, so the two deterministic passes that exist —
+look the code up, then look it up ignoring punctuation — have nothing to look up, and
+every distinct name lands in the review queue: 26,490 names carrying 8.2 million rows,
+against 2.6 million rows that mapped. Drug coverage sat at 23.7%.
+
+The queue was then ranked by dense retrieval over the whole string, and that is where
+the real failure was. `CEFAZOLIN 2 GRAM/100 ML IN 0.9% SODIUM CHLORIDE INTRAVENOUS
+PIGGYBACK` and `Cefazolin 2000 MG Intravenous Solution` share almost no surface, while
+`OXYCODONE 5 MG` sits close to `acetaminophen 300 MG / oxycodone 5 MG Oral Tablet`,
+which is a different drug. The exact concepts were in the vocabulary the whole time and
+ranked outside the top 32; a person confirming candidates cannot confirm what they were
+never shown.
+
+But a drug name is not free text. It states an ingredient, a strength and a dose form,
+and the vocabulary states the same three things about the concept — the strength as a
+number in `DRUG_STRENGTH`, not as words in a name. Comparing three fields is exact where
+comparing one string is not, so `ehr2cdm.drug_match` parses the source name and looks
+the concept up by those fields. It is a deterministic pass, in the same class as the
+punctuation-insensitive code lookup: exactly one standard concept with that ingredient
+set, that strength and that dose form, or nothing.
+
+Four things it is allowed to do beyond literal equality, each of which is a spelling
+difference rather than a weaker claim, and each of which still has to end in a unique
+concept:
+
+- **dose-form tiers.** `Injectable Solution` and `Injection` are the same vial filed
+  twice. `ehr2cdm.drug_lexicon` lists the spellings in order and the first one that
+  exists is taken, so two names for one form resolve instead of tying.
+- **the total-dose reading.** `2 GRAM/100 ML` on an IV bag is what RxNorm Extension
+  calls `2000 MG`. When the source states a whole-container volume both readings are
+  tried; a percent and a `1:1,000` are concentrations by definition and are not.
+- **the salt suffix.** `OXYCODONE HCL` is RxNorm's `oxycodone` — but the full name is
+  tried first, and the fallback is refused outright when the vocabulary has a concept
+  that keeps the dropped word. That is what stops `HEPARIN (PORCINE)` from quietly
+  becoming plain `heparin` while `heparin sodium, porcine` exists.
+- **qualified variants.** `Once-Daily gabapentin 600 MG Oral Tablet` names a product
+  line the source did not. Among candidates that already agree on ingredient, strength
+  and form, the one carrying the most of the source's own words wins, then the shortest
+  name — the same rule, and the same reason, as the lexical candidate ranking.
+
+One rule runs the other way, and it exists because leaving it out produced a real error.
+When a source string names no dose form, every form is a candidate, and `FOLIC ACID
+1 MG/3 ML` matched `folic acid 1 MG Oral Tablet` — a unique match, on 35,408 rows, and
+a tablet. A strength written per millilitre describes something poured, so a source
+concentration now restricts the formless case to dose forms the vocabulary measures by
+volume. Which those are is asked of `DRUG_STRENGTH` rather than listed here: `Oral
+Tablet` and `Oral Capsule` have no drug in it with a millilitre denominator and
+`Injection` has 73%, and the gap is not close. It cost three of the confirmed mappings
+and removed a class of silent errors, which is the right trade.
+
+Measured against the 139 drug mappings a physician had already confirmed, holding those
+mappings out so the matcher cannot short-cut them: 120 of 139 resolve, and of those,
+92.5% are the identical concept, 5.0% are the same ingredient and strength under the
+other spelling of one dose form, and 2.5% are the same ingredient under the other
+reading of a concentration. **None is a different drug and none is a different
+strength** — the failure that would matter is absent, and the 16 that do not resolve
+abstain rather than approximate.
+
+A second check reads the *concept name* — a different field, written by a different
+process from the numbers in `DRUG_STRENGTH` — re-derives a strength from it, and
+compares that with the source string. Over the 6,950 names the pass settles on this
+export, 5,848 are comparable that way and **none disagrees**.
+
+Those numbers are re-derivable rather than remembered, and the tool exits non-zero if a
+disagreement ever turns out to be a different drug:
+
+```bash
+python3 tools/measure_drug_match.py --vocabulary "$OMOP_VOCAB_DIR"   # -> results/drug_match.json
+```
+
+The disagreements are classified from `DRUG_STRENGTH` rather than by reading names,
+because two concepts with the same ingredient set and the same strength are the same
+drug however differently they are spelled.
+
+Two limits worth stating. The lexicon is English drug-name convention, not a vocabulary
+— a form phrase it does not know makes a term abstain, which is visible in the review
+queue but is a maintenance cost. And the order in which it lists two spellings of one
+dose form was calibrated against those 139 physician decisions; that is a preference
+recorded in a file a reviewer can read and change, not something derived from the data.
+
+What this does not do is replace review. Names that state no strength (`ONDANSETRON
+IVPB`), multi-ingredient solutions (`LACTATED RINGERS`), compounded infusions and
+non-drugs (`BLOOD SUGAR DIAGNOSTIC STRIPS`) all still abstain and still go to a person.
+The queue is smaller, not gone.

@@ -387,10 +387,11 @@ def compile_mappings(
 ) -> None:
     """review/decisions.csv -> mappings/. Only human decisions are compiled."""
     from ehr2cdm.review import compile_decisions
+    from ehr2cdm.terminology import mappings_directory
 
     cfg, _path = _load(dataset)
     layout = _layout(cfg)
-    target = mappings_dir or Path.cwd() / "mappings"
+    target = mappings_dir or mappings_directory()
     written = compile_decisions(layout, target)
     typer.echo(f"compiled {written} decisions into {target}")
     raise typer.Exit(code=0)
