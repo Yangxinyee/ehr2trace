@@ -1,0 +1,5 @@
+source_string,code_system,concept_id,concept_name,domain_id,vocabulary_id,mapping_version,decided_by,decided_on,note
+AGE,SOURCE,3022304,Age,Observation,LOINC,1,yxx,2026-09-02,
+ETHNICITY,SOURCE,44803968,Ethnicity,Observation,SNOMED,1,yxx,2026-09-02,
+GENDER,SOURCE,3046965,Sex,Observation,LOINC,1,yxx,2026-09-02,
+RACE,SOURCE,4013886,Race,Observation,SNOMED,1,yxx,2026-09-02,

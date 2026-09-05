@@ -129,12 +129,47 @@ def query_text(row: dict) -> tuple[str, str]:
         # The expansion replaces rather than joins the abbreviation: leaving `K` in the
         # query is what pulled the whole neighbourhood towards vitamin K.
         return expansion, "expansion"
+    if code.isdigit() and name:
+        # A purely numeric code is a surrogate key, not an abbreviation. MIMIC-IV names
+        # its laboratory tests `50912`; there is nothing in that string to embed, and
+        # leaving it in front of the label asks the encoder to place the query somewhere
+        # between a creatinine assay and a five-digit number. The label carries the whole
+        # signal, so the number is dropped rather than joined -- the same reason an
+        # expansion replaces `K` instead of sitting beside it.
+        return name, "name"
     if name and name.lower() != code.lower():
         return f"{code} {name}", "code+name"
     return code or name, "code"
 
 
-def load_pool(vocab_dir: Path, domain: str) -> tuple[list[int], list[str], list[str]]:
+#: Concepts that are real, standard, and useless as retrieval candidates for a hospital's
+#: own vocabulary. They are excluded from the pool rather than down-ranked, because with
+#: 32 slots a term competes against its own packaging variants: RxNorm Extension carries
+#: one concept per box size and per manufacturer, so `cefazolin 2000 MG Injection` sits
+#: behind dozens of `... Box of 25 [Cefazolin Hikma]` entries that mean the same drug.
+#:
+#: Measured on the installed bundle: 1,640,071 of 2,022,711 standard Drug concepts (81%)
+#: are a brand, a manufacturer or a box, and every concept this project has verified by
+#: hand as a correct answer survives the filter.
+#:
+#: The cost is real and worth stating: a product that exists *only* under a brand becomes
+#: unreachable. That is the right trade for mapping a ward's generic drug names, and the
+#: wrong one for mapping a pharmacy's branded inventory -- hence a flag, not a default
+#: buried in code.
+POOL_EXCLUSIONS = {
+    "Drug": (
+        "concept_name NOT LIKE '%Box of %' "
+        "AND NOT regexp_matches(concept_name, ' by [A-Z][A-Za-z0-9&. -]+$') "
+        "AND concept_name NOT LIKE '%[%]%'"
+    ),
+    # Gene variants and cancer staging are standard Measurement concepts that no ordinary
+    # laboratory name should ever retrieve. They were 14% of the measurement pool and are
+    # what `STX1` and `UTX3` were matching against.
+    "Measurement": "vocabulary_id NOT IN ('OMOP Genomic', 'Cancer Modifier', 'SNOMED Veterinary')",
+}
+
+
+def load_pool(vocab_dir: Path, domain: str, denoise: bool = False) -> tuple[list[int], list[str], list[str]]:
     import duckdb
 
     con = duckdb.connect()
@@ -145,6 +180,7 @@ def load_pool(vocab_dir: Path, domain: str) -> tuple[list[int], list[str], list[
             FROM read_csv('{vocab_dir / "CONCEPT.csv"}', {options})
             WHERE standard_concept = 'S' AND domain_id = '{domain}'
               AND (invalid_reason IS NULL OR invalid_reason = '')
+              AND {POOL_EXCLUSIONS.get(domain, '1=1') if denoise else '1=1'}
             ORDER BY concept_id"""
     ).fetchall()
     con.close()
@@ -282,7 +318,7 @@ def merge(rows: list[dict], keep: int) -> None:
 
 
 def retrieve(rows: list[dict], vocab: Path, model_dir: Path, device: str, batch: int,
-             cache_dir: Path, k: int) -> None:
+             cache_dir: Path, k: int, denoise: bool = False) -> None:
     """Attach `candidates` to each row, densely retrieved within its own domain."""
     import numpy as np
 
@@ -295,9 +331,11 @@ def retrieve(rows: list[dict], vocab: Path, model_dir: Path, device: str, batch:
             row["candidates"] = []
 
     for domain, group in sorted(by_domain.items()):
-        ids, names, vocabs = load_pool(vocab, domain)
-        print(f"{domain}: {len(group)} terms against {len(ids):,} concepts", flush=True)
-        pool = embed(names, model_dir, device, batch, cache_dir / f"bge-m3_{domain.lower()}.npy", domain)
+        ids, names, vocabs = load_pool(vocab, domain, denoise)
+        tag = f"{domain.lower()}{'_denoised' if denoise else ''}"
+        print(f"{domain}: {len(group)} terms against {len(ids):,} concepts"
+              + (" (denoised)" if denoise else ""), flush=True)
+        pool = embed(names, model_dir, device, batch, cache_dir / f"bge-m3_{tag}.npy", domain)
         queries = embed([query_text(r)[0] for r in group], model_dir, device, batch, None, f"{domain} queries")
         scores = queries @ pool.T
         top = np.argpartition(-scores, kth=k, axis=1)[:, :k]
@@ -388,6 +426,10 @@ def main() -> None:
     ap.add_argument("--k", type=int, default=8, help="candidates retrieved per term, per retriever")
     ap.add_argument("--show", type=int, default=12, help="candidates kept after merging")
     ap.add_argument("--dense-only", action="store_true", help="skip the lexical pass")
+    ap.add_argument("--denoise", action="store_true",
+                    help="drop brand, manufacturer and packaging variants from the candidate "
+                         "pool, and gene/cancer-staging concepts from the measurement pool. "
+                         "See POOL_EXCLUSIONS for what this costs.")
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--batch", type=int, default=256)
     ap.add_argument("--expand", action="store_true",
@@ -395,6 +437,11 @@ def main() -> None:
     ap.add_argument("--llm", action="store_true", help="re-rank the candidates with LLM_MODEL")
     ap.add_argument("--concurrency", type=int, default=16)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--candidates-json", type=Path, default=None,
+                    help="also write every merged candidate as JSON. The sheet shows the "
+                         "first eight because that is what a person can read on a screen; "
+                         "a ranker can see further down the list than that, and the two "
+                         "consumers should not be forced to share a width.")
     args = ap.parse_args()
 
     with open(args.pending, newline="", encoding="utf-8") as fh:
@@ -410,7 +457,7 @@ def main() -> None:
         print("expanding abbreviations", flush=True)
         expand(rows, args.concurrency)
         print(f"  expanded {sum(1 for r in rows if r.get('expansion'))}/{len(rows)}", flush=True)
-    retrieve(rows, args.vocab, args.model, args.device, args.batch, args.cache_dir, args.k)
+    retrieve(rows, args.vocab, args.model, args.device, args.batch, args.cache_dir, args.k, args.denoise)
     if not args.dense_only:
         print("retrieving lexically", flush=True)
         retrieve_lexically(rows, args.vocab, args.k)
@@ -457,6 +504,35 @@ def main() -> None:
                 record[f"cand{i + 1}_vocab"] = c.get("vocabulary_id", "")
                 record[f"cand{i + 1}_score"] = c.get("score", "")
             writer.writerow(record)
+
+    if args.candidates_json:
+        args.candidates_json.parent.mkdir(parents=True, exist_ok=True)
+        payload = [
+            {
+                "id": row["id"],
+                "source_string": row.get("source_string", ""),
+                "source_name": row.get("source_name", ""),
+                "event_kind": row.get("event_kind", ""),
+                "code_system": row.get("code_system", ""),
+                "occurrences": row.get("occurrences", 0),
+                "expansion": row.get("expansion", ""),
+                "candidates": [
+                    {
+                        "concept_id": c.get("concept_id"),
+                        "concept_name": c.get("concept_name", ""),
+                        "vocabulary_id": c.get("vocabulary_id", ""),
+                        "found_by": c.get("found_by", ""),
+                    }
+                    for c in (row.get("candidates") or [])
+                ],
+            }
+            for row in rows
+        ]
+        args.candidates_json.write_text(
+            json.dumps(payload, indent=1, ensure_ascii=False), encoding="utf-8"
+        )
+        print(f"-> {args.candidates_json}  ({len(payload)} terms, "
+              f"{sum(len(r['candidates']) for r in payload)} candidates)", flush=True)
 
     summary = args.out.with_suffix(".summary.json")
     summary.write_text(json.dumps({

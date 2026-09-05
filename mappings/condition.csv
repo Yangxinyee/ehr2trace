@@ -1,0 +1,4 @@
+source_string,code_system,concept_id,concept_name,domain_id,vocabulary_id,mapping_version,decided_by,decided_on,note
+D72.829,ICD10CM,438398,Leukocytosis,Condition,SNOMED,1,yxx,2026-09-02,
+R74.8,ICD10CM,4326594,Abnormal liver function,Condition,SNOMED,1,yxx,2026-09-02,
+R79.89,ICD10CM,4035689,Abnormal adrenocorticotropic hormone,Condition,SNOMED,1,yxx,2026-09-02,
