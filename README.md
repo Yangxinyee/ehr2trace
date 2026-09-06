@@ -10,8 +10,7 @@ judgment is genuinely required — and a human confirming every proposal.
 
 **ehr2cdm: Auditable EHR Data Infrastructure for Patient World Models and Clinical Agents**
 
-[Manuscript PDF](paper/main.pdf) · [arXiv source package](paper/arxiv-source.zip) ·
-[Editable draw.io figures and PDFs](paper/drawio-figures.zip)
+[Manuscript PDF](paper/main.pdf) · [arXiv source package](paper/arxiv-source.zip)
 
 The system provides source-linked conversion and executable checks for data intended
 for patient world models, clinical agents, and offline reinforcement learning.
@@ -42,7 +41,8 @@ python3 tools/verify_paper_numbers.py
 python3 tools/build_paper.py
 ```
 
-See [figure instructions](paper/figures/README.md) to edit and export the draw.io sources.
+Figures are TikZ sources that compile with the manuscript; see
+[figure instructions](paper/figures/README.md).
 The repository includes aggregate evidence and synthetic fixtures. Patient-level
 outputs and licensed vocabularies are not distributed.
 

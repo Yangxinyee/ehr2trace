@@ -1,7 +1,7 @@
 """Build the paper from a clean directory and package only its arXiv source inputs.
 
-Requires pdflatex and bibtex. Editable draw.io figures stay in paper/figures; their
-exported PDFs are the figure inputs to this build. This command does not submit.
+Requires pdflatex and bibtex. Figures are TikZ sources under paper/figures and are
+compiled as part of this build. This command does not submit.
 """
 from pathlib import Path
 import re
@@ -43,11 +43,12 @@ def main():
                     ['pdflatex','-interaction=nonstopmode','-halt-on-error','main.tex'],
                     ['pdflatex','-interaction=nonstopmode','-halt-on-error','main.tex'],
                     ['pdflatex','-interaction=nonstopmode','-halt-on-error','main.tex']]:
-            p=subprocess.run(cmd,cwd=build,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+            p=subprocess.run(cmd,cwd=build,text=True,errors='replace',
+                         stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
             if p.returncode:
                 print(p.stdout[-7000:])
                 raise SystemExit(f'Failed: {cmd}')
-        log=(build/'main.log').read_text()
+        log=(build/'main.log').read_text(errors='replace')
         problems=[x for x in log.splitlines() if any(t in x for t in ('Overfull', 'undefined', 'LaTeX Warning:', 'Package natbib Warning:'))]
         if problems:
             print('\n'.join(problems))
