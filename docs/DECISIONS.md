@@ -142,8 +142,8 @@ Tablet` and `Oral Capsule` have no drug in it with a millilitre denominator and
 and removed a class of silent errors, which is the right trade.
 
 Measured against the 139 drug mappings a physician had already confirmed, holding those
-mappings out so the matcher cannot short-cut them: 120 of 139 resolve, and of those,
-92.5% are the identical concept, 5.0% are the same ingredient and strength under the
+mappings out so the matcher cannot short-cut them: 121 of 139 resolve, and of those,
+91.7% are the identical concept, 5.8% are the same ingredient and strength under the
 other spelling of one dose form, and 2.5% are the same ingredient under the other
 reading of a concentration. **None is a different drug and none is a different
 strength** — the failure that would matter is absent, and the 16 that do not resolve
@@ -152,7 +152,16 @@ abstain rather than approximate.
 A second check reads the *concept name* — a different field, written by a different
 process from the numbers in `DRUG_STRENGTH` — re-derives a strength from it, and
 compares that with the source string. Over the 6,950 names the pass settles on this
-export, 5,848 are comparable that way and **none disagrees**.
+export, 5,923 are comparable that way and **none disagrees**.
+
+It found one, and the fix is worth recording because it is the same mistake twice. A
+denominator is not always a volume: an inhaler is dosed per actuation and a patch per
+hour, and `DRUG_STRENGTH` says so in 18,371 and 13,849 rows respectively. Accepting only
+millilitres left every inhaler in this export unmapped — 64,148 rows on one albuterol
+product — while `albuterol 0.09 MG/ACTUAT Metered Dose Inhaler` sat in the vocabulary,
+and it then made the audit itself report a correctly matched nicotine patch as a
+disagreement. The strength key now carries the family of *both* halves, because
+`0.09 MG/ACTUAT` and `0.09 MG/ML` are the same two numbers and not the same drug.
 
 Those numbers are re-derivable rather than remembered, and the tool exits non-zero if a
 disagreement ever turns out to be a different drug:

@@ -73,9 +73,13 @@ def strength_index(con):
 #: How the vocabulary writes a unit inside a concept *name*, which is not always how it
 #: writes it in `DRUG_STRENGTH`: `1000 UNT/ML Injection` against unit concept `[U]`.
 NAME_UNITS = {"MG": "mg", "G": "g", "MCG": "ug", "ML": "mL", "UNT": "[U]", "UNIT": "[U]",
-              "IU": "[U]", "MEQ": "10*-3.eq", "MMOL": "mmol", "ACTUAT": "{actuat}", "%": "%"}
+              "IU": "[U]", "MEQ": "10*-3.eq", "MMOL": "mmol", "ACTUAT": "{actuat}", "%": "%",
+              "HR": "h", "H": "h", "CM2": "cm2"}
 _UNIT_ALT = "|".join(sorted(NAME_UNITS, key=len, reverse=True))
-NAME_RATIO = re.compile(rf"([\d.]+)\s*({_UNIT_ALT})\s*/\s*([\d.]*)\s*(ML|ACTUAT|MG)\b", re.I)
+#: A denominator in a concept name is not always a volume: an inhaler is dosed per
+#: actuation and a patch per hour. Reading `0.875 MG/HR` as a plain 0.875 MG amount is
+#: what made this audit report a correct nicotine patch as a disagreement.
+NAME_RATIO = re.compile(rf"([\d.]+)\s*({_UNIT_ALT})\s*/\s*([\d.]*)\s*({_UNIT_ALT})\b", re.I)
 NAME_AMOUNT = re.compile(rf"([\d.]+)\s*({_UNIT_ALT})\b", re.I)
 
 
@@ -86,7 +90,7 @@ def name_strength(name: str):
         top = _canonical(float(match.group(1)), NAME_UNITS[match.group(2).upper()])
         bottom = _canonical(float(match.group(3) or 1), NAME_UNITS[match.group(4).upper()])
         if top and bottom and bottom[1]:
-            return ("ratio", top[0], _round(top[1] / bottom[1]))
+            return ("ratio", top[0], bottom[0], _round(top[1] / bottom[1]))
         return None
     match = NAME_AMOUNT.search(name)
     if match:
@@ -107,7 +111,7 @@ def source_readings(parsed):
     bottom = _canonical(strength.denominator or 1.0, strength.denominator_unit or "mL")
     if not top or not bottom or not bottom[1]:
         return []
-    out = [("ratio", top[0], _round(top[1] / bottom[1]))]
+    out = [("ratio", top[0], bottom[0], _round(top[1] / bottom[1]))]
     if strength.origin == "explicit":
         out.append(("amount", top[0], _round(top[1])))
     return out
@@ -134,7 +138,7 @@ def audit_names(index, pending: Path, noise: list[str]) -> dict:
         if not readings or stated is None:
             continue
         comparable += 1
-        if any(r[0] == stated[0] and r[1] == stated[1] and abs(r[2] - stated[2]) < 1e-6
+        if any(len(r) == len(stated) and r[:-1] == stated[:-1] and abs(r[-1] - stated[-1]) < 1e-6
                for r in readings):
             agree += 1
         else:

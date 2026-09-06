@@ -248,6 +248,7 @@ UNITS: dict[str, str] = {
     "MMOL": "mmol", "MCI": "mCi", "MILLICURIE": "mCi",
     "%": "%",
     "ACTUATION": "{actuat}", "ACTUAT": "{actuat}", "PUFF": "{actuat}",
+    "HR": "h", "HOUR": "h", "HOURS": "h",
 }
 
 #: UCUM code -> (family, factor to the family's base unit).
@@ -256,6 +257,12 @@ UNITS: dict[str, str] = {
 #: international unit, because for insulin or heparin they are not the same quantity
 #: and no factor relates them. A unit absent from this table has no comparable form,
 #: so a strength written in it does not match anything rather than matching loosely.
+#:
+#: Denominators are not all volumes. An inhaler is dosed per actuation and a patch per
+#: hour, and the vocabulary says so -- `DRUG_STRENGTH` has 18,371 rows denominated in
+#: `{actuat}` and 13,849 in `h`. Recognising only millilitres left every inhaler in this
+#: export unmapped while `albuterol 0.09 MG/ACTUAT Metered Dose Inhaler` sat in the
+#: vocabulary.
 UNIT_FAMILIES: dict[str, tuple[str, float]] = {
     "mg": ("mass", 1.0), "g": ("mass", 1000.0), "ug": ("mass", 0.001),
     "ng": ("mass", 1e-6), "kg": ("mass", 1e6),
@@ -267,6 +274,8 @@ UNIT_FAMILIES: dict[str, tuple[str, float]] = {
     "%": ("percent", 1.0),
     "{actuat}": ("actuation", 1.0),
     "mCi": ("millicurie", 1.0),
+    "h": ("hour", 1.0), "min": ("hour", 1 / 60),
+    "cm2": ("area", 1.0),
 }
 
 #: Salt and hydrate suffixes. A source name may carry one where RxNorm's ingredient

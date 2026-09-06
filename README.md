@@ -200,7 +200,7 @@ about `oxycodone hydrochloride 5 MG Oral Tablet` -- with the strength as a *numb
 rather than by text similarity, deterministically and only when exactly one standard
 concept fits all three. On this export that settles 6,943 of 26,629 medication names and
 takes drug coverage from 23.7% to 76.3%; measured against 139 mappings a physician had
-already confirmed, it reproduces 92.5% of them exactly and the rest as the same drug at
+already confirmed, it reproduces 91.7% of them exactly and the rest as the same drug at
 the same strength under another spelling, with no case of a different drug. The names it
 cannot settle -- compounded infusions, multi-ingredient solutions, anything with no
 strength -- still go to a person.

@@ -39,6 +39,8 @@ CONCEPTS = "".join([
     "8576\tmilligram\tUnit\tUCUM\tUnit\tS\tmg\t19700101\t20991231\t\n",
     "8587\tmilliliter\tUnit\tUCUM\tUnit\tS\tmL\t19700101\t20991231\t\n",
     "8504\tgram\tUnit\tUCUM\tUnit\tS\tg\t19700101\t20991231\t\n",
+    "9655\tmicrogram\tUnit\tUCUM\tUnit\tS\tug\t19700101\t20991231\t\n",
+    "45744809\tactuation\tUnit\tUCUM\tUnit\tS\t{actuat}\t19700101\t20991231\t\n",
     "1124957\toxycodone\tDrug\tRxNorm\tIngredient\tS\t7804\t19700101\t20991231\t\n",
     "1112807\tlorazepam\tDrug\tRxNorm\tIngredient\tS\t6470\t19700101\t20991231\t\n",
     "963353\toxycodone hydrochloride\tDrug\tRxNorm\tPrecise Ingredient\t\t7805\t19700101\t20991231\t\n",
@@ -51,6 +53,10 @@ CONCEPTS = "".join([
     "9999002\tlorazepam 2 MG/ML Injection\tDrug\tRxNorm\tClinical Drug\tS\t9999002\t19700101\t20991231\t\n",
     "9999003\tlorazepam 2 MG/ML Injectable Solution\tDrug\tRxNorm\tClinical Drug\tS\t9999003\t19700101\t20991231\t\n",
     "9999004\tlorazepam 4 MG/ML Injection\tDrug\tRxNorm\tClinical Drug\tS\t9999004\t19700101\t20991231\t\n",
+    "1154602\talbuterol\tDrug\tRxNorm\tIngredient\tS\t435\t19700101\t20991231\t\n",
+    "19126918\tMetered Dose Inhaler\tDrug\tRxNorm\tDose Form\t\t316987\t19700101\t20991231\t\n",
+    "9999005\talbuterol 0.09 MG/ACTUAT Metered Dose Inhaler\tDrug\tRxNorm\tClinical Drug\tS\t9999005\t19700101\t20991231\t\n",
+    "9999006\talbuterol 0.09 MG/ML Injection\tDrug\tRxNorm\tClinical Drug\tS\t9999006\t19700101\t20991231\t\n",
 ])
 STRENGTHS = "".join([
     "1049621\t1124957\t5\t8576\t\t\t\t\t\t19700101\t20991231\t\n",
@@ -60,6 +66,10 @@ STRENGTHS = "".join([
     "9999002\t1112807\t\t\t2\t8576\t\t8587\t\t19700101\t20991231\t\n",
     "9999003\t1112807\t\t\t2\t8576\t\t8587\t\t19700101\t20991231\t\n",
     "9999004\t1112807\t\t\t4\t8576\t\t8587\t\t19700101\t20991231\t\n",
+    # an inhaler is dosed per actuation, not per millilitre
+    "9999005\t1154602\t\t\t0.09\t8576\t\t45744809\t\t19700101\t20991231\t\n",
+    # the same two numbers over a volume: a different strength, and it must stay one
+    "9999006\t1154602\t\t\t0.09\t8576\t\t8587\t\t19700101\t20991231\t\n",
 ])
 RELATIONSHIPS = "".join([
     "1049621\t19082573\tRxNorm has dose form\t19700101\t20991231\t\n",
@@ -69,6 +79,8 @@ RELATIONSHIPS = "".join([
     "9999003\t19082103\tRxNorm has dose form\t19700101\t20991231\t\n",
     "9999004\t46234469\tRxNorm has dose form\t19700101\t20991231\t\n",
     "963353\t1124957\tForm of\t19700101\t20991231\t\n",
+    "9999005\t19126918\tRxNorm has dose form\t19700101\t20991231\t\n",
+    "9999006\t46234469\tRxNorm has dose form\t19700101\t20991231\t\n",
 ])
 
 
@@ -245,3 +257,28 @@ def test_a_site_local_word_is_declared_by_the_dataset_not_the_converter(index):
         index, "LORAZEPAM 2 MG/ML INJECTION SOLUTION JHM", ["JHM"])
     assert status == "unique"
     assert matches[0].concept_id == 9999002
+
+
+def test_a_strength_per_actuation_resolves(index):
+    """An inhaler states its strength per puff, and the vocabulary agrees.
+
+    Recognising only millilitre denominators left every inhaler in this export
+    unmapped -- 64,148 rows on one albuterol product alone -- while
+    `albuterol 0.09 MG/ACTUAT Metered Dose Inhaler` sat in the vocabulary. RxNorm has
+    18,371 per-actuation strengths and 13,849 per-hour ones.
+    """
+    _parsed, status, matches = match_drug(
+        index, "ALBUTEROL SULFATE HFA 90 MCG/ACTUATION AEROSOL INHALER")
+    assert status == "unique"
+    assert matches[0].concept_id == 9999005
+
+
+def test_per_actuation_and_per_millilitre_are_not_the_same_strength(index):
+    """`0.09 MG/ACTUAT` and `0.09 MG/ML` are the same two numbers and different drugs.
+
+    The strength key carries the family of both halves for exactly this reason; keying
+    on the numerator alone would let a puff match a millilitre.
+    """
+    _parsed, status, matches = match_drug(index, "ALBUTEROL 0.09 MG/ML INJECTION SOLUTION")
+    assert status == "unique"
+    assert matches[0].concept_id == 9999006

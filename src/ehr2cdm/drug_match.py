@@ -282,7 +282,12 @@ def _round(value: float) -> float:
 
 
 def _signature(strength: Strength | None) -> tuple | None:
-    """The source strength as the key the vocabulary index is built under."""
+    """The source strength as the key the vocabulary index is built under.
+
+    A ratio carries the family of *both* halves. `0.05 MG/ACTUAT` and `0.05 MG/ML` are
+    the same two numbers and not the same strength, so the denominator's family is part
+    of the key rather than something the key assumes.
+    """
     if strength is None:
         return ("none",)
     if strength.kind == "amount":
@@ -290,9 +295,9 @@ def _signature(strength: Strength | None) -> tuple | None:
         return None if canonical is None else ("amount", canonical[0], _round(canonical[1]))
     numerator = _canonical(strength.value, strength.unit)
     denominator = _canonical(strength.denominator or 1.0, strength.denominator_unit or "mL")
-    if numerator is None or denominator is None or denominator[0] != "volume":
+    if numerator is None or denominator is None or denominator[1] == 0:
         return None
-    return ("ratio", numerator[0], _round(numerator[1] / denominator[1]))
+    return ("ratio", numerator[0], denominator[0], _round(numerator[1] / denominator[1]))
 
 
 #: RxNorm's classes for a drug named as ingredient + strength + form, and for one named
@@ -542,9 +547,9 @@ def _vocabulary_signature(amount, amount_unit, numerator, numerator_unit,
         # Intravenous Solution` unreachable while it sat in the vocabulary.
         top = _canonical(float(numerator), numerator_unit)
         bottom = _canonical(float(denominator) if denominator else 1.0, denominator_unit)
-        if top is None or bottom is None or bottom[0] != "volume" or bottom[1] == 0:
+        if top is None or bottom is None or bottom[1] == 0:
             return None
-        return ("ratio", top[0], _round(top[1] / bottom[1]))
+        return ("ratio", top[0], bottom[0], _round(top[1] / bottom[1]))
     return ("none",)
 
 
