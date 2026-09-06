@@ -122,8 +122,18 @@ def _faults() -> dict[str, str]:
     return {"localised": str(doc["faults_localised"])}
 
 
+def _snapshot() -> dict[str, str]:
+    from make_paper_tables import snapshot_macros
+    return snapshot_macros(_load("paper_snapshot.json"))
+
+
+def _readiness() -> dict[str, str]:
+    from make_readiness_numbers import readiness_macros
+    return readiness_macros(_load("world_model_readiness.json"))
+
+
 SOURCES: tuple[Callable[[], dict[str, str]], ...] = (
-    _leakage, _dqd, _reproducibility, _terminology, _scale, _faults,
+    _leakage, _dqd, _reproducibility, _terminology, _scale, _faults, _snapshot, _readiness,
 )
 
 
@@ -137,7 +147,14 @@ def main() -> None:
     for source in SOURCES:
         expected.update(source())
 
-    text = args.paper.read_text()
+    # Quantity definitions are split by provenance in the revised paper.
+    paths = [args.paper]
+    for filename in ("experiment_numbers.tex", "snapshot_numbers.tex", "readiness_numbers.tex"):
+        path = args.paper.parent / filename
+        if path.exists():
+            paths.append(path)
+    contents = {p: p.read_text() for p in paths}
+    text = "\n".join(contents.values())
     drift, missing = [], []
     for name, value in sorted(expected.items()):
         match = re.search(r"\\newcommand\{\\" + name + r"\}\{(.*?)\}\n", text)
@@ -147,14 +164,19 @@ def main() -> None:
             drift.append((name, match.group(1), value))
 
     if args.update and drift:
-        for name, _old, value in drift:
-            text = re.sub(
-                r"(\\newcommand\{\\" + name + r"\}\{).*?(\}\n)",
-                lambda m: m.group(1) + value + m.group(2),
-                text,
-            )
-        args.paper.write_text(text)
+        for path, original in contents.items():
+            updated = original
+            for name, _old, value in drift:
+                updated = re.sub(
+                    r"(\\newcommand\{\\" + name + r"\}\{).*?(\}\n)",
+                    lambda m, value=value: m.group(1) + value + m.group(2),
+                    updated,
+                )
+            if updated != original:
+                path.write_text(updated)
         print(f"updated {len(drift)} macro(s)")
+        if missing:
+            raise SystemExit(f"{len(missing)} absent macros remain")
         return
 
     for name, found, want in drift:

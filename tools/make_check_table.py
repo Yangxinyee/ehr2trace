@@ -36,6 +36,7 @@ GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
             "ANCHORS_ARE_NOT_EVENTS", "COHORT_LABEL_NEVER_A_CLINICAL_FACT",
             "MEMBERSHIP_KEPT_PER_PARTITION", "NO_UNTIMED_CLINICAL_EVENTS",
             "ORDERS_AND_ADMINISTRATIONS_STAY_SEPARATE", "POST_DEATH_RECORDS_FLAGGED_NOT_DELETED",
+            "END_TIME_NEVER_PRECEDES_START",
             "QUARANTINE_IS_EXPLAINED", "IDENTITY_RESOLVED_ACROSS_PARTITIONS",
         ),
     ),
@@ -60,7 +61,7 @@ GROUPS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ),
     (
         "Review governance",
-        "nothing a human has not decided reaches a published mapping",
+        "unaccepted proposals do not enter the mapping registry",
         ("UNDECIDED_PROPOSALS_NEVER_PUBLISHED",),
     ),
 )
@@ -95,7 +96,7 @@ def main() -> None:
         raise SystemExit(f"training-data list names checks that do not exist: {sorted(stray)}")
 
     lines = [
-        r"\begin{tabular}{llc}",
+        r"\begin{tabularx}{\linewidth}{@{}p{.27\linewidth}Yc@{}}",
         r"\toprule",
         r"\textbf{Group} & \textbf{What it asserts} & \textbf{$n$} \\",
         r"\midrule",
@@ -106,7 +107,7 @@ def main() -> None:
         r"\midrule",
         f"& & \\textbf{{{len(registered)}}} \\\\",
         r"\bottomrule",
-        r"\end{tabular}",
+        r"\end{tabularx}",
     ]
     args.out.write_text("\n".join(lines) + "\n")
     print(f"{len(registered)} checks, {len(TRAINING_DATA_SPECIFIC)} training-data specific -> {args.out}")

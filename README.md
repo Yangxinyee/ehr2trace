@@ -1,10 +1,50 @@
-# ehr-to-omop-meds
+# ehr2cdm
 
 Deterministically convert local hospital EHR exports (txt + xlsx) into two standard
 formats, **OMOP CDM 5.4** and **MEDS**, with an LLM proposing only where semantic
 judgment is genuinely required — and a human confirming every proposal.
 
 **A research converter, not a production system.**
+
+## Paper and current evidence
+
+**ehr2cdm: Auditable EHR Data Infrastructure for Patient World Models and Clinical Agents**
+
+[Manuscript PDF](paper/main.pdf) · [arXiv source package](paper/arxiv-source.zip) ·
+[Editable draw.io figures and PDFs](paper/drawio-figures.zip)
+
+The system provides source-linked conversion and executable checks for data intended
+for patient world models, clinical agents, and offline reinforcement learning.
+Task-specific episodes, rewards, world models, and agent policies remain downstream
+work. The [readiness audit and development priorities](docs/WORLD_MODEL_READINESS.md)
+document the visibility and action-semantics gaps in the current outputs.
+
+Current aggregate evidence (September 6, 2026):
+
+| | CTPE | MIMIC-IV |
+|---|---:|---:|
+| Canonical events | 31,752,664 | 296,595,466 |
+| Subjects with canonical events | 22,980 | 364,673 |
+| Validation: pass / skip / fail | 36 / 0 / 0 | 29 / 5 / 2 |
+
+The MIMIC rerun reports unflagged inverted intervals and missing dataset acceptance
+records for two registry entries. These outputs do not satisfy the current contract.
+See the [aggregate snapshot](results/paper_snapshot.json),
+[rerun record](results/mimiciv_validation_rerun.json), and
+[readiness results](results/world_model_readiness.json). Historical experiments below
+retain their original counts and versions.
+
+To verify the manuscript quantities and build the PDF/source package from the included
+figure PDFs (Python 3, LaTeX, and BibTeX required):
+
+```bash
+python3 tools/verify_paper_numbers.py
+python3 tools/build_paper.py
+```
+
+See [figure instructions](paper/figures/README.md) to edit and export the draw.io sources.
+The repository includes aggregate evidence and synthetic fixtures. Patient-level
+outputs and licensed vocabularies are not distributed.
 
 ## What it does
 
@@ -18,8 +58,8 @@ canonical/         canonical event store — the single source of truth
 omop/              meds/
 ```
 
-Measured on the reference export (8 GB, 4 partitions, 25 files, 40 logical sources),
-from a clean work root, with 34/34 validation checks passing:
+Historical reference run (8 GB, 4 partitions, 25 files, 40 logical sources),
+from a clean work root, with the then-current 34/34 validation checks passing:
 
 | | |
 |---|---:|
