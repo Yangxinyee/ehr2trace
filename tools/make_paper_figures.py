@@ -221,8 +221,8 @@ def leakage():
     out = [BANNER,
            r'\setlength{\figunit}{0.01\linewidth}%',
            r'\begin{tikzpicture}[figbase]',
-           r'\begin{groupplot}[group style={group size=3 by 1, horizontal sep=9mm},',
-           r'  width=0.29\linewidth, height=33mm, leakpanel,',
+           r'\begin{groupplot}[group style={group size=3 by 1, horizontal sep=10mm},',
+           r'  width=0.37\linewidth, height=50mm, leakpanel,',
            fr'  xtick={{{xticks}}}, xticklabels={{{labels}}},]']
 
     panels = [('held_out_auroc', '(a) AUROC', 'ymin=0.80, ymax=1.00, '
@@ -249,7 +249,7 @@ def leakage():
     # separate the two filtered arms; on a log scale their difference is legible.
     out.append(r'\nextgroupplot[title={(c) AUROC increase},')
     out.append(r'  ymode=log, ymin=0.0015, ymax=0.30, ytick={0.002,0.01,0.05,0.2},')
-    out.append(r'  yticklabels={0.002,0.010,0.050,0.200},]')
+    out.append(r'  yticklabels={0.002,0.01,0.05,0.2},]')
     for arm, _, style in arms[1:]:
         coords = ' '.join(f"({positions[h['horizon_hours']]},{h['auroc_inflation'][arm]})"
                           for h in horizons)
