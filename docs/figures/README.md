@@ -13,6 +13,10 @@ band underneath names the properties stage b establishes for everything downstre
 
 `system_framework.pdf` is a vector export of the same slide.
 
+Figure 1a of the paper is the TikZ counterpart of this strip, compact enough to sit
+above the system diagram. This deck is the version for talks: wider, with icons, and
+with room to say what each stage involves.
+
 ## Rebuild
 
 ```sh

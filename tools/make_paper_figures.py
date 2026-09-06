@@ -277,12 +277,13 @@ def check_groups():
     rows = ',\n'.join(f'                        {i}/{counts[key]}/{{{label}}}'
                        for i, (key, label) in enumerate(GROUP_LABEL))
     body = (BANNER +
+            '% Geometry comes from the caller: \\chipx, \\chipy, \\chipstep, \\chipw, \\chiptw.\n'
             '\\foreach \\i/\\n/\\lab in {' + rows.lstrip() + '}{%\n'
-            '  \\node[chip, anchor=north west, minimum width=18\\figunit,'
-            ' minimum height=7.8\\figunit,\n'
-            '        text width=16.2\\figunit]\n'
-            '    at ({2 + \\i*19.5},-43.4) {\\figcount{\\n}\\\\[0.1\\figunit]'
-            '{\\centering\\figmini{\\lab}}};\n}\n')
+            '  \\node[chip, anchor=north west, minimum width=\\chipw,'
+            ' minimum height=\\chiph,\n'
+            '        text width=\\chiptw]\n'
+            '    at ({\\chipx + \\i*\\chipstep},\\chipy) {\\figcount{\\n}'
+            '\\\\[0.1\\figunit]{\\centering\\figmini{\\lab}}};\n}\n')
     (FIGURES / 'check_groups.tex').write_text(body)
     return len(ids), counts
 
