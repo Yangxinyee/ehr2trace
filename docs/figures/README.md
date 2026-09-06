@@ -1,0 +1,38 @@
+# Positioning figure
+
+`system_framework.pptx` places this repository among the components a patient world
+model or a clinical agent system needs. It is a talk and overview figure, not a
+manuscript figure: the three figures inside the paper are TikZ and live in
+`paper/figures`.
+
+The five stages read left to right. Stage **b** is what this repository implements
+and the paper evaluates. Stages **c** to **e** are drawn dashed because the paper
+identifies them as requirements and does not deliver them; that distinction is the
+point of the figure. A feedback loop returns from evaluation to the contract, and a
+band underneath names the properties stage b establishes for everything downstream.
+
+`system_framework.pdf` is a vector export of the same slide.
+
+## Rebuild
+
+```sh
+pip install python-pptx
+python3 tools/make_framework_figure.py
+```
+
+`python-pptx` is needed only for this figure and is deliberately not a project
+dependency. The PDF export step runs when LibreOffice is on `PATH` and is skipped
+otherwise.
+
+## Editing
+
+Every mark is a native PowerPoint object: cards and rules are autoshapes, the icons
+are grouped vector custom geometry, and all text is live text. Nothing is a raster
+image, so the deck can be recoloured, retyped, and resized in PowerPoint or
+LibreOffice without returning to the generator. Regenerating overwrites manual
+edits, so change the generator when a change should persist.
+
+Colours match the manuscript figures in `paper/figures/figstyle.tex`: teal for what
+is implemented, orange for what is required but absent, grey for external input.
+Subscripts are real subscript runs rather than Unicode subscript characters, which
+Arial does not carry.
