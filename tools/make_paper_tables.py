@@ -5,6 +5,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+READINESS = json.loads(
+    (ROOT / 'results' / 'world_model_readiness.json').read_text()
+)
+
+
 def integer(n):
     return f'{n:,}'.replace(',', '{,}')
 
@@ -23,7 +28,10 @@ def snapshot_macros(doc):
         'ctpeRows':integer(a['source_rows']), 'ctpeEvents':integer(a['canonical']['events']),
         'ctpeLinks':integer(a['canonical']['event_source']), 'ctpeSubjects':integer(a['identity_subjects']),
         'ctpeAnchors':integer(a['canonical']['anchors']), 'ctpeQuarantine':integer(a['canonical']['quarantine']),
-        'mimicSources':'21', 'mimicPrepRows':integer(b['source_rows']),
+        # Counted, not typed: a source added to the config and not here would leave the
+        # manuscript claiming a smaller export than the one it measured.
+        'mimicSources':str(len(READINESS['datasets']['mimiciv']['configured_sources'])),
+        'mimicPrepRows':integer(b['source_rows']),
         'mimicSubjects':integer(b['canonical_subjects']), 'mimicPersons':integer(b['omop_persons']),
         'mimicQuarantine':integer(b['canonical']['quarantine']),
         'drugGold':integer(d['confirmed_mappings']), 'drugResolved':integer(d['resolved']),

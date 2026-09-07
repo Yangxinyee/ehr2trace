@@ -103,3 +103,63 @@ def test_reversed_range_is_not_read_as_a_range():
     """40-35 is not a range; treating it as one would invent an ordering."""
     v = parse_value("40-35")
     assert v.low is None and v.form in {"text", "number_unit"}
+
+
+def test_a_dose_too_large_for_the_target_column_becomes_no_quantity():
+    """MIMIC-IV's emar_detail carries doses that are identifiers, not amounts.
+
+    Sixteen rows give a dose_given of eighteen digits. Parsed faithfully they overflow
+    OMOP's ``quantity NUMERIC``, and the choice is between inventing a rounded quantity,
+    losing the build, and publishing no quantity while keeping the string. Only the
+    third preserves what the source said without asserting a dose.
+    """
+    import duckdb
+
+    from ehr2cdm.omop import QUANTITY_LIMIT, _build_dose_map
+
+    con = duckdb.connect()
+    con.execute("CREATE TABLE evt (dose_source VARCHAR)")
+    con.executemany("INSERT INTO evt VALUES (?)",
+                    [("500110360505613004 mcg",), ("400 mg",)])
+    _build_dose_map(con)
+    got = dict((d, q) for d, q, _ in con.execute(
+        "SELECT dose_source, quantity, dose_unit FROM dose_map").fetchall())
+    assert got["400 mg"] == 400
+    assert got["500110360505613004 mcg"] is None
+
+    # The bound is the column's, not a round number picked to pass this test.
+    con.execute("CREATE TABLE probe (q NUMERIC)")
+    con.execute(f"INSERT INTO probe VALUES ({QUANTITY_LIMIT - 1})")
+    try:
+        con.execute(f"INSERT INTO probe VALUES ({QUANTITY_LIMIT})")
+    except duckdb.ConversionException:
+        pass
+    else:
+        raise AssertionError("QUANTITY_LIMIT is looser than the column it describes")
+
+
+def test_routing_clause_survives_being_anded_with_an_exclusion():
+    """`WHERE {routes} AND NOT excluded` must exclude from every branch, not the last.
+
+    The routing clause is a disjunction. Unparenthesised, SQL reads the caller's
+    conjunction as `A OR (B AND NOT excluded)`, so rows arriving through A keep their
+    exemption. Nothing reports it: the rows are well formed and the query is valid.
+    This asserts the behaviour rather than the string, by running it.
+    """
+    import duckdb
+
+    from ehr2cdm.omop import _routes_here
+    from ehr2cdm.schema import EventKind
+
+    con = duckdb.connect()
+    con.execute("CREATE TABLE e (event_kind VARCHAR, flags VARCHAR[])")
+    con.execute("CREATE TABLE m (domain_id VARCHAR)")
+    # One row per branch of the disjunction, both excluded by the flag.
+    con.execute("INSERT INTO e VALUES ('drug_admin', ['NOT_ADMINISTERED'])")   # unmapped branch
+    con.execute("INSERT INTO m VALUES (NULL)")
+    routes = _routes_here("drug_exposure", (str(EventKind.drug_order), str(EventKind.drug_admin)))
+    n = con.execute(
+        f"SELECT count(*) FROM e, m WHERE {routes} "
+        f"AND NOT list_contains(e.flags, 'NOT_ADMINISTERED')"
+    ).fetchone()[0]
+    assert n == 0, "an excluded row reached the table through the unmapped branch"

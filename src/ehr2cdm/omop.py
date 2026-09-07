@@ -226,8 +226,21 @@ def _build_term_map(con, vocabulary, mappings: MappingRegistry,
     return len(terms), len(resolved), unresolved
 
 
+#: What OMOP's ``quantity NUMERIC`` can hold: DuckDB reads that as DECIMAL(18,3), which
+#: leaves fifteen digits ahead of the point.
+QUANTITY_LIMIT = 10**15
+
+
 def _build_dose_map(con) -> None:
-    """Parse each distinct dose string once, with the same parser the rest uses."""
+    """Parse each distinct dose string once, with the same parser the rest uses.
+
+    A dose too large for the target column is published as a null quantity with its
+    source string kept in ``sig`` -- the treatment a dose that never parsed already
+    gets. MIMIC-IV's ``emar_detail`` has sixteen rows whose ``dose_given`` is an
+    eighteen-digit integer, which reads as an identifier that leaked into a measurement
+    column; 500110360505613004 mcg is not a dose anyone administered. Rounding it to
+    fit would invent a quantity, and failing the build would lose the other 34 million.
+    """
     from ehr2cdm.canonical.values import parse_value
     from ehr2cdm.errors import QuarantineRow
 
@@ -244,7 +257,10 @@ def _build_dose_map(con) -> None:
         except QuarantineRow:
             payload.append((dose, None, None))
             continue
-        payload.append((dose, parsed.number, parsed.unit))
+        number = parsed.number
+        if number is not None and abs(number) >= QUANTITY_LIMIT:
+            number = None
+        payload.append((dose, number, parsed.unit))
     if payload:
         con.executemany("INSERT INTO dose_map VALUES (?, ?, ?)", payload)
 
@@ -559,15 +575,22 @@ def _routes_here(table: str, kinds: tuple[str, ...]) -> str:
     * mapped, and its domain names this table: it lands here, whichever column it came
       from;
     * mapped, and its domain names another table: it is not this table's row.
+
+    The whole disjunction is wrapped, and that is not cosmetic. Unparenthesised, a
+    caller writing ``WHERE {routes} AND NOT <excluded>`` gets ``A OR (B AND NOT
+    excluded)`` from the parser: the exclusion silently applies to one branch and every
+    row arriving through the other keeps its exemption. That is not a syntax error and
+    nothing downstream reports it -- the rows are well formed, they simply should not
+    be there. It cost 8,483,405 refusals and line flushes published as drug exposure.
     """
     kind_list = ", ".join(f"'{k}'" for k in kinds)
     domains = ", ".join(f"'{d}'" for d in DOMAIN_TABLE)
     mine = ", ".join(f"'{d}'" for d, tb in DOMAIN_TABLE.items() if tb == table)
     unrouted = f"(m.domain_id IS NULL OR m.domain_id NOT IN ({domains}))"
     return (
-        f"(e.event_kind IN ({kind_list}) AND {unrouted})"
+        f"((e.event_kind IN ({kind_list}) AND {unrouted})"
         f" OR (e.event_kind IN ({', '.join(repr(k) for k in ROUTED_KINDS)})"
-        f" AND m.domain_id IN ({mine}))"
+        f" AND m.domain_id IN ({mine})))"
     )
 
 
