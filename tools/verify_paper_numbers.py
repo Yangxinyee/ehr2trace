@@ -132,8 +132,18 @@ def _readiness() -> dict[str, str]:
     return readiness_macros(_load("world_model_readiness.json"))
 
 
+def _rebuild_defects() -> dict[str, str]:
+    """The two defects the rebuild surfaced, which no injected fault predicted."""
+    doc = _load("rebuild_defects.json")["routing_precedence"]
+    return {
+        "leakedAdministrations": _thousands(doc["not_administered_in_drug_exposure"]),
+        "leakedFlushes": _thousands(doc["of_which_flushes"]),
+    }
+
+
 SOURCES: tuple[Callable[[], dict[str, str]], ...] = (
     _leakage, _dqd, _reproducibility, _terminology, _scale, _faults, _snapshot, _readiness,
+    _rebuild_defects,
 )
 
 
