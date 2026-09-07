@@ -679,6 +679,10 @@ def _drug_sql(con) -> str:
         LEFT JOIN dose_map d ON d.dose_source = e.dose_source
         LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
         WHERE {_routes_here('drug_exposure', (str(EventKind.drug_order), str(EventKind.drug_admin)))}
+          -- A refusal, a held dose and a line flush are all real records and all stay
+          -- in the canonical layer. None of them is a drug exposure, which is a claim
+          -- that this patient received this drug.
+          AND NOT list_contains(e.quality_flags, '{QualityFlag.NOT_ADMINISTERED}')
     """
 
 

@@ -301,6 +301,7 @@ def run_canonical_task(task: CanonicalTask) -> CanonicalResult:
 
     all_events: list[dict[str, Any]] = []
     all_links: list[dict[str, Any]] = []
+    all_action_keys: list[dict[str, Any]] = []
     all_anchors: list[dict[str, Any]] = []
     all_memberships: list[dict[str, Any]] = []
     all_issues: list[dict[str, Any]] = []
@@ -336,6 +337,7 @@ def run_canonical_task(task: CanonicalTask) -> CanonicalResult:
             emission: Emission = shape(ctx, wrapped)
             all_events.extend(e.model_dump(mode="python") for e in emission.events)
             all_links.extend(emission.links)
+            all_action_keys.extend(emission.action_keys)
             all_issues.extend(_with_source(emission.issues, source_id))
             all_quarantine.extend(_with_dataset(emission.quarantine, cfg.dataset_id, source_id))
             anchors, memberships = emit_anchors(ctx, wrapped)
@@ -347,6 +349,7 @@ def run_canonical_task(task: CanonicalTask) -> CanonicalResult:
     events = apply_duplicate_flags(events, partitions)
     events, death_issues = apply_cross_event_rules(events)
     all_issues.extend(death_issues)
+    events, _caused = resolve_causes(events, all_action_keys)
     events = sort_events(events)
     anchors = merge_anchors(all_anchors)
     memberships = dedup_records(all_memberships, ["subject_id", "partition_id", "anchor_id"])
@@ -400,6 +403,41 @@ def _iter_subject_groups(df: pl.DataFrame) -> Iterator[list[dict[str, Any]]]:
         current.append(row)
     if current:
         yield current
+
+
+def resolve_causes(
+    events: Sequence[dict[str, Any]], action_keys: Sequence[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], int]:
+    """Turn the source keys the shapes recorded into ``caused_by_event_id``.
+
+    An administration names the order it carries out, but it names it by the order's own
+    key, because that is what the source row holds. The order's event id exists only
+    once the order entry table has been read too, so the join waits until here.
+
+    A key naming nothing is left null rather than guessed. The order may sit outside the
+    extract, or in a source nobody configured, and an invented parent would assert that
+    a dispensed drug was ordered when the evidence for that is simply absent.
+    """
+    declared: dict[str, str] = {}
+    # Sorted so that two rows claiming one key resolve the same way on every rebuild,
+    # whatever order the workers happened to finish in.
+    for rec in sorted(action_keys, key=lambda r: (r["key"], r["event_id"])):
+        if rec["role"] == "declares":
+            declared.setdefault(rec["key"], rec["event_id"])
+    wanted = {r["event_id"]: r["key"] for r in action_keys if r["role"] == "caused_by"}
+    if not declared or not wanted:
+        return list(events), 0
+
+    out: list[dict[str, Any]] = []
+    resolved = 0
+    for event in events:
+        key = wanted.get(event["event_id"])
+        target = declared.get(key) if key is not None else None
+        if target is not None and target != event["event_id"]:
+            event = {**event, "caused_by_event_id": target}
+            resolved += 1
+        out.append(event)
+    return out, resolved
 
 
 def apply_cross_event_rules(events: Sequence[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

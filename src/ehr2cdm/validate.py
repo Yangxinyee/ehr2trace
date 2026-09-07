@@ -45,7 +45,7 @@ import polars as pl
 from ehr2cdm.analytics import HEAVY_THREADS, analytic_connection
 from ehr2cdm.config import DatasetConfig
 from ehr2cdm.paths import WorkLayout
-from ehr2cdm.schema import EventKind, QualityFlag
+from ehr2cdm.schema import TIMELESS_BASELINE_CODES, EventKind, QualityFlag
 
 
 @dataclass
@@ -625,34 +625,180 @@ def _membership_kept(l: Layers) -> CheckResult:
 
 @check("NO_UNTIMED_CLINICAL_EVENTS")
 def _no_untimed_clinical(l: Layers) -> CheckResult:
+    """Only a declared baseline attribute may be timeless.
+
+    Exempting the whole ``demographic`` kind was too coarse. Vital status is written as
+    a static column by both exports and was published as a timeless demographic event,
+    so it passed a check whose own sentence says static attributes are the only
+    timeless ones. An outcome is not a static attribute: read through an as-of view it
+    answers every cutoff, including the ones before the patient died. The exemption is
+    now the explicit allowlist rather than the event kind, so a new untimed attribute
+    has to be added to it deliberately.
+    """
     if l.events is None:
         return _skip("canonical layer not built")
+    allowed = sorted(TIMELESS_BASELINE_CODES)
     untimed = l.events.filter(
-        pl.col("event_time").is_null() & (pl.col("event_kind") != str(EventKind.demographic))
+        pl.col("event_time").is_null()
+        & (
+            (pl.col("event_kind") != str(EventKind.demographic))
+            | ~pl.col("source_code").is_in(allowed)
+        )
+    )
+    offenders = (
+        untimed.group_by("source_code").len().sort("len", descending=True).head(5)
+        if untimed.height
+        else None
     )
     return CheckResult(
         "",
         untimed.height == 0,
-        "every clinical event has a real time; only static attributes are timeless"
+        f"every clinical event has a real time; only {len(allowed)} declared baseline "
+        f"attributes are timeless"
         if untimed.height == 0
-        else f"{untimed.height} clinical events have no time and were still published",
+        else f"{untimed.height:,} events have no time and are not declared baseline "
+        f"attributes: {dict(zip(offenders['source_code'], offenders['len']))}",
+        {"untimed_not_baseline": untimed.height, "baseline_codes": allowed},
     )
 
 
 @check("ORDERS_AND_ADMINISTRATIONS_STAY_SEPARATE")
 def _orders_vs_admin(l: Layers) -> CheckResult:
+    """Ordering a drug, handing it over and giving it are three facts, not one.
+
+    Two of them used to be one: a dispensing cabinet's records were published as
+    administrations, which asserts a treatment the source never claims happened. The
+    check now covers all three stages, because the failure it is meant to catch is a
+    stage collapsing into the one next to it.
+    """
     if l.events is None:
         return _skip("canonical layer not built")
-    orders = l.events.filter(pl.col("event_kind") == str(EventKind.drug_order))
-    admins = l.events.filter(pl.col("event_kind") == str(EventKind.drug_admin))
-    overlap = orders.select("event_id").join(admins.select("event_id"), on="event_id", how="semi").height
+    stages = {
+        str(EventKind.drug_order): "order",
+        str(EventKind.drug_dispense): "dispense",
+        str(EventKind.drug_admin): "administration",
+    }
+    ids = {
+        kind: l.events.filter(pl.col("event_kind") == kind).select("event_id")
+        for kind in stages
+    }
+    counts = {stages[k]: v.height for k, v in ids.items()}
+    shared = []
+    for a, b in ((str(EventKind.drug_order), str(EventKind.drug_dispense)),
+                 (str(EventKind.drug_order), str(EventKind.drug_admin)),
+                 (str(EventKind.drug_dispense), str(EventKind.drug_admin))):
+        overlap = ids[a].join(ids[b], on="event_id", how="semi").height
+        if overlap:
+            shared.append(f"{overlap:,} are both a {stages[a]} and a {stages[b]}")
     return CheckResult(
         "",
-        not overlap,
-        f"{orders.height:,} orders and {admins.height:,} administrations, no shared events"
-        if not overlap
-        else f"{overlap:,} events are both an order and an administration",
-        {"drug_order": orders.height, "drug_admin": admins.height},
+        not shared,
+        ", ".join(f"{n:,} {name}s" for name, n in counts.items()) + "; no event is two stages"
+        if not shared
+        else "; ".join(shared),
+        counts,
+    )
+
+
+@check("EVENT_KIND_IS_ONE_ITS_SOURCE_DECLARES")
+def _kind_matches_source(l: Layers) -> CheckResult:
+    """An event may only be a kind its own source said it could produce.
+
+    This is the regression guard for the mislabelling that motivated the three drug
+    stages. A cabinet's dispensing records were administrations for as long as one line
+    of configuration said so, and nothing downstream disagreed: the events were well
+    formed, they referenced real people, and they validated. What was wrong was that the
+    kind did not match what the source documents itself to be.
+
+    Comparing published kinds against the declaration turns that from a reading of the
+    configuration into a property of the artifact, so a source relabelled in one place
+    and rebuilt in another shows up here rather than in a training set.
+    """
+    if l.events is None:
+        return _skip("canonical layer not built")
+    allowed: dict[str, set[str]] = {}
+    for source_id, spec in l.cfg.sources.items():
+        kinds: set[str] = set()
+        if spec.event_kind_from is not None:
+            kinds |= set(spec.event_kind_from.map.values())
+            kinds.add(spec.event_kind_from.default)
+        elif spec.event_kind is not None:
+            kinds.add(spec.event_kind)
+        # Several shapes emit companion events a source never names: a study event for a
+        # report, a death for a row carrying a date. Those are the shape's contract
+        # rather than the source's, so they are always admissible.
+        kinds |= {str(EventKind.death), str(EventKind.demographic), str(EventKind.procedure)}
+        if spec.study_event_kind is not None:
+            kinds.add(spec.study_event_kind)
+        allowed[source_id] = kinds
+
+    seen = l.events.group_by("source_id", "event_kind").len()
+    offenders = [
+        (row["source_id"], row["event_kind"], row["len"])
+        for row in seen.iter_rows(named=True)
+        if row["source_id"] in allowed and row["event_kind"] not in allowed[row["source_id"]]
+    ]
+    unknown = sorted({row["source_id"] for row in seen.iter_rows(named=True)
+                      if row["source_id"] not in allowed and row["source_id"] is not None})
+    return CheckResult(
+        "",
+        not offenders,
+        f"every event's kind is one its source declares, across {len(allowed)} sources"
+        + (f"; {len(unknown)} source ids are not in the configuration: {unknown[:3]}" if unknown else "")
+        if not offenders
+        else "; ".join(f"{n:,} {kind} events from {sid}, which does not declare it"
+                       for sid, kind, n in sorted(offenders, key=lambda o: -o[2])[:5]),
+        {"sources_checked": len(allowed), "offending_pairs": len(offenders)},
+    )
+
+
+@check("ONLY_ADMINISTRATIONS_BECOME_DRUG_EXPOSURE")
+def _not_administered_excluded(l: Layers) -> CheckResult:
+    """A record that is not evidence of administration must not be published as one.
+
+    An administration record logs more than administrations: alongside refusals and
+    held doses it carries line flushes, confirmations, assessments and pain
+    reassessments. Those are real events and they stay in the canonical layer. What
+    they are not is a claim that a patient received a drug, and DRUG_EXPOSURE is
+    exactly that claim.
+
+    Read from the published table through its lineage rather than from the query that
+    fills it, because the failure this guards against is a WHERE clause lost in a later
+    edit -- which a reading of the code would still describe as correct.
+    """
+    declared = [sid for sid, spec in l.cfg.sources.items() if spec.administered_when]
+    if not declared:
+        return _skip("no source declares which of its statuses mean administered")
+    if l.events_path is None:
+        return _skip("canonical layer not built")
+    con = _omop_connection(l)
+    if con is None:
+        return _skip("OMOP not built or empty")
+    try:
+        leaked, total = con.execute(
+            f"""
+            WITH e AS (
+                SELECT event_id FROM read_parquet('{l.events_path}')
+                WHERE list_contains(quality_flags, '{QualityFlag.NOT_ADMINISTERED}')
+            )
+            SELECT (SELECT count(*) FROM etl_audit.lineage g
+                    JOIN e ON e.event_id = g.event_id
+                    WHERE g.target_table = 'drug_exposure'),
+                   (SELECT count(*) FROM e)
+            """
+        ).fetchone()
+    finally:
+        con.close()
+    return CheckResult(
+        "",
+        not leaked,
+        f"{int(total):,} records are not evidence of administration, from "
+        f"{len(declared)} source(s) declaring the distinction, and none became a drug "
+        f"exposure"
+        if not leaked
+        else f"{int(leaked):,} records that are not evidence of administration were "
+        f"published as drug exposure",
+        {"not_administered": int(total), "in_drug_exposure": int(leaked)},
     )
 
 

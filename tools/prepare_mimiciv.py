@@ -253,14 +253,64 @@ def build(mimic: Path, ed: Path | None, note: Path | None, out: Path) -> dict:
         )
 
     if p.view("emar", hosp / "emar.csv.gz"):
-        p.emit(
-            "emar",
+        # `poe_id` and `pharmacy_id` were not projected before, so nothing downstream
+        # could tell which order an administration carried out. They are the whole
+        # reason an action stream can answer "was this ordered thing actually given".
+        base = """SELECT e.subject_id, e.hadm_id, e.emar_id, e.emar_seq, e.poe_id,
+                         e.pharmacy_id, e.charttime, e.medication, e.event_txt,
+                         e.scheduletime, e.storetime"""
+        if p.view("emar_detail", hosp / "emar_detail.csv.gz"):
+            # emar_detail holds one row per component of an administration, so a plain
+            # join multiplies the dose. It is collapsed to one row per emar_id first,
+            # taking each field from the earliest component that states it; `emit`'s
+            # cardinality assertion is what proves the collapse actually happened.
+            sql = f"""
+            WITH detail AS (
+              SELECT emar_id,
+                     arg_min(dose_given, ord)               AS dose_given,
+                     arg_min(dose_given_unit, ord)          AS dose_given_unit,
+                     arg_min(route, ord)                    AS route,
+                     arg_min(product_amount_given, ord)     AS product_amount_given,
+                     arg_min(infusion_rate, ord)            AS infusion_rate,
+                     arg_min(infusion_rate_unit, ord)       AS infusion_rate_unit,
+                     arg_min(complete_dose_not_given, ord)  AS complete_dose_not_given,
+                     count(*)                               AS detail_rows
+              FROM (SELECT *, coalesce(try_cast(parent_field_ordinal AS INTEGER), 0) AS ord
+                    FROM emar_detail)
+              GROUP BY emar_id
+            )
+            {base}, d.dose_given, d.dose_given_unit, d.route, d.product_amount_given,
+                    d.infusion_rate, d.infusion_rate_unit, d.complete_dose_not_given,
+                    d.detail_rows,
+                    -- The canonical layer carries a dose as one text field, the way the
+                    -- other export's administrations already arrive, so the amount and
+                    -- its unit are joined here rather than losing the unit.
+                    nullif(trim(coalesce(d.dose_given, '') || ' ' ||
+                                coalesce(d.dose_given_unit, '')), '') AS dose_given_text
+            FROM emar e LEFT JOIN detail d USING (emar_id)
             """
-            SELECT subject_id, hadm_id, emar_id, emar_seq, charttime, medication,
-                   event_txt, scheduletime, storetime
-            FROM emar
+        else:
+            print("  [skip] emar_detail: dose and route will be empty", file=sys.stderr)
+            sql = f"{base} FROM emar e"
+        p.emit("emar", sql, "emar")
+
+    # The pharmacy's record of a medication order, which is where a dispensation is
+    # documented. MIMIC-IV on FHIR maps this table to MedicationDispense, and that is
+    # the reading taken here. It is worth stating what it is not: `status` describes the
+    # order's state rather than a confirmed hand-over, and `starttime` opens the
+    # dispensing schedule rather than timing a single act. Calling it a dispense is
+    # already far closer than calling it an administration, which is what the ED
+    # cabinet records were called before.
+    if p.view("pharmacy", hosp / "pharmacy.csv.gz"):
+        p.emit(
+            "pharmacy",
+            """
+            SELECT subject_id, hadm_id, pharmacy_id, poe_id, starttime, stoptime,
+                   medication, proc_type, status, entertime, verifiedtime, route,
+                   frequency, dispensation, fill_quantity
+            FROM pharmacy
             """,
-            "emar",
+            "pharmacy",
         )
 
     if p.view("poe", hosp / "poe.csv.gz"):

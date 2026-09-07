@@ -82,6 +82,36 @@ class RowFilterSpec(BaseModel):
         return v
 
 
+class EventKindFromSpec(BaseModel):
+    """The event kind is a property of the row, not of the whole table.
+
+    Provider order entry is one table holding medication orders, laboratory orders,
+    radiology orders and consults. A single ``event_kind`` makes most of its rows assert
+    something untrue, and a ``row_filter`` that keeps only medications answers that by
+    discarding 28.9 million recorded decisions -- which are exactly the actions an agent
+    would have to learn.
+
+    ``default`` is the point of this spec rather than a convenience: an order type
+    nobody mapped becomes a generic request instead of vanishing, so a new value in the
+    source shows up as an unmapped kind rather than as a number that quietly dropped.
+    """
+
+    model_config = Strict
+
+    column: str
+    #: source value -> event kind, compared case-insensitively after stripping
+    map: dict[str, str] = Field(default_factory=dict)
+    #: the kind for any value the map does not name
+    default: str
+
+    @field_validator("map")
+    @classmethod
+    def _nonempty(cls, v: dict[str, str]) -> dict[str, str]:
+        if not v:
+            raise ValueError("'map' must name at least one value; use 'event_kind' for a fixed kind")
+        return v
+
+
 class CodeSplitSpec(BaseModel):
     """One cell holding several codes, and the separator that divides them.
 
@@ -170,9 +200,28 @@ class SourceSpec(BaseModel):
     keep_columns: list[str] = Field(default_factory=list)
     #: restrict this source to a subset of its physical table's rows
     row_filter: "RowFilterSpec | None" = None
+    #: the kind varies by row: one table holding several kinds of action
+    event_kind_from: "EventKindFromSpec | None" = None
+    #: which values of the ``status`` role mean the drug actually reached the patient.
+    #:
+    #: Stated affirmatively on purpose. Listing the refusals instead would put the risk
+    #: on the wrong side: a status nobody enumerated would become a drug exposure, which
+    #: is exactly the claim -- a treatment that did not happen -- that the rest of this
+    #: converter exists to avoid making. Unlisted means not evidence, so a value added
+    #: by a future release is conservative rather than silently affirmative.
+    administered_when: list[str] = Field(default_factory=list)
     #: a cell holding several codes, and how to divide it
     code_split: "CodeSplitSpec | None" = None
     notes: str | None = None
+
+    @model_validator(mode="after")
+    def _one_way_to_declare_a_kind(self) -> "SourceSpec":
+        if self.event_kind is not None and self.event_kind_from is not None:
+            raise ValueError(
+                "declare either 'event_kind' or 'event_kind_from', not both: with both "
+                "present the fixed one is silently ignored"
+            )
+        return self
 
     @field_validator("adapter")
     @classmethod

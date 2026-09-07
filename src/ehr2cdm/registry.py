@@ -57,6 +57,9 @@ FIELD_ROLES: frozenset[str] = frozenset(
         "visit_type",
         "length_of_stay",
         "duration_masked",
+        # action lifecycle: this row's own identifier, and the action that caused it
+        "action_key",
+        "caused_by",
         # bookkeeping
         "sequence_number",
     }

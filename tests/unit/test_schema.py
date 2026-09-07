@@ -63,8 +63,14 @@ def test_event_kinds_cover_the_documented_set():
         "demographic",
         "visit",
         "condition",
+        # A medication has three distinct actions behind it and they are not the same
+        # evidence: ordering it, handing it over, and giving it to the patient.
         "drug_order",
+        "drug_dispense",
         "drug_admin",
+        # Everything else that can be requested shares one lifecycle, so it shares one
+        # kind; the domain lives in the code.
+        "service_order",
         "procedure",
         "measurement",
         "note",

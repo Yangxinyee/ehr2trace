@@ -11,6 +11,7 @@ from datetime import datetime
 
 from ehr2cdm.canonical.normalize import (
     COL_PREFIX,
+    kind_resolver,
     Row,
     ShapeContext,
     build_role_map,
@@ -312,6 +313,59 @@ def test_a_death_date_becomes_a_death_event_with_a_source_independent_id():
     assert death.event_id == other_death.event_id
 
 
+PERSON_WITH_STATUS_SPEC = {
+    **PERSON_SPEC,
+    "fields": {**PERSON_SPEC["fields"], "vital_status": {"from": ["Status"]}},
+}
+
+
+def test_vital_status_is_never_a_timeless_event():
+    """It is an outcome, and a timeless outcome is readable from every earlier history.
+
+    The source writes it as a static column next to gender, and it used to be published
+    as one. An as-of view has no cutoff that can exclude a row with no time, so a
+    patient's final status reached the histories that end before they died.
+    """
+    ctx = make_ctx("demographics", PERSON_WITH_STATUS_SPEC)
+    out = get_shape("person_attributes")(
+        ctx, make_rows(ctx, [{"PID": "P1", "Gender": "Female", "Status": "Deceased",
+                              "Died": "2021-06-02 08:15:00"}])
+    )
+    assert not any(e.source_code == "VITAL_STATUS" for e in out.events)
+
+
+def test_a_death_date_carries_the_status_so_the_status_itself_is_dropped():
+    """The death event already states the same fact at a real time."""
+    ctx = make_ctx("demographics", PERSON_WITH_STATUS_SPEC)
+    out = get_shape("person_attributes")(
+        ctx, make_rows(ctx, [{"PID": "P1", "Status": "Deceased", "Died": "2021-06-02 08:15:00"}])
+    )
+    death = next(e for e in out.events if e.event_kind == EventKind.death)
+    assert death.event_time == datetime(2021, 6, 2, 8, 15)
+    assert not out.quarantine
+
+
+def test_a_status_with_no_death_date_is_withheld_rather_than_published():
+    """Withheld, not deleted: the row keeps its status where a human can still read it.
+
+    This is also the path for a death date that failed to parse, which previously
+    produced a timeless "deceased" and no death event at all.
+    """
+    ctx = make_ctx("demographics", PERSON_WITH_STATUS_SPEC)
+    out = get_shape("person_attributes")(
+        ctx, make_rows(ctx, [{"PID": "P1", "Gender": "Female", "Status": "Alive"}])
+    )
+    assert {e.source_code for e in out.events} == {"GENDER"}
+    assert out.quarantine[0]["reason"] == str(QuarantineReason.UNTIMED_VITAL_STATUS)
+    assert "Alive" in out.quarantine[0]["detail"]
+
+
+def test_a_row_with_no_status_column_quarantines_nothing():
+    ctx = make_ctx("demographics", PERSON_WITH_STATUS_SPEC)
+    out = get_shape("person_attributes")(ctx, make_rows(ctx, [{"PID": "P1", "Gender": "Female"}]))
+    assert not out.quarantine
+
+
 def test_a_derived_visit_end_is_marked_derived():
     ctx = make_ctx(
         "outcome",
@@ -458,3 +512,66 @@ def test_split_codes_is_a_no_op_without_the_declaration():
     ctx = make_ctx("problems", PROBLEMS_SPEC)
     rows = make_rows(ctx, [{"PID": "PID1", "dx": "R78.81, B95.7", "t": "2024-01-01"}])
     assert [p.text("source_code") for p in split_codes(ctx, rows[0])] == ["R78.81, B95.7"]
+
+
+# --------------------------------------------------------------------------------
+# One table, several kinds of action
+# --------------------------------------------------------------------------------
+
+ORDER_SPEC = {
+    "adapter": "excel",
+    "shape": "point_event",
+    "event_kind_from": {
+        "column": "order_type",
+        "map": {"Medications": "drug_order"},
+        "default": "service_order",
+    },
+    "fields": {
+        "person_id": {"from": ["PID"]},
+        "event_time": {"from": ["ordered"]},
+        "source_code": {"from": ["order_type"]},
+        "action_key": {"from": ["order_id"]},
+    },
+}
+
+
+def _order_rows(ctx, values):
+    return make_rows(ctx, [
+        {"PID": "P1", "ordered": "2020-01-0%d 09:00:00" % (i + 1),
+         "order_type": v, "order_id": "o%d" % i}
+        for i, v in enumerate(values)
+    ])
+
+
+def test_the_kind_is_read_per_row_when_one_table_holds_several():
+    ctx = make_ctx("poe", ORDER_SPEC)
+    out = get_shape("point_event")(ctx, _order_rows(ctx, ["Medications", "Radiology"]))
+    assert [str(e.event_kind) for e in out.events] == ["drug_order", "service_order"]
+
+
+def test_an_unmapped_order_type_falls_through_instead_of_disappearing():
+    """A filter would have dropped it. The default is what makes the loss impossible."""
+    ctx = make_ctx("poe", ORDER_SPEC)
+    out = get_shape("point_event")(ctx, _order_rows(ctx, ["Something Invented In 2027"]))
+    assert [str(e.event_kind) for e in out.events] == ["service_order"]
+
+
+def test_a_kind_column_the_source_lacks_raises_rather_than_relabelling_everything():
+    ctx = make_ctx("poe", {**ORDER_SPEC,
+                           "event_kind_from": {"column": "absent", "map": {"a": "drug_order"},
+                                               "default": "service_order"}})
+    rows = _order_rows(ctx, ["Medications"])
+    try:
+        kind_resolver(ctx, rows, "drug_order")
+    except ValueError as exc:
+        assert "absent" in str(exc)
+    else:
+        raise AssertionError("a missing kind column must not fall through silently")
+
+
+def test_an_action_declares_its_own_key_and_the_one_that_caused_it():
+    ctx = make_ctx("poe", ORDER_SPEC)
+    out = get_shape("point_event")(ctx, _order_rows(ctx, ["Medications"]))
+    assert out.action_keys == [
+        {"event_id": out.events[0].event_id, "key": "o0", "role": "declares"}
+    ]

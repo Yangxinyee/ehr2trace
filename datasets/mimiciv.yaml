@@ -342,6 +342,32 @@ sources:
       dose:         {from: [dose_val_rx]}
       unit:         {from: [dose_unit_rx]}
       route:        {from: [route]}
+      caused_by:    {from: [poe_id]}
+
+  # The pharmacy's record of a medication order, and where a dispensation is
+  # documented. MIMIC-IV on FHIR maps this table to MedicationDispense and that is the
+  # reading taken here. What it is not: `status` describes the order's state rather than
+  # a confirmed hand-over, and `starttime` opens the dispensing schedule rather than
+  # timing a single act. It is still far closer than an administration, which is what
+  # the only other dispensing record in this export used to be called.
+  pharmacy:
+    adapter: parquet
+    file_glob: "pharmacy.parquet"
+    shape: point_event
+    event_kind: drug_dispense
+    code_system: SOURCE
+    required: false
+    fields:
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [hadm_id]}
+      event_time:     {from: [starttime], required: true}
+      end_time:       {from: [stoptime]}
+      available_time: {from: [entertime]}
+      source_code:    {from: [medication], required: true}
+      source_name:    {from: [medication]}
+      status:         {from: [status]}
+      route:          {from: [route]}
+      caused_by:      {from: [poe_id]}
 
   emar:
     adapter: parquet
@@ -350,6 +376,20 @@ sources:
     event_kind: drug_admin
     code_system: SOURCE
     required: false
+    # `event_txt` has 73 distinct values over 42,808,593 rows, and only 66.9% of them
+    # say a drug reached the patient. 13.3% are refusals or held doses. The remaining
+    # 19.8% are not administrations at all: 3,350,325 line flushes, 1,852,934
+    # confirmations, 582,474 assessments, 20,867 pain reassessments, and a long tail of
+    # starts, stops, rate changes and applications. Publishing all of them as drug
+    # exposure asserted roughly 13.5 million treatments the source never claims.
+    #
+    # Listed affirmatively, so a value this list does not know is not an exposure.
+    administered_when:
+      - "Administered"
+      - "Delayed Administered"
+      - "Administered Bolus from IV Drip"
+      - "Administered in Other Location"
+      - "Partial Administered"
     fields:
       person_id:      {from: [subject_id], required: true}
       encounter_id:   {from: [hadm_id]}
@@ -359,12 +399,24 @@ sources:
       source_name:    {from: [medication]}
       status:         {from: [event_txt]}
       sequence_number: {from: [emar_seq]}
+      # Present in emar_detail all along; the preparation step now collapses that
+      # one-to-many table to one row per administration and brings them across.
+      dose:           {from: [dose_given_text]}
+      route:          {from: [route]}
+      # The order this administration carried out. Without it there is no way to ask
+      # whether an ordered drug was actually given, which is the question an action
+      # stream exists to answer.
+      caused_by:      {from: [poe_id]}
 
+  # The ED dispensing cabinet. Taking a drug out of a cabinet is not giving it to a
+  # patient: the official documentation calls this dispensation, and one record can
+  # cover several GSN rows. Calling it an administration asserted 1,180,121 treatments
+  # that the source never claims happened.
   ed_pyxis:
     adapter: parquet
     file_glob: "ed_pyxis.parquet"
     shape: point_event
-    event_kind: drug_admin
+    event_kind: drug_dispense
     code_system: SOURCE
     required: false
     fields:
@@ -377,7 +429,6 @@ sources:
     adapter: parquet
     file_glob: "poe.parquet"
     shape: point_event
-    event_kind: drug_order
     code_system: SOURCE
     required: false
     # Provider order entry covers every order type, not only drugs, and declaring the
@@ -386,13 +437,19 @@ sources:
     # Harmless only while nothing in the drug domain mapped; the moment RxNorm or NDC
     # lookup works, a chest CT becomes a DRUG_EXPOSURE row.
     #
-    # The laboratory, radiology and nutrition orders dropped here are not lost facts --
-    # the labs and studies they ordered are ingested from their own tables. What is lost
-    # is the ordering event for them, which is order metadata rather than a clinical fact
-    # about the patient.
-    row_filter:
+    # Filtering to medications answered that by discarding the other 28,916,331 rows.
+    # For a model of a clinician's decisions those are not metadata: ordering a chest CT
+    # or requesting a consult is exactly the kind of action such a model has to produce,
+    # and the result arriving later from its own table is not the same fact as the
+    # decision to ask for it.
+    #
+    # So the kind is read per row instead. Anything the map does not name becomes a
+    # generic service order rather than disappearing, which is what makes a new order
+    # type in a future release show up as an unmapped kind instead of a smaller count.
+    event_kind_from:
       column: order_type
-      keep: ["Medications"]
+      map: {Medications: drug_order}
+      default: service_order
     fields:
       person_id:       {from: [subject_id], required: true}
       encounter_id:    {from: [hadm_id]}
@@ -401,6 +458,10 @@ sources:
       source_name:     {from: [order_subtype]}
       status:          {from: [order_status]}
       sequence_number: {from: [poe_seq]}
+      # Order entry is the hub of the medication chain: the prescription, the pharmacy
+      # record and the administration all name this row rather than each other, so a
+      # missing middle source costs a link instead of the whole chain.
+      action_key:      {from: [poe_id]}
 
   # -- notes ----------------------------------------------------------------------
   # The text this export does have, and the reference export did not. One row is one

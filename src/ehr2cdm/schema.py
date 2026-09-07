@@ -24,7 +24,15 @@ class EventKind(StrEnum):
     visit = "visit"
     condition = "condition"
     drug_order = "drug_order"
+    #: handed over by a pharmacy or a cabinet. Not evidence the patient received it.
+    drug_dispense = "drug_dispense"
     drug_admin = "drug_admin"
+    #: a request for something that is not a drug -- a test, an image, a consult. One
+    #: kind rather than one per domain: they share a lifecycle (requested, performed,
+    #: resulted) and the result already arrives as its own observational event. The
+    #: domain lives in the code, the way FHIR keeps every non-medication request in a
+    #: single ServiceRequest resource.
+    service_order = "service_order"
     procedure = "procedure"
     measurement = "measurement"
     note = "note"
@@ -58,6 +66,10 @@ class Coverage(StrEnum):
 
 class QualityFlag(StrEnum):
     RECORDED_AFTER_DEATH = "RECORDED_AFTER_DEATH"
+    #: this record is not evidence the drug reached the patient. It covers a refusal, a
+    #: held dose, and equally the nursing actions an administration record also logs --
+    #: a line flush, a pain reassessment, an infusion reconciliation.
+    NOT_ADMINISTERED = "NOT_ADMINISTERED"
     AVAILABILITY_ASSUMED = "AVAILABILITY_ASSUMED"
     AVAILABILITY_BEFORE_EVENT = "AVAILABILITY_BEFORE_EVENT"
     COMPARATOR_VALUE = "COMPARATOR_VALUE"
@@ -82,7 +94,20 @@ class QuarantineReason(StrEnum):
     MISSING_PERSON_KEY = "MISSING_PERSON_KEY"
     UNPARSEABLE_VALUE = "UNPARSEABLE_VALUE"
     UNTIMED_CLINICAL_VALUE = "UNTIMED_CLINICAL_VALUE"
+    UNTIMED_VITAL_STATUS = "UNTIMED_VITAL_STATUS"
     DECODE_ERROR = "DECODE_ERROR"
+
+
+#: Person attributes that may legitimately carry no time.
+#:
+#: A baseline attribute is one whose value holds for the whole record, so a model that
+#: reads it at any decision point learns nothing it could not have known at the first.
+#: Vital status is deliberately absent. It is an outcome, and an outcome with no time
+#: sits in every history the record can produce, including the ones that end before the
+#: patient died. Anything not on this list must resolve to a time or be withheld.
+TIMELESS_BASELINE_CODES: frozenset[str] = frozenset(
+    {"GENDER", "RACE", "ETHNICITY", "AGE", "BIRTH_DATE"}
+)
 
 
 # --------------------------------------------------------------------------------
@@ -179,6 +204,7 @@ CANONICAL_EVENT_SCHEMA = pa.schema(
         # bookkeeping, not part of the identity of an event
         pa.field("source_id", pa.string()),
         pa.field("parent_event_id", pa.string()),
+        pa.field("caused_by_event_id", pa.string()),
     ]
 )
 
@@ -282,6 +308,10 @@ class CanonicalEvent(BaseModel):
     quality_flags: list[str] = Field(default_factory=list)
     source_id: str | None = None
     parent_event_id: str | None = None
+    #: the action this one carries out: an administration points at its order. Resolved
+    #: across sources during the build, because the causing row is read by a different
+    #: source than the row that names it.
+    caused_by_event_id: str | None = None
 
 
 def events_to_table(events: Iterable[CanonicalEvent]) -> pa.Table:

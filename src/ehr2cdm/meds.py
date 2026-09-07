@@ -67,6 +67,14 @@ MEDS_SCHEMA = pa.schema(
         pa.field("source_code", pa.string()),
         pa.field("unit", pa.string()),
         pa.field("event_kind", pa.string()),
+        # An administration without a dose, a route or an execution status is not an
+        # action a model can learn from, only the fact that something happened. All
+        # three are in the canonical layer and were being dropped by this projection.
+        pa.field("dose", pa.string()),
+        pa.field("route", pa.string()),
+        pa.field("status", pa.string()),
+        #: the order this event carried out, when one is known
+        pa.field("caused_by_event_id", pa.string()),
         pa.field("quality_flags", pa.list_(pa.string())),
     ]
 )
@@ -253,6 +261,10 @@ def _materialize_rows(con, out_path: Path, scratch_dir: Path) -> None:
                    e.source_code,
                    e.unit_source AS unit,
                    e.event_kind,
+                   e.dose_source AS dose,
+                   e.route_source AS route,
+                   e.status_source AS status,
+                   e.caused_by_event_id,
                    CASE
                        WHEN e.available_time IS NULL AND e.event_time IS NOT NULL
                        THEN list_sort(list_distinct(list_append(e.quality_flags, '{assumed}')))

@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from ehr2cdm.canonical.anchors import anchor_identity, emit_anchors
+from ehr2cdm.canonical.build import resolve_causes
 from ehr2cdm.canonical.dedup import (
     apply_duplicate_flags,
     dedup_records,
@@ -194,3 +195,38 @@ def test_generic_dedup_is_order_independent():
     assert len(forward) == 1
     assert forward == backward
     assert forward[0]["source_row_id"] == "r1"
+
+
+def test_an_administration_is_joined_to_the_order_it_carried_out():
+    """The source names the order by the order's key, not by an event id.
+
+    The order is read by a different source, so the id only exists once both have been
+    read. That join is the whole reason this runs after the per-source pass.
+    """
+    events = [{"event_id": "order1", "caused_by_event_id": None},
+              {"event_id": "admin1", "caused_by_event_id": None}]
+    keys = [{"event_id": "order1", "key": "poe7", "role": "declares"},
+            {"event_id": "admin1", "key": "poe7", "role": "caused_by"}]
+    out, resolved = resolve_causes(events, keys)
+    assert resolved == 1
+    assert {e["event_id"]: e["caused_by_event_id"] for e in out} == {
+        "order1": None, "admin1": "order1"}
+
+
+def test_a_key_naming_nothing_stays_null_rather_than_being_guessed():
+    """The order may sit outside the extract. An invented parent asserts evidence."""
+    events = [{"event_id": "admin1", "caused_by_event_id": None}]
+    keys = [{"event_id": "admin1", "key": "poe_not_extracted", "role": "caused_by"},
+            {"event_id": "order9", "key": "poe_other", "role": "declares"}]
+    out, resolved = resolve_causes(events, keys)
+    assert resolved == 0 and out[0]["caused_by_event_id"] is None
+
+
+def test_two_rows_claiming_one_key_resolve_the_same_way_every_run():
+    events = [{"event_id": "admin1", "caused_by_event_id": None}]
+    keys = [{"event_id": "admin1", "key": "k", "role": "caused_by"},
+            {"event_id": "zzz", "key": "k", "role": "declares"},
+            {"event_id": "aaa", "key": "k", "role": "declares"}]
+    first = resolve_causes(events, keys)[0][0]["caused_by_event_id"]
+    assert first == resolve_causes(events, list(reversed(keys)))[0][0]["caused_by_event_id"]
+    assert first == "aaa"

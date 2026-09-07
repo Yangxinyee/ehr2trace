@@ -168,6 +168,57 @@ def filter_rows(spec: SourceSpec, rows: Sequence["Row"], columns: Iterable[str])
     return out
 
 
+def kind_resolver(ctx: "ShapeContext", rows: Sequence["Row"], fixed: str) -> Callable[["Row"], str]:
+    """How to decide one row's event kind.
+
+    Fixed for most sources: the table is one kind of thing. When ``event_kind_from`` is
+    declared the kind is read from a column instead, because the table is not -- an
+    order entry table holds medication orders next to laboratory and radiology ones.
+
+    A column the source does not have raises rather than letting every row fall to the
+    default. A typo would otherwise relabel a whole table in one direction, silently,
+    and the result would still validate.
+    """
+    spec = ctx.spec.event_kind_from
+    if spec is None:
+        return lambda row: fixed
+    available = {
+        c[len(COL_PREFIX):].strip().lower(): c
+        for c in (rows[0].data if rows else {})
+        if c.startswith(COL_PREFIX)
+    }
+    column = available.get(spec.column.strip().lower())
+    if column is None:
+        raise ValueError(
+            f"event_kind_from names column {spec.column!r}, which this source does not "
+            f"have; every row would fall through to {spec.default!r}. "
+            f"available: {sorted(available)[:20]}"
+        )
+    mapping = {k.strip().lower(): v for k, v in spec.map.items()}
+
+    def resolve(row: "Row") -> str:
+        value = row.data.get(column)
+        key = str(value).strip().lower() if value is not None else ""
+        return mapping.get(key, spec.default)
+
+    return resolve
+
+
+def record_action_keys(out: "Emission", ctx: "ShapeContext", row: "Row", event_id: str) -> None:
+    """Note this event's own action key, and the key of the action that caused it.
+
+    Both are source business keys rather than event ids. The causing row is read by a
+    different source -- an administration names its order, and the order is a row in the
+    order entry table -- so the id it will be given is not knowable here.
+    """
+    own = row.text("action_key", ctx.null_literals)
+    if own is not None:
+        out.action_keys.append({"event_id": event_id, "key": own, "role": "declares"})
+    cause = row.text("caused_by", ctx.null_literals)
+    if cause is not None:
+        out.action_keys.append({"event_id": event_id, "key": cause, "role": "caused_by"})
+
+
 def split_codes(ctx: "ShapeContext", row: "Row") -> list["Row"]:
     """One row holding several codes -> one row per code, or the row unchanged.
 
@@ -227,12 +278,16 @@ class Emission:
     links: list[dict[str, Any]] = field(default_factory=list)
     issues: list[dict[str, Any]] = field(default_factory=list)
     quarantine: list[dict[str, Any]] = field(default_factory=list)
+    #: source business keys naming actions, resolved to event ids once the build has
+    #: every source in view. See ``resolve_causes``.
+    action_keys: list[dict[str, Any]] = field(default_factory=list)
 
     def extend(self, other: "Emission") -> None:
         self.events.extend(other.events)
         self.links.extend(other.links)
         self.issues.extend(other.issues)
         self.quarantine.extend(other.quarantine)
+        self.action_keys.extend(other.action_keys)
 
     def link(self, event_id: str, row: Row, relation: SourceRelation = SourceRelation.derived_from) -> None:
         self.links.append(
@@ -393,8 +448,10 @@ def _dedup_flags(flags: Iterable[str]) -> list[str]:
 def shape_point_event(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
     """One row, one event: conditions, orders, administrations, single measurements."""
     out = Emission()
-    kind = ctx.spec.event_kind or str(EventKind.measurement)
+    kind_of = kind_resolver(ctx, rows, ctx.spec.event_kind or str(EventKind.measurement))
+    administered = {v.strip().lower() for v in ctx.spec.administered_when}
     for row in rows:
+        kind = kind_of(row)
         try:
             event_time, available_time, end_time, flags = resolve_times(ctx, row)
             value = parse_value(
@@ -421,6 +478,15 @@ def shape_point_event(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
                 row, str(QuarantineReason.UNPARSEABLE_VALUE), "no source code or name", ctx.source_id
             )
             continue
+
+        status_text = row.text("status", ctx.null_literals)
+        if administered and kind == str(EventKind.drug_admin):
+            # An administration record logs more than administrations. Two thirds of
+            # MIMIC-IV's say the drug was given; the rest are refusals, held doses, and
+            # nursing actions -- flushes, assessments, infusion reconciliations -- that
+            # are real events but not evidence of exposure.
+            if status_text is None or status_text.strip().lower() not in administered:
+                flags = flags + [str(QualityFlag.NOT_ADMINISTERED)]
 
         discriminator = row.text("sequence_number", ctx.null_literals)
         event_id = event_identity(
@@ -452,13 +518,14 @@ def shape_point_event(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
                 value_low=value.low,
                 value_high=value.high,
                 unit_source=value.unit,
-                status_source=row.text("status", ctx.null_literals),
+                status_source=status_text,
                 route_source=row.text("route", ctx.null_literals),
                 dose_source=row.text("dose", ctx.null_literals),
                 quality_flags=_dedup_flags(flags + value.flags),
             )
         )
         out.link(event_id, row)
+        record_action_keys(out, ctx, row, event_id)
     return out
 
 
@@ -639,7 +706,7 @@ def shape_person_attributes(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
     """
     out = Emission()
     for row in rows:
-        for role in ("gender", "race", "ethnicity", "vital_status"):
+        for role in ("gender", "race", "ethnicity"):
             text = row.text(role, ctx.null_literals)
             if text is None:
                 continue
@@ -703,7 +770,9 @@ def shape_person_attributes(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
                 out.link(event_id, row)
 
         out.extend(_emit_birth_date(ctx, row))
-        out.extend(_emit_death(ctx, row))
+        death = _emit_death(ctx, row)
+        out.extend(death)
+        out.extend(_emit_vital_status(ctx, row, timed=bool(death.events)))
         out.extend(_emit_untimed(ctx, row))
     return out
 
@@ -866,6 +935,39 @@ def _emit_death(ctx: ShapeContext, row: Row) -> Emission:
         )
     )
     out.link(event_id, row)
+    return out
+
+
+def _emit_vital_status(ctx: ShapeContext, row: Row, *, timed: bool) -> Emission:
+    """A person's vital status, which is an outcome and not a baseline attribute.
+
+    The source states it as a static column, and it was published as one: a timeless
+    ``demographic`` event, which an as-of view returns whatever cutoff it is asked for.
+    Every history a record can produce therefore carried the patient's final status,
+    including the histories that end long before they died.
+
+    There is no honest time to give it here. When the row carries a death date the
+    ``death`` event above already states the same fact at a real time, so the status is
+    redundant and dropped. When it does not, the status is withheld rather than
+    published: quarantined with its source row, the way an untimed measurement is. That
+    also catches the rows whose death date failed to parse, which until now produced a
+    timeless "deceased" and no death event at all.
+
+    Deciding this on whether a death event was emitted, rather than on what the status
+    column says, keeps the core free of any particular export's word for "alive".
+    """
+    out = Emission()
+    if timed:
+        return out
+    text = row.text("vital_status", ctx.null_literals)
+    if text is None:
+        return out
+    out.quarantine_row(
+        row,
+        str(QuarantineReason.UNTIMED_VITAL_STATUS),
+        f"vital status {text[:32]!r} has no time in the source and no death date to place it",
+        ctx.source_id,
+    )
     return out
 
 
