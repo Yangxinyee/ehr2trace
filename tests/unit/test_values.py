@@ -163,3 +163,33 @@ def test_routing_clause_survives_being_anded_with_an_exclusion():
         f"AND NOT list_contains(e.flags, 'NOT_ADMINISTERED')"
     ).fetchone()[0]
     assert n == 0, "an excluded row reached the table through the unmapped branch"
+
+
+def test_surrogate_ids_are_totally_ordered_when_a_code_fans_out():
+    """One event mapping to two concepts must number its rows the same way every run.
+
+    ``ORDER BY event_id`` leaves such rows tied, and a tie lets the engine number them
+    either way. The rows' content still agrees, so only a digest of the whole table
+    disagrees -- which is how this was found, by the tables with no fan-out reproducing
+    and the two with it not.
+    """
+    import duckdb
+
+    from ehr2cdm.omop import SURROGATE_ORDER
+
+    con = duckdb.connect()
+    con.execute("CREATE TABLE e (event_id VARCHAR)")
+    con.execute("CREATE TABLE m (event_id VARCHAR, concept_id BIGINT)")
+    con.execute("INSERT INTO e VALUES ('evt1'), ('evt2')")
+    # evt1 maps to two standard concepts; evt2 to one.
+    con.executemany("INSERT INTO m VALUES (?, ?)",
+                    [("evt1", 200), ("evt1", 100), ("evt2", 300)])
+    sql = (f"SELECT row_number() OVER (ORDER BY {SURROGATE_ORDER}) AS id, e.event_id, m.concept_id "
+           "FROM e JOIN m ON m.event_id = e.event_id")
+    first = con.execute(sql).fetchall()
+    # The same query under a different plan must assign the same ids.
+    con.execute("SET threads=1")
+    assert con.execute(sql).fetchall() == first
+    # And the tie is broken by concept id rather than left to the engine.
+    assert [(r[1], r[2]) for r in sorted(first)] == [
+        ("evt1", 100), ("evt1", 200), ("evt2", 300)]

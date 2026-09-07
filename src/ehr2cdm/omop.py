@@ -564,6 +564,19 @@ ROUTABLE_JOIN = (
 )
 
 
+#: The surrogate key's order, and why it carries a second column.
+#:
+#: A source code that maps to more than one standard concept produces more than one
+#: published row from one canonical event, so ``ORDER BY event_id`` alone leaves those
+#: rows tied and the engine free to number them either way. Two builds then agree on
+#: every row's content and disagree on which of them holds which id, which is enough to
+#: make an order-independent digest of the table differ. 83,016 drug events and 33
+#: condition events fan out this way on MIMIC-IV; the tables with no fan-out reproduced
+#: exactly, which is what located this. The concept id is the column the fan-out is
+#: along, so adding it makes the order total.
+SURROGATE_ORDER = "e.event_id, coalesce(m.concept_id, 0)"
+
+
 def _routes_here(table: str, kinds: tuple[str, ...]) -> str:
     """The WHERE clause deciding whether an event belongs in ``table``.
 
@@ -596,7 +609,7 @@ def _routes_here(table: str, kinds: tuple[str, ...]) -> str:
 
 def _visit_sql(con) -> str:
     return f"""
-        SELECT CAST(row_number() OVER (ORDER BY e.event_id) AS INTEGER) AS visit_occurrence_id,
+        SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS visit_occurrence_id,
                p.person_id,
                CAST(coalesce(m.concept_id, 0) AS INTEGER) AS visit_concept_id,
                CAST(e.event_time AS DATE) AS visit_start_date,
@@ -629,7 +642,7 @@ def _condition_sql(con) -> str:
     # The source says when a problem was first noted. That is not an onset date, and
     # the type concept is what keeps this row from claiming one.
     return f"""
-        SELECT CAST(row_number() OVER (ORDER BY e.event_id) AS INTEGER) AS condition_occurrence_id,
+        SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS condition_occurrence_id,
                p.person_id,
                CAST(coalesce(m.concept_id, 0) AS INTEGER) AS condition_concept_id,
                CAST(e.event_time AS DATE) AS condition_start_date,
@@ -666,7 +679,7 @@ def _drug_sql(con) -> str:
     into ``stop_reason``, which means something else.
     """
     return f"""
-        SELECT CAST(row_number() OVER (ORDER BY e.event_id) AS INTEGER) AS drug_exposure_id,
+        SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS drug_exposure_id,
                p.person_id,
                CAST(coalesce(m.concept_id, 0) AS INTEGER) AS drug_concept_id,
                CAST(e.event_time AS DATE) AS drug_exposure_start_date,
@@ -711,7 +724,7 @@ def _drug_sql(con) -> str:
 
 def _procedure_sql(con) -> str:
     return f"""
-        SELECT CAST(row_number() OVER (ORDER BY e.event_id) AS INTEGER) AS procedure_occurrence_id,
+        SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS procedure_occurrence_id,
                p.person_id,
                CAST(coalesce(m.concept_id, 0) AS INTEGER) AS procedure_concept_id,
                CAST(e.event_time AS DATE) AS procedure_date,
@@ -765,7 +778,7 @@ def _measurement_sql(con, cfg: DatasetConfig) -> str:
         range_low = range_high = "CAST(NULL AS DOUBLE)"
 
     return f"""
-        SELECT CAST(row_number() OVER (ORDER BY e.event_id) AS INTEGER) AS measurement_id,
+        SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS measurement_id,
                p.person_id,
                CAST(coalesce(m.concept_id, 0) AS INTEGER) AS measurement_concept_id,
                CAST(e.event_time AS DATE) AS measurement_date,
@@ -820,7 +833,7 @@ def _observation_sql(con) -> str:
     resolve elsewhere.
     """
     return f"""
-        SELECT CAST(row_number() OVER (ORDER BY e.event_id) AS INTEGER) AS observation_id,
+        SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS observation_id,
                p.person_id,
                CAST(m.concept_id AS INTEGER) AS observation_concept_id,
                CAST(e.event_time AS DATE) AS observation_date,

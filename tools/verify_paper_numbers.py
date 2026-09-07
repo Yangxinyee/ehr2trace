@@ -132,18 +132,40 @@ def _readiness() -> dict[str, str]:
     return readiness_macros(_load("world_model_readiness.json"))
 
 
+def _cost() -> dict[str, str]:
+    """Stage cost, from whichever run of each stage the cost record kept."""
+    doc = _load("cost.json")
+    rows = doc["recorded"] + doc.get("measured", [])
+    latest = {}
+    for row in rows:
+        if row.get("wall_seconds") is not None:
+            latest[row["stage"]] = row
+    out = {}
+    for stage, macro in (("ingest", "mimicIngestMinutes"), ("canonical", "mimicCanonicalMinutes"),
+                         ("omop", "mimicOmopMinutes"), ("meds", "mimicMedsMinutes")):
+        if stage in latest:
+            out[macro] = f"{latest[stage]['wall_seconds'] / 60:.0f}"
+    if "canonical" in latest and latest["canonical"].get("peak_rss_gb") is not None:
+        out["mimicCanonicalPeakGb"] = f"{latest['canonical']['peak_rss_gb']:.1f}"
+    return out
+
+
 def _rebuild_defects() -> dict[str, str]:
     """The two defects the rebuild surfaced, which no injected fault predicted."""
-    doc = _load("rebuild_defects.json")["routing_precedence"]
+    record = _load("rebuild_defects.json")
+    doc = record["routing_precedence"]
+    ties = record["surrogate_key_ties"]
     return {
         "leakedAdministrations": _thousands(doc["not_administered_in_drug_exposure"]),
         "leakedFlushes": _thousands(doc["of_which_flushes"]),
+        "faninDrug": _thousands(ties["fanout_drug_events"]),
+        "faninCondition": _thousands(ties["fanout_condition_events"]),
     }
 
 
 SOURCES: tuple[Callable[[], dict[str, str]], ...] = (
     _leakage, _dqd, _reproducibility, _terminology, _scale, _faults, _snapshot, _readiness,
-    _rebuild_defects,
+    _rebuild_defects, _cost,
 )
 
 
