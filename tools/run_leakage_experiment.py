@@ -40,8 +40,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from ehr2cdm.paths import portable_work_path  # noqa: E402
 
 # The prediction point and the cohort floor. Twenty-four hours is the conventional
 # horizon for this task; the 48-hour floor keeps the prediction point well inside the
@@ -250,7 +255,7 @@ def main() -> None:
     con.close()
 
     summary = {
-        "meds_root": str(args.meds),
+        "meds_root": portable_work_path(args.meds),
         "task": "in-hospital death, predicted at a fixed horizon after admission",
         "cohort": {
             "min_stay_hours": MIN_STAY_HOURS,

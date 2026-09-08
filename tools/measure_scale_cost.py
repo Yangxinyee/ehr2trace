@@ -40,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from ehr2cdm.config import load_dataset_config  # noqa: E402
 from ehr2cdm.digest import digest_duckdb, digest_meds_data  # noqa: E402
 from ehr2cdm.faults import clone_work_tree  # noqa: E402
-from ehr2cdm.paths import WorkLayout  # noqa: E402
+from ehr2cdm.paths import WorkLayout, portable_work_path  # noqa: E402
 
 
 def recorded_costs(layout: WorkLayout) -> list[dict]:
@@ -153,7 +153,7 @@ def main() -> None:
 
     summary = {
         "dataset": cfg.dataset_id,
-        "built": str(args.built),
+        "built": portable_work_path(args.built),
         "recorded": recorded_costs(original),
         "measured": measured,
         "rebuilt_identically": reproduced,

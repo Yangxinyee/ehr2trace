@@ -199,3 +199,22 @@ def read_parquet_dir(root: Path, columns: Sequence[str] | None = None) -> pa.Tab
 def remove_tree(path: Path) -> None:
     if path.exists():
         shutil.rmtree(path)
+
+
+def portable_work_path(path: Path | str) -> str:
+    """Describe a work-root path without publishing where the machine keeps it.
+
+    Result records name the build they measured, and a recorded absolute path
+    puts one operator's directory layout into a public repository without adding
+    anything a reader can use. Relative to ``EHR_WORK_ROOT`` the same string
+    still identifies the build, so that is what gets written; a path outside the
+    work root falls back to its last two components.
+    """
+    path = Path(path)
+    root = os.environ.get("EHR_WORK_ROOT")
+    if root:
+        try:
+            return str(path.resolve().relative_to(Path(root).resolve()))
+        except ValueError:
+            pass
+    return str(Path(*path.parts[-2:])) if len(path.parts) > 2 else str(path)
