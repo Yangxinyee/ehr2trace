@@ -39,7 +39,11 @@ def digest_frame(frame) -> str:
         return f"0:{header}"
     hashes = frame.select(columns).hash_rows(seed=0)
     # Sorted, so two builds that emitted the same rows in a different order agree.
-    payload = hashes.sort().to_numpy().tobytes()
+    # Serialised a word at a time with the byte order named rather than inherited:
+    # `to_numpy().tobytes()` produces the same bytes on x86 but reads the machine's
+    # endianness, which is not something a digest that certifies determinism should
+    # depend on -- and it pulled in numpy, which nothing else here needs.
+    payload = b"".join(int(h).to_bytes(8, "little") for h in hashes.sort())
     return f"{frame.height}:{hashlib.sha256(header.encode() + payload).hexdigest()}"
 
 
