@@ -152,10 +152,10 @@ These must be answered by the data owner. They cannot be guessed, and the LLM mu
 
 ### P0 exit criteria
 
-- [x] `ehr2cdm inspect --dataset ctpe` runs and passes every baseline assertion.
+- [x] `ehr2trace inspect --dataset ctpe` runs and passes every baseline assertion.
 - [x] Contracts (config model, canonical schema, hashing rules) are frozen.
 - [!] The blocker list has been sent to the data owner.
-      - **[!] blocked**: a human action. `ehr2cdm inspect` prints the list and exits non-zero while any remain open.
+      - **[!] blocked**: a human action. `ehr2trace inspect` prints the list and exits non-zero while any remain open.
 
 ---
 
@@ -394,7 +394,7 @@ These must be answered by the data owner. They cannot be guessed, and the LLM mu
 ### P4-4 Measure the benefit ★
 
 - [!] Build a small human gold set (a few dozen terminology mappings is enough).
-      - **[!] blocked** on the vocabulary: candidate recall needs one before a human can accept anything. `ehr2cdm measure --from-decisions` builds the gold set from accepted decisions.
+      - **[!] blocked** on the vocabulary: candidate recall needs one before a human can accept anything. `ehr2trace measure --from-decisions` builds the gold set from accepted decisions.
 - [!] Compare human-acceptance rates across three configurations: deterministic lookup only / plus lexical recall / plus LLM ranking.
       - **[!] not measured**: implemented in `measure.py`, needs a served model and a vocabulary. Until it is run, the ranking step is unjustified — use `--no-llm`.
 - [!] Record JSON schema success rate, retry rate, and latency.

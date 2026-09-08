@@ -52,7 +52,7 @@ def _requires_the_real_export(data_root):
 
 @pytest.fixture(scope="module")
 def work_layout(ctpe_config):
-    from ehr2cdm.paths import WorkLayout
+    from ehr2trace.paths import WorkLayout
 
     if not os.environ.get("EHR_WORK_ROOT"):
         pytest.skip("EHR_WORK_ROOT is not set")
@@ -61,7 +61,7 @@ def work_layout(ctpe_config):
 
 @pytest.fixture(scope="module")
 def report(ctpe_config):
-    from ehr2cdm.discover import inspect
+    from ehr2trace.discover import inspect
 
     return inspect(ctpe_config, compute_hashes=False)
 
@@ -187,7 +187,7 @@ def local_baselines():
 
 
 def subject_id_for(ctpe_config, mrn: str) -> int:
-    from ehr2cdm.hashing import subject_id_from_person_key
+    from ehr2trace.hashing import subject_id_from_person_key
 
     return subject_id_from_person_key(ctpe_config.dataset_id, mrn, ctpe_config.subject_salt())
 

@@ -52,5 +52,5 @@ so that authority can be grepped without importing anything.
 - split names: `train`, `tuning`, `held_out`
 
 This project adds extension columns beyond the required five; see `MEDS_SCHEMA` in
-`src/ehr2cdm/meds.py`. `available_time` is the one that matters: an as-of view filters
+`src/ehr2trace/meds.py`. `available_time` is the one that matters: an as-of view filters
 on it, not on `time`.

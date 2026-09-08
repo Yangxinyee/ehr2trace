@@ -10,9 +10,9 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from ehr2cdm.adapters import get_adapter, has_bom, resolve_sheet, sniff_line_ending
-from ehr2cdm.adapters.base import PhysicalUnit, is_unnamed, strip_bom
-from ehr2cdm.config import AdapterOptions
+from ehr2trace.adapters import get_adapter, has_bom, resolve_sheet, sniff_line_ending
+from ehr2trace.adapters.base import PhysicalUnit, is_unnamed, strip_bom
+from ehr2trace.config import AdapterOptions
 
 TSV = AdapterOptions(delimiter="\t", encoding="utf-8-sig", file_glob="*.txt")
 
@@ -56,8 +56,8 @@ def test_crlf_endings_do_not_leak_into_the_last_field(tmp_path: Path):
 
 
 def test_column_reordering_and_case_do_not_change_role_resolution(tmp_path: Path):
-    from ehr2cdm.canonical.normalize import build_role_map
-    from ehr2cdm.config import SourceSpec
+    from ehr2trace.canonical.normalize import build_role_map
+    from ehr2trace.config import SourceSpec
 
     spec = SourceSpec(
         adapter="delimited",
@@ -77,8 +77,8 @@ def test_column_reordering_and_case_do_not_change_role_resolution(tmp_path: Path
 
 
 def test_missing_optional_column_simply_has_no_role(tmp_path: Path):
-    from ehr2cdm.canonical.normalize import build_role_map
-    from ehr2cdm.config import SourceSpec
+    from ehr2trace.canonical.normalize import build_role_map
+    from ehr2trace.config import SourceSpec
 
     spec = SourceSpec(
         adapter="delimited",
@@ -165,7 +165,7 @@ def test_mixed_cell_types_in_one_column_are_handled_per_value(tmp_path: Path):
     values = [v[1] for _n, v in stream.rows]
     assert [type(v).__name__ for v in values] == ["str", "datetime", "int"]
 
-    from ehr2cdm.hashing import canonical_cell
+    from ehr2trace.hashing import canonical_cell
 
     assert canonical_cell(values[0]) == ""
     assert canonical_cell(values[1]) == "2031-02-03T04:05:00"

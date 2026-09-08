@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Put the structured drug matches in front of a clinician, by exception.
 
-`ehr2cdm.drug_match` adopts a mapping only when exactly one standard concept has the
+`ehr2trace.drug_match` adopts a mapping only when exactly one standard concept has the
 ingredient set, the strength and the dose form the source string states, so what it
 publishes is not a proposal and there is nothing to accept. That is precisely why it
 should still be spot-checked: an error here is silent and repeated across millions of
@@ -30,7 +30,7 @@ a different drug or a different strength. This sheet exists to test that on this
 rather than to assume it: if the sampled rows come back worse, the rest is not safe.
 
 Nothing here is applied, and marking a row `wrong` writes it to `decisions.csv` in the
-format `ehr2cdm compile` reads, so a correction becomes an approved mapping that
+format `ehr2trace compile` reads, so a correction becomes an approved mapping that
 overrides the matcher on the next build.
 """
 from __future__ import annotations
@@ -75,7 +75,7 @@ def load_rows(omop_db: Path, vocabulary: Path | None) -> list[dict]:
     # that the name has since changed.
     names: dict[int, tuple[str, str]] = {}
     if vocabulary:
-        from ehr2cdm.terminology import Vocabulary
+        from ehr2trace.terminology import Vocabulary
 
         opened = Vocabulary.open(vocabulary) if vocabulary.is_dir() else None
         source = opened.con if opened is not None and opened.available else (
@@ -115,7 +115,7 @@ def unit(code: str | None) -> str:
 
 def describe(source: str, noise: list[str]) -> str:
     """What the matcher read out of the name, in the reviewer's own terms."""
-    from ehr2cdm.drug_match import parse_drug_name
+    from ehr2trace.drug_match import parse_drug_name
 
     parsed = parse_drug_name(source, noise)
     parts = []
@@ -275,7 +275,7 @@ matches, sampled above rather than listed.</p>
 </tbody></table>
 <div class="bar"><button onclick="exportCsv()">Export the ones marked wrong</button>
 <span class="lede" style="margin:0">Saves <code>drug_match_corrections.csv</code>;
-feed it to <code>ehr2cdm compile</code> after a concept id is filled in.</span></div>
+feed it to <code>ehr2trace compile</code> after a concept id is filled in.</span></div>
 <script>{SCRIPT}</script>
 </html>""", encoding="utf-8")
 
@@ -293,7 +293,7 @@ def main() -> int:
 
     noise: list[str] = []
     if args.dataset:
-        from ehr2cdm.config import load_dataset_config
+        from ehr2trace.config import load_dataset_config
 
         noise = list(load_dataset_config(args.dataset).terminology.drug_name_noise)
 

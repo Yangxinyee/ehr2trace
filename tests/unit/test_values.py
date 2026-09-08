@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import pytest
 
-from ehr2cdm.canonical.values import ValueParsingSpec, parse_value
-from ehr2cdm.errors import QuarantineRow
-from ehr2cdm.schema import QualityFlag
+from ehr2trace.canonical.values import ValueParsingSpec, parse_value
+from ehr2trace.errors import QuarantineRow
+from ehr2trace.schema import QualityFlag
 
 
 def test_plain_number():
@@ -115,7 +115,7 @@ def test_a_dose_too_large_for_the_target_column_becomes_no_quantity():
     """
     import duckdb
 
-    from ehr2cdm.omop import QUANTITY_LIMIT, _build_dose_map
+    from ehr2trace.omop import QUANTITY_LIMIT, _build_dose_map
 
     con = duckdb.connect()
     con.execute("CREATE TABLE evt (dose_source VARCHAR)")
@@ -148,8 +148,8 @@ def test_routing_clause_survives_being_anded_with_an_exclusion():
     """
     import duckdb
 
-    from ehr2cdm.omop import _routes_here
-    from ehr2cdm.schema import EventKind
+    from ehr2trace.omop import _routes_here
+    from ehr2trace.schema import EventKind
 
     con = duckdb.connect()
     con.execute("CREATE TABLE e (event_kind VARCHAR, flags VARCHAR[])")
@@ -175,7 +175,7 @@ def test_surrogate_ids_are_totally_ordered_when_a_code_fans_out():
     """
     import duckdb
 
-    from ehr2cdm.omop import SURROGATE_ORDER
+    from ehr2trace.omop import SURROGATE_ORDER
 
     con = duckdb.connect()
     con.execute("CREATE TABLE e (event_id VARCHAR)")

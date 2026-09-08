@@ -4,7 +4,7 @@ Thirty-five checks passing on the pipeline that produced the data proves very li
 The question a reader should ask is the other one: when a specific corruption is
 present, does anything fire?
 
-This file records the faults `ehr2cdm.faults` injects, and — for each — the incident it
+This file records the faults `ehr2trace.faults` injects, and — for each — the incident it
 is drawn from. Every one of them happened while building this converter. That
 constraint matters: invented faults are the ones you already knew how to prevent, which
 is precisely why they make a detector suite look better than it is.

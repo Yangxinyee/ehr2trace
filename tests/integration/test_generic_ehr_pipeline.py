@@ -13,13 +13,13 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from ehr2cdm.canonical.build import merge_buckets, plan_canonical, plan_stage, run_canonical_task, run_stage_task
-from ehr2cdm.config import load_dataset_config
-from ehr2cdm.identity import build_identity
-from ehr2cdm.ingest import plan_ingest, run_ingest_task, write_manifest
-from ehr2cdm.paths import WorkLayout
-from ehr2cdm.run import execute
-from ehr2cdm.schema import EventKind, QualityFlag
+from ehr2trace.canonical.build import merge_buckets, plan_canonical, plan_stage, run_canonical_task, run_stage_task
+from ehr2trace.config import load_dataset_config
+from ehr2trace.identity import build_identity
+from ehr2trace.ingest import plan_ingest, run_ingest_task, write_manifest
+from ehr2trace.paths import WorkLayout
+from ehr2trace.run import execute
+from ehr2trace.schema import EventKind, QualityFlag
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "generic_ehr"
 CONFIG = Path(__file__).resolve().parents[2] / "datasets" / "generic_ehr.yaml"
@@ -184,7 +184,7 @@ def test_the_merged_layer_matches_the_frozen_schema_exactly(built: WorkLayout):
     """Not one column more: how the work was split is not part of the contract."""
     import pyarrow.parquet as pq
 
-    from ehr2cdm.canonical.build import MERGE_TABLES
+    from ehr2trace.canonical.build import MERGE_TABLES
 
     for name, schema in MERGE_TABLES.items():
         path = built.canonical_path(name)
@@ -201,7 +201,7 @@ def test_staging_reads_the_manifest_not_the_directory(tmp_path_factory):
     """
     import shutil
 
-    from ehr2cdm.canonical.build import plan_stage
+    from ehr2trace.canonical.build import plan_stage
 
     root = tmp_path_factory.mktemp("stale")
     layout = run_pipeline(root, workers=1)
@@ -219,7 +219,7 @@ def test_staging_reads_the_manifest_not_the_directory(tmp_path_factory):
 
 
 def test_staging_refuses_to_run_without_a_manifest(tmp_path_factory):
-    from ehr2cdm.canonical.build import plan_stage
+    from ehr2trace.canonical.build import plan_stage
 
     root = tmp_path_factory.mktemp("nomanifest")
     layout = run_pipeline(root, workers=1)
@@ -237,7 +237,7 @@ def test_staging_refuses_a_manifest_from_a_different_code_version(tmp_path_facto
     source files the current code would address differently is exactly the situation
     content addressing exists to catch, so it stops rather than proceeding.
     """
-    from ehr2cdm.canonical.build import plan_stage
+    from ehr2trace.canonical.build import plan_stage
 
     root = tmp_path_factory.mktemp("versioned")
     layout = run_pipeline(root, workers=1)
@@ -245,21 +245,21 @@ def test_staging_refuses_a_manifest_from_a_different_code_version(tmp_path_facto
     cfg = load_dataset_config(CONFIG)
     assert plan_stage(cfg, layout)
 
-    monkeypatch.setattr("ehr2cdm.ingest.CODE_VERSION", "99.0.0")
+    monkeypatch.setattr("ehr2trace.ingest.CODE_VERSION", "99.0.0")
     with pytest.raises(RuntimeError, match="different code or config version"):
         plan_stage(cfg, layout)
 
 
 def test_cleanup_still_works_when_everything_is_stale(tmp_path_factory, monkeypatch):
     """The command for removing stranded artifacts must not refuse because of them."""
-    from ehr2cdm.canonical.build import plan_stage
+    from ehr2trace.canonical.build import plan_stage
 
     root = tmp_path_factory.mktemp("cleanstale")
     layout = run_pipeline(root, workers=1)
     os.environ["GENERIC_EHR_ROOT"] = str(FIXTURE)
     cfg = load_dataset_config(CONFIG)
 
-    monkeypatch.setattr("ehr2cdm.ingest.CODE_VERSION", "99.0.0")
+    monkeypatch.setattr("ehr2trace.ingest.CODE_VERSION", "99.0.0")
     with pytest.raises(RuntimeError):
         plan_stage(cfg, layout)
     assert plan_stage(cfg, layout, strict=False) == []

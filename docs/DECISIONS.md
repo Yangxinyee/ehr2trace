@@ -107,7 +107,7 @@ never shown.
 But a drug name is not free text. It states an ingredient, a strength and a dose form,
 and the vocabulary states the same three things about the concept — the strength as a
 number in `DRUG_STRENGTH`, not as words in a name. Comparing three fields is exact where
-comparing one string is not, so `ehr2cdm.drug_match` parses the source name and looks
+comparing one string is not, so `ehr2trace.drug_match` parses the source name and looks
 the concept up by those fields. It is a deterministic pass, in the same class as the
 punctuation-insensitive code lookup: exactly one standard concept with that ingredient
 set, that strength and that dose form, or nothing.
@@ -117,7 +117,7 @@ difference rather than a weaker claim, and each of which still has to end in a u
 concept:
 
 - **dose-form tiers.** `Injectable Solution` and `Injection` are the same vial filed
-  twice. `ehr2cdm.drug_lexicon` lists the spellings in order and the first one that
+  twice. `ehr2trace.drug_lexicon` lists the spellings in order and the first one that
   exists is taken, so two names for one form resolve instead of tying.
 - **the total-dose reading.** `2 GRAM/100 ML` on an IV bag is what RxNorm Extension
   calls `2000 MG`. When the source states a whole-container volume both readings are

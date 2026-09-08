@@ -16,11 +16,11 @@ import polars as pl
 import pytest
 
 import meds as meds_spec
-from ehr2cdm.config import load_dataset_config
-from ehr2cdm.meds import build_meds
-from ehr2cdm.omop import build_omop
-from ehr2cdm.paths import WorkLayout
-from ehr2cdm.validate import run_checks
+from ehr2trace.config import load_dataset_config
+from ehr2trace.meds import build_meds
+from ehr2trace.omop import build_omop
+from ehr2trace.paths import WorkLayout
+from ehr2trace.validate import run_checks
 from tests.integration.test_generic_ehr_pipeline import CONFIG, run_pipeline
 
 
@@ -274,7 +274,7 @@ def test_death_uses_the_reserved_meds_code(published):
 
 def test_no_event_row_carries_the_cohort_label_or_a_file_name(published):
     layout, _o, _m = published
-    from ehr2cdm.meds import FORBIDDEN_EVENT_COLUMNS
+    from ehr2trace.meds import FORBIDDEN_EVENT_COLUMNS
 
     frame = pl.read_parquet(sorted((layout.meds_dir / meds_spec.data_subdirectory).rglob("*.parquet")))
     assert not set(frame.columns) & FORBIDDEN_EVENT_COLUMNS
@@ -300,7 +300,7 @@ def test_available_time_is_populated_everywhere_and_flagged_when_assumed(publish
 
 def test_an_as_of_view_contains_nothing_that_was_not_yet_visible(published):
     layout, _o, _m = published
-    from ehr2cdm.meds import as_of_view
+    from ehr2trace.meds import as_of_view
 
     cutoff = datetime(2021, 5, 29, 6, 30)
     view = as_of_view(layout, cutoff)
@@ -329,7 +329,7 @@ def test_each_subject_is_in_one_shard_and_one_split(published):
 def test_dataset_metadata_records_what_produced_it(published):
     layout, _o, _m = published
     metadata = json.loads((layout.meds_dir / meds_spec.dataset_metadata_filepath).read_text())
-    assert metadata["etl_name"] == "ehr2cdm"
+    assert metadata["etl_name"] == "ehr2trace"
     assert metadata["meds_version"]
     assert "available_time" in metadata["notes"]
 
@@ -354,10 +354,10 @@ def _with_birth_dates(cfg, layout, tmp_path, dates: dict[int, str]):
     """
     import polars as pl
 
-    from ehr2cdm.paths import WorkLayout
+    from ehr2trace.paths import WorkLayout
 
     scratch = tmp_path / "birthdates"
-    from ehr2cdm.faults import clone_work_tree
+    from ehr2trace.faults import clone_work_tree
 
     clone_work_tree(layout.root, scratch)
     target = WorkLayout(root=scratch, dataset_id=cfg.dataset_id)

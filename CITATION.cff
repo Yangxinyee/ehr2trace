@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 title: >-
-  ehr2cdm: a deterministic converter from local EHR exports to OMOP CDM 5.4
+  EHR2Trace: a deterministic converter from local EHR exports to OMOP CDM 5.4
   and MEDS, with row-level lineage and an executable correctness contract
 message: If you use this software, please cite it as below.
 type: software
@@ -15,11 +15,11 @@ authors:
   - given-names: Harrison
     family-names: Bai
     affiliation: University of Colorado Anschutz School of Medicine
-repository-code: https://github.com/Yangxinyee/ehr-to-omop-meds-agent
+repository-code: https://github.com/Yangxinyee/ehr2trace
 license: Apache-2.0
 version: 0.5.0
 abstract: >-
-  ehr2cdm converts local hospital EHR extracts (delimited text and spreadsheets)
+  EHR2Trace converts local hospital EHR extracts (delimited text and spreadsheets)
   into OMOP CDM 5.4 and MEDS. The two targets are derived independently from a
   single canonical layer rather than one from the other, every published row
   carries a link back to the source rows it came from, and thirty-eight checks encode

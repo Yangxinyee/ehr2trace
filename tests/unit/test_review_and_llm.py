@@ -11,9 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from ehr2cdm.llm import CandidateRanking, LlmCall, LlmClient, is_safe_sample, load_template
-from ehr2cdm.paths import WorkLayout
-from ehr2cdm.review import (
+from ehr2trace.llm import CandidateRanking, LlmCall, LlmClient, is_safe_sample, load_template
+from ehr2trace.paths import WorkLayout
+from ehr2trace.review import (
     PENDING_FIELDS,
     compile_decisions,
     item_id,
@@ -22,7 +22,7 @@ from ehr2cdm.review import (
     undecided_ids,
     write_pending,
 )
-from ehr2cdm.terminology import Candidate, MappingRegistry
+from ehr2trace.terminology import Candidate, MappingRegistry
 
 
 @pytest.fixture()
@@ -123,7 +123,7 @@ def test_proposing_creates_an_empty_decisions_file_for_the_reviewer(layout: Work
 def write_decision(layout: WorkLayout, item: str, **fields) -> None:
     path = layout.review_dir / "decisions.csv"
     rows = list(csv.DictReader(path.open(encoding="utf-8"))) if path.exists() else []
-    from ehr2cdm.review import DECISION_FIELDS
+    from ehr2trace.review import DECISION_FIELDS
 
     rows.append({**{k: "" for k in DECISION_FIELDS}, "id": item, **fields})
     with open(path, "w", newline="", encoding="utf-8") as fh:
@@ -283,7 +283,7 @@ def test_a_vocabulary_directory_actually_loads(tmp_path: Path):
     refuses to prepare — so it worked in every test that had no vocabulary and failed
     the instant one was supplied. This test supplies one.
     """
-    from ehr2cdm.terminology import Vocabulary
+    from ehr2trace.terminology import Vocabulary
 
     vocab = Vocabulary.open(write_vocab(tmp_path / "vocab"))
     try:
@@ -298,7 +298,7 @@ def test_a_vocabulary_directory_actually_loads(tmp_path: Path):
 
 def test_a_non_standard_source_code_is_followed_to_its_standard_concept(tmp_path: Path):
     """The deterministic path: source code -> source concept -> 'Maps to' -> standard."""
-    from ehr2cdm.terminology import Vocabulary
+    from ehr2trace.terminology import Vocabulary
 
     vocab = Vocabulary.open(write_vocab(tmp_path / "vocab"))
     try:
@@ -313,7 +313,7 @@ def test_a_non_standard_source_code_is_followed_to_its_standard_concept(tmp_path
 
 
 def test_an_unknown_code_maps_to_nothing_rather_than_something_close(tmp_path: Path):
-    from ehr2cdm.terminology import Vocabulary
+    from ehr2trace.terminology import Vocabulary
 
     vocab = Vocabulary.open(write_vocab(tmp_path / "vocab"))
     try:
@@ -325,7 +325,7 @@ def test_an_unknown_code_maps_to_nothing_rather_than_something_close(tmp_path: P
 
 def test_an_unreadable_version_string_does_not_fail_the_load(tmp_path: Path):
     """The version is metadata. A bundle that omits it is still perfectly usable."""
-    from ehr2cdm.terminology import Vocabulary
+    from ehr2trace.terminology import Vocabulary
 
     directory = write_vocab(tmp_path / "vocab")
     (directory / "VOCABULARY.csv").write_text("a\tb\nx\ty\n", encoding="utf-8")
@@ -339,7 +339,7 @@ def test_an_unreadable_version_string_does_not_fail_the_load(tmp_path: Path):
 
 
 def test_lexical_recall_surfaces_candidates_without_adopting_them(tmp_path: Path):
-    from ehr2cdm.terminology import Vocabulary
+    from ehr2trace.terminology import Vocabulary
 
     vocab = Vocabulary.open(write_vocab(tmp_path / "vocab"))
     try:

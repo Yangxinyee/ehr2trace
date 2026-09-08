@@ -7,7 +7,7 @@ from datetime import datetime
 import pyarrow as pa
 import pytest
 
-from ehr2cdm.schema import (
+from ehr2trace.schema import (
     ANCHOR_SCHEMA,
     CANONICAL_EVENT_SCHEMA,
     COHORT_MEMBERSHIP_SCHEMA,

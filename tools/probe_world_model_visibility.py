@@ -12,8 +12,8 @@ import tempfile
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from ehr2cdm.meds import MEDS_SCHEMA, as_of_view
-from ehr2cdm.paths import WorkLayout
+from ehr2trace.meds import MEDS_SCHEMA, as_of_view
+from ehr2trace.paths import WorkLayout
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,7 +35,7 @@ def main():
         after = as_of_view(layout,cutoff,subject_id=1)
         second = after.filter(after['event_id']=='synthetic-status')['text_value'].to_list()
         outcome = {'scope':'Synthetic two-row probe of the current as_of_view helper; no patient data and no population leakage estimate.',
-                   'meds_implementation_sha256':hashlib.sha256((ROOT/'src/ehr2cdm/meds.py').read_bytes()).hexdigest(),
+                   'meds_implementation_sha256':hashlib.sha256((ROOT/'src/ehr2trace/meds.py').read_bytes()).hexdigest(),
                    'timeless_dynamic_status_is_visible':bool(first),
                    'changing_retrospective_status_changes_observation':first != second,
                    'future_visit_end_is_visible':any(x and x>cutoff for x in before['end_time'].to_list())}

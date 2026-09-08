@@ -5,7 +5,7 @@
 # similar export means writing another file like this one, not editing code.
 #
 # Anything this file records as `null` is an open question for the data owner. It stays
-# null until they answer, and `ehr2cdm inspect` lists it as a blocker.
+# null until they answer, and `ehr2trace inspect` lists it as a blocker.
 
 dataset_id: ctpe
 root_env: EHR_DATA_ROOT

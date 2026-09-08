@@ -1,4 +1,4 @@
-# ehr2cdm
+# EHR2Trace
 
 Deterministically convert local hospital EHR exports (txt + xlsx) into two standard
 formats, **OMOP CDM 5.4** and **MEDS**, with an LLM proposing only where semantic
@@ -65,7 +65,7 @@ see the blocker table below.
 4. Same input + config + mapping version → same output hash.
 
 Each of these is a test, not a promise: see `tests/test_no_hardcoded_dataset_strings.py`,
-the lineage checks in `src/ehr2cdm/validate.py`, and
+the lineage checks in `src/ehr2trace/validate.py`, and
 `tests/integration/test_generic_ehr_pipeline.py::test_one_worker_and_four_workers_agree`.
 
 ## Documents
@@ -102,7 +102,7 @@ optional LLM assistance needs one GPU serving a local OpenAI-compatible endpoint
 ### 2. Look before converting
 
 ```bash
-.venv/bin/ehr2cdm inspect --dataset ctpe
+.venv/bin/ehr2trace inspect --dataset ctpe
 ```
 
 Lists every file with its hash, lines the physical layout up against the declared
@@ -113,12 +113,12 @@ intentional: an open blocker is information, not an error to route around.
 ### 3. Convert
 
 ```bash
-.venv/bin/ehr2cdm ingest    --dataset ctpe --workers 12
-.venv/bin/ehr2cdm identity  --dataset ctpe
-.venv/bin/ehr2cdm canonical --dataset ctpe --workers 12 --assume-timezone America/New_York
-.venv/bin/ehr2cdm omop      --dataset ctpe
-.venv/bin/ehr2cdm meds      --dataset ctpe
-.venv/bin/ehr2cdm validate  --dataset ctpe --all
+.venv/bin/ehr2trace ingest    --dataset ctpe --workers 12
+.venv/bin/ehr2trace identity  --dataset ctpe
+.venv/bin/ehr2trace canonical --dataset ctpe --workers 12 --assume-timezone America/New_York
+.venv/bin/ehr2trace omop      --dataset ctpe
+.venv/bin/ehr2trace meds      --dataset ctpe
+.venv/bin/ehr2trace validate  --dataset ctpe --all
 ```
 
 `--assume-timezone` exists because the source timezone is an open blocker. It records
@@ -134,7 +134,7 @@ the whole resumption mechanism — there is no ledger.
 ### 4. Ask where a record came from
 
 ```bash
-.venv/bin/ehr2cdm trace --dataset ctpe --patient <key>
+.venv/bin/ehr2trace trace --dataset ctpe --patient <key>
 ```
 
 Prints one patient's path through every layer: source rows per partition, what was
@@ -177,7 +177,7 @@ technical one:
 ```bash
 EHR_WORK_ROOT=... python3 tools/check_vocabulary.py /path/to/unzipped/vocab
 export OMOP_VOCAB_DIR=/path/to/unzipped/vocab
-.venv/bin/ehr2cdm omop --dataset ctpe
+.venv/bin/ehr2trace omop --dataset ctpe
 ```
 
 `check_vocabulary.py` answers the three questions that matter before a single row is
@@ -189,10 +189,10 @@ having no vocabulary at all — so they are worth catching up front.
 ### 6. Terminology and review
 
 ```bash
-.venv/bin/ehr2cdm propose --dataset ctpe --kind terminology   # -> review/pending.csv
+.venv/bin/ehr2trace propose --dataset ctpe --kind terminology   # -> review/pending.csv
 # a human edits review/decisions.csv in any tool
-.venv/bin/ehr2cdm compile --dataset ctpe                      # -> mappings/*.csv
-.venv/bin/ehr2cdm omop    --dataset ctpe                      # rerun with the new mappings
+.venv/bin/ehr2trace compile --dataset ctpe                      # -> mappings/*.csv
+.venv/bin/ehr2trace omop    --dataset ctpe                      # rerun with the new mappings
 ```
 
 `mappings/` is the only thing that can turn a source string into a concept id, its only
@@ -207,7 +207,7 @@ set; `propose --limit` looks at a subset and must leave the rest alone.
 Drug names are the exception to needing a person at all, because they are not free text.
 A hospital writes `OXYCODONE 5 MG TABLET`, and the vocabulary says the same three things
 about `oxycodone hydrochloride 5 MG Oral Tablet` -- with the strength as a *number* in
-`DRUG_STRENGTH`. So `ehr2cdm.drug_match` matches by ingredient, strength and dose form
+`DRUG_STRENGTH`. So `ehr2trace.drug_match` matches by ingredient, strength and dose form
 rather than by text similarity, deterministically and only when exactly one standard
 concept fits all three. On this export that settles 6,943 of 26,629 medication names and
 takes drug coverage from 23.7% to 76.3%; measured against 139 mappings a physician had
@@ -225,7 +225,7 @@ Add `--llm` to have a local model rank the recalled candidates. Whether that is 
 doing is a measurement, not an opinion:
 
 ```bash
-.venv/bin/ehr2cdm measure --dataset ctpe --from-decisions
+.venv/bin/ehr2trace measure --dataset ctpe --from-decisions
 ```
 
 It compares deterministic lookup / plus lexical recall / plus model ranking against the
@@ -285,7 +285,7 @@ writing a manifest of input and output hashes so lineage is unbroken across that
 python tools/prepare_mimiciv.py --mimic-root .../mimiciv/3.1 \
   --ed-root .../mimic-iv-ed/2.2/ed --note-root .../mimic-iv-note/2.2/note \
   --out $MIMICIV_DATA_ROOT/mimiciv
-MIMICIV_DATA_ROOT=... ehr2cdm inspect --dataset datasets/mimiciv.yaml
+MIMICIV_DATA_ROOT=... ehr2trace inspect --dataset datasets/mimiciv.yaml
 ```
 
 The prepared files derive from PhysioNet credentialed data and must not be
@@ -321,7 +321,7 @@ mappings record that they depended on ignoring punctuation.
 ## Does the check suite detect anything?
 
 Checks passing on the pipeline that produced the data is weak evidence. The other
-direction is built in: `src/ehr2cdm/faults.py` holds seventeen corruptions, each drawn
+direction is built in: `src/ehr2trace/faults.py` holds seventeen corruptions, each drawn
 from an incident that actually happened here, each silent by construction — row counts
 plausible, schemas valid, a spot check on a few patients clean. Detection means a check
 that passed on the clean build fails on the corrupted one, and `docs/FAULT_CATALOGUE.md`

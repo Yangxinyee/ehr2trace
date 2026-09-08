@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from ehr2cdm.terminology import MappingRegistry, TermRequest, Vocabulary, resolve_terms_batch
+from ehr2trace.terminology import MappingRegistry, TermRequest, Vocabulary, resolve_terms_batch
 
 HEADER = (
     "concept_id\tconcept_name\tdomain_id\tvocabulary_id\tconcept_class_id\t"

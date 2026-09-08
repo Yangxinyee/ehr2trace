@@ -155,9 +155,9 @@ footer{max-width:1000px;margin:0 auto;padding:0 20px 60px;color:var(--muted);fon
 JS = r"""
 const N = __N__;
 const st = {};
-try { Object.assign(st, JSON.parse(localStorage.getItem("ehr2cdm_agent_review")||"{}")); } catch(e){}
+try { Object.assign(st, JSON.parse(localStorage.getItem("ehr2trace_agent_review")||"{}")); } catch(e){}
 function save(){
-  try { localStorage.setItem("ehr2cdm_agent_review", JSON.stringify(st)); } catch(e){}
+  try { localStorage.setItem("ehr2trace_agent_review", JSON.stringify(st)); } catch(e){}
   const d = Object.values(st).filter(s=>s&&s.choice!==undefined).length;
   document.getElementById("count").textContent = d+" / "+N+" decided";
 }

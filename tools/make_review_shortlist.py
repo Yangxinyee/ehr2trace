@@ -49,7 +49,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ehr2cdm.terminology import DOMAIN_FOR_KIND  # noqa: E402
+from ehr2trace.terminology import DOMAIN_FOR_KIND  # noqa: E402
 
 #: How many candidates to show a reviewer. Five fits on a screen; past that the sheet
 #: stops being readable, which defeats the point of making one.
@@ -89,7 +89,7 @@ def expand(rows: list[dict], concurrency: int) -> None:
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
-    from ehr2cdm.llm import LlmClient
+    from ehr2trace.llm import LlmClient
 
     local = threading.local()
 
@@ -250,7 +250,7 @@ def retrieve_lexically(rows: list[dict], vocab_dir: Path, k: int) -> None:
     `LACTATED RINGERS IV BOLUS` retrieves `COCHLIOBOLUS LUNATUS` because `BOLUS` is a
     token. Both queries are cheap and the union is what gets ranked.
     """
-    from ehr2cdm.terminology import Vocabulary
+    from ehr2trace.terminology import Vocabulary
 
     vocabulary = Vocabulary.open(vocab_dir)
     if not getattr(vocabulary, "available", False):
@@ -365,7 +365,7 @@ def rerank(rows: list[dict], concurrency: int) -> None:
     import threading
     from concurrent.futures import ThreadPoolExecutor
 
-    from ehr2cdm.llm import LlmClient
+    from ehr2trace.llm import LlmClient
 
     local = threading.local()
 
@@ -375,7 +375,7 @@ def rerank(rows: list[dict], concurrency: int) -> None:
         return local.c
 
     def one(row: dict) -> None:
-        from ehr2cdm.terminology import Candidate
+        from ehr2trace.terminology import Candidate
 
         if not row.get("candidates"):
             return

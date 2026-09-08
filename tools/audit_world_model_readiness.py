@@ -32,7 +32,7 @@ def main():
     out = {'collected_utc':datetime.now(timezone.utc).isoformat(),
            'scope':'Full canonical aggregate scans; one MEDS shard schema per dataset; saved validation metrics. No patient-level export, new clinical experiment, or validation rerun.',
            'repository_head':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
-           'implementation_sha256':{str(p.relative_to(ROOT)):sha(p) for p in [ROOT/'src/ehr2cdm/schema.py',ROOT/'src/ehr2cdm/meds.py',ROOT/'src/ehr2cdm/canonical/normalize.py',ROOT/'tools/prepare_mimiciv.py',Path(__file__)]},
+           'implementation_sha256':{str(p.relative_to(ROOT)):sha(p) for p in [ROOT/'src/ehr2trace/schema.py',ROOT/'src/ehr2trace/meds.py',ROOT/'src/ehr2trace/canonical/normalize.py',ROOT/'tools/prepare_mimiciv.py',Path(__file__)]},
            'datasets':{}}
     for name in ('ctpe','mimiciv'):
         root = args.work_root/name

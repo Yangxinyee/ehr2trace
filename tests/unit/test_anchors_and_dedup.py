@@ -8,16 +8,16 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from ehr2cdm.canonical.anchors import anchor_identity, emit_anchors
-from ehr2cdm.canonical.build import resolve_causes
-from ehr2cdm.canonical.dedup import (
+from ehr2trace.canonical.anchors import anchor_identity, emit_anchors
+from ehr2trace.canonical.build import resolve_causes
+from ehr2trace.canonical.dedup import (
     apply_duplicate_flags,
     dedup_records,
     merge_events,
     merge_links,
     sort_events,
 )
-from ehr2cdm.schema import QualityFlag, SourceRelation
+from ehr2trace.schema import QualityFlag, SourceRelation
 from tests.unit.test_normalize import COMPONENT_SPEC, make_ctx, make_rows
 
 

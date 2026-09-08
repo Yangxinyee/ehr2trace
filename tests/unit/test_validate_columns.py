@@ -15,15 +15,15 @@ from pathlib import Path
 
 import pytest
 
-from ehr2cdm.schema import (
+from ehr2trace.schema import (
     ANCHOR_SCHEMA,
     CANONICAL_EVENT_SCHEMA,
     COHORT_MEMBERSHIP_SCHEMA,
     QUARANTINE_SCHEMA,
 )
-from ehr2cdm.validate import READ_COLUMNS
+from ehr2trace.validate import READ_COLUMNS
 
-SOURCE = Path(__file__).resolve().parents[2] / "src" / "ehr2cdm" / "validate.py"
+SOURCE = Path(__file__).resolve().parents[2] / "src" / "ehr2trace" / "validate.py"
 
 #: event_source is deliberately absent: it is never materialised at all. Its `event_id`
 #: column alone is 18 GB on MIMIC-IV, so the checks that read it do so in the query

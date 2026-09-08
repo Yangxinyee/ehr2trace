@@ -11,7 +11,7 @@ from datetime import date, datetime
 
 import pytest
 
-from ehr2cdm.hashing import (
+from ehr2trace.hashing import (
     bucket_of,
     canonical_cell,
     canonical_row,
@@ -166,7 +166,7 @@ def test_storage_keeps_the_written_shape_while_hashing_normalizes_it():
     onto midnight, because "this source had no time to give" is a fact the anchor
     handling depends on.
     """
-    from ehr2cdm.hashing import source_cell
+    from ehr2trace.hashing import source_cell
 
     assert canonical_cell("2031-02-03 04:05:00") == canonical_cell(datetime(2031, 2, 3, 4, 5))
     assert source_cell("2031-02-03") == "2031-02-03"

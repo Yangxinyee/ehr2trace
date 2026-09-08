@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ehr2cdm.analytics import analytic_connection, memory_limit_gb
+from ehr2trace.analytics import analytic_connection, memory_limit_gb
 
 
 def test_the_connection_has_somewhere_to_spill(tmp_path: Path):

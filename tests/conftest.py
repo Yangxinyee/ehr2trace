@@ -26,7 +26,7 @@ def data_root() -> Path:
 
 @pytest.fixture(scope="session")
 def ctpe_config(repo_root: Path):
-    from ehr2cdm.config import load_dataset_config
+    from ehr2trace.config import load_dataset_config
 
     return load_dataset_config(repo_root / "datasets" / "ctpe.yaml")
 

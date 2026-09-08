@@ -186,10 +186,10 @@ footer{max-width:960px;margin:0 auto;padding:0 22px 60px;color:var(--muted);font
 JS = """
 const N = __N__;
 const state = {};
-try { Object.assign(state, JSON.parse(localStorage.getItem("ehr2cdm_decisions") || "{}")); } catch (e) {}
+try { Object.assign(state, JSON.parse(localStorage.getItem("ehr2trace_decisions") || "{}")); } catch (e) {}
 
 function save() {
-  try { localStorage.setItem("ehr2cdm_decisions", JSON.stringify(state)); } catch (e) {}
+  try { localStorage.setItem("ehr2trace_decisions", JSON.stringify(state)); } catch (e) {}
   const done = Object.values(state).filter(s => s && s.choice).length;
   document.getElementById("count").textContent = done + " of " + N + " answered";
 }
@@ -233,7 +233,7 @@ document.getElementById("export").addEventListener("click", () => {
 document.getElementById("clear").addEventListener("click", () => {
   if (!confirm("Clear every answer on this page?")) return;
   for (const k of Object.keys(state)) delete state[k];
-  try { localStorage.removeItem("ehr2cdm_decisions"); } catch (e) {}
+  try { localStorage.removeItem("ehr2trace_decisions"); } catch (e) {}
   location.reload();
 });
 """

@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from ehr2cdm.config import DatasetConfig, load_dataset_config
-from ehr2cdm.errors import BlockerError, ConfigError
+from ehr2trace.config import DatasetConfig, load_dataset_config
+from ehr2trace.errors import BlockerError, ConfigError
 
 MINIMAL = """
 dataset_id: tiny

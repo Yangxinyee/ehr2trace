@@ -26,7 +26,7 @@ def omop_reference() -> str:
         "Regenerate with `python3 tools/make_standards_reference.py`. Never hand-edited: if this",
         "disagrees with the DDL, the DDL is right.",
         "",
-        "`NOT NULL` matters more than it looks. Half the decisions in `src/ehr2cdm/omop.py` are",
+        "`NOT NULL` matters more than it looks. Half the decisions in `src/ehr2trace/omop.py` are",
         "about what to do when the source cannot supply a required field, and the answer is never",
         "to invent one.",
         "",
@@ -78,7 +78,7 @@ def meds_reference() -> str:
         f"- split names: `{meds.train_split}`, `{meds.tuning_split}`, `{meds.held_out_split}`",
         "",
         "This project adds extension columns beyond the required five; see `MEDS_SCHEMA` in",
-        "`src/ehr2cdm/meds.py`. `available_time` is the one that matters: an as-of view filters",
+        "`src/ehr2trace/meds.py`. `available_time` is the one that matters: an as-of view filters",
         "on it, not on `time`.",
     ]
     return "\n".join(lines)

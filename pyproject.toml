@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ehr2cdm"
+name = "ehr2trace"
 version = "0.5.0"
 description = "Deterministic local EHR (txt/xlsx) -> OMOP CDM 5.4 + MEDS converter with row-level lineage"
 requires-python = ">=3.11"
@@ -35,7 +35,7 @@ dependencies = [
 dev = ["pytest>=8"]
 
 [project.scripts]
-ehr2cdm = "ehr2cdm.cli:app"
+ehr2trace = "ehr2trace.cli:app"
 
 [tool.setuptools.packages.find]
 where = ["src"]

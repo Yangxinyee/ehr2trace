@@ -16,12 +16,12 @@ from pathlib import Path
 
 import pytest
 
-from ehr2cdm.config import load_dataset_config
-from ehr2cdm.digest import changed, fingerprint
-from ehr2cdm.meds import build_meds
-from ehr2cdm.omop import build_omop
-from ehr2cdm.paths import WorkLayout
-from ehr2cdm.validate import run_checks
+from ehr2trace.config import load_dataset_config
+from ehr2trace.digest import changed, fingerprint
+from ehr2trace.meds import build_meds
+from ehr2trace.omop import build_omop
+from ehr2trace.paths import WorkLayout
+from ehr2trace.validate import run_checks
 from tests.integration.test_generic_ehr_pipeline import CONFIG, run_pipeline
 
 WORKER_COUNTS = (1, 4)

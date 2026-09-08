@@ -1,4 +1,4 @@
-"""Draw the end-to-end framework figure that places ehr2cdm among the components a
+"""Draw the end-to-end framework figure that places ehr2trace among the components a
 patient world model or clinical agent system needs.
 
 Writes docs/figures/system_framework.pptx. Every mark is a native PowerPoint shape:
@@ -262,7 +262,7 @@ STAGES = [
                   'Site-local schemas, codes and time zones']),
     dict(letter='b', title='Auditable data infrastructure',
          role='Source-linked conversion under an executable contract',
-         colour=TEAL, tag=TAG_WORK, tag_text='ehr2cdm  —  THIS WORK',
+         colour=TEAL, tag=TAG_WORK, tag_text='ehr2trace  —  THIS WORK',
          icon=icon_contract,
          bullets=['Canonical events with row-level lineage',
                   'Occurrence time and availability time kept apart',
@@ -451,7 +451,7 @@ def build():
          'From hospital exports to patient world models and clinical agents',
          size=19, bold=True, color=INK)
     text(shapes, MARGIN, Inches(0.66), inner, Inches(0.26),
-         [('ehr2cdm supplies the audited data foundation (b). Stages c to e are '
+         [('ehr2trace supplies the audited data foundation (b). Stages c to e are '
            'requirements this paper identifies and does not implement.', {})],
          size=10, color=SLATE)
 

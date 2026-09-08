@@ -16,7 +16,7 @@ from pathlib import Path
 
 import polars as pl
 
-from ehr2cdm.digest import (
+from ehr2trace.digest import (
     changed,
     digest_frame,
     digest_meds_data,

@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from ehr2cdm.drug_match import DrugIndex, match_drug, parse_drug_name
-from ehr2cdm.terminology import MappingRegistry, TermRequest, Vocabulary, resolve_terms_batch
+from ehr2trace.drug_match import DrugIndex, match_drug, parse_drug_name
+from ehr2trace.terminology import MappingRegistry, TermRequest, Vocabulary, resolve_terms_batch
 
 CONCEPT_HEADER = (
     "concept_id\tconcept_name\tdomain_id\tvocabulary_id\tconcept_class_id\t"
@@ -226,7 +226,7 @@ def test_a_vocabulary_without_drug_strength_abstains_rather_than_failing(tmp_pat
     """A partial Athena bundle is a missing table, not a mapping failure.
 
     `DRUG_STRENGTH` is what makes this pass possible; a bundle downloaded without it
-    should leave drug names in the review queue and let `ehr2cdm vocabulary` report the
+    should leave drug names in the review queue and let `ehr2trace vocabulary` report the
     gap, not stop the build with a SQL error halfway through publishing.
     """
     directory = tmp_path / "partial"

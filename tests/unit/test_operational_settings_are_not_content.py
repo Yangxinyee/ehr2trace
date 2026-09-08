@@ -21,8 +21,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from ehr2cdm.canonical.build import CanonicalTask, StageTask
-from ehr2cdm.config import load_dataset_config
+from ehr2trace.canonical.build import CanonicalTask, StageTask
+from ehr2trace.config import load_dataset_config
 
 CONFIG = Path(__file__).resolve().parents[2] / "datasets" / "ctpe_shape.yaml"
 

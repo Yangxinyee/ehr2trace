@@ -18,13 +18,13 @@ from pathlib import Path
 import polars as pl
 import pytest
 
-from ehr2cdm.canonical.build import merge_buckets, plan_canonical, plan_stage, run_canonical_task, run_stage_task
-from ehr2cdm.config import load_dataset_config
-from ehr2cdm.identity import build_identity
-from ehr2cdm.ingest import plan_ingest, run_ingest_task, write_manifest
-from ehr2cdm.paths import WorkLayout
-from ehr2cdm.run import execute
-from ehr2cdm.schema import EventKind, QualityFlag, QuarantineReason
+from ehr2trace.canonical.build import merge_buckets, plan_canonical, plan_stage, run_canonical_task, run_stage_task
+from ehr2trace.config import load_dataset_config
+from ehr2trace.identity import build_identity
+from ehr2trace.ingest import plan_ingest, run_ingest_task, write_manifest
+from ehr2trace.paths import WorkLayout
+from ehr2trace.run import execute
+from ehr2trace.schema import EventKind, QualityFlag, QuarantineReason
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "ctpe_shape"
 CONFIG = Path(__file__).resolve().parents[2] / "datasets" / "ctpe_shape.yaml"
@@ -57,7 +57,7 @@ def events(built) -> pl.DataFrame:
 
 
 def subject_of(cfg, patient: str) -> int:
-    from ehr2cdm.hashing import subject_id_from_person_key
+    from ehr2trace.hashing import subject_id_from_person_key
 
     return subject_id_from_person_key(cfg.dataset_id, patient, cfg.subject_salt())
 
@@ -67,7 +67,7 @@ def subject_of(cfg, patient: str) -> int:
 
 def test_the_fixture_has_the_same_shape_as_the_real_export(built):
     """25 physical files, 21 text sources, 19 sheets: the counts the design measured."""
-    from ehr2cdm.discover import inspect
+    from ehr2trace.discover import inspect
 
     report = inspect(built[1], compute_hashes=False)
     assert report.counts["physical_files"] == 25
@@ -76,7 +76,7 @@ def test_the_fixture_has_the_same_shape_as_the_real_export(built):
 
 
 def test_an_inconsistent_byte_order_mark_does_not_change_a_column_name(built):
-    from ehr2cdm.discover import inspect
+    from ehr2trace.discover import inspect
 
     report = inspect(built[1], compute_hashes=False)
     text_files = [f for f in report.files if f.kind == "text"]
@@ -87,7 +87,7 @@ def test_an_inconsistent_byte_order_mark_does_not_change_a_column_name(built):
 
 
 def test_both_sheet_naming_variants_resolve(built):
-    from ehr2cdm.discover import inspect
+    from ehr2trace.discover import inspect
 
     report = inspect(built[1], compute_hashes=False)
     for source_id in ("pft_narrative", "pft_values"):
@@ -96,7 +96,7 @@ def test_both_sheet_naming_variants_resolve(built):
 
 
 def test_one_logical_source_arrives_as_a_file_and_as_a_sheet(built):
-    from ehr2cdm.discover import inspect
+    from ehr2trace.discover import inspect
 
     report = inspect(built[1], compute_hashes=False)
     adapters = {u.adapter for s in report.sources if s.source_id == "medication_admin" for u in s.units}
@@ -104,7 +104,7 @@ def test_one_logical_source_arrives_as_a_file_and_as_a_sheet(built):
 
 
 def test_the_unnamed_leading_column_is_skipped_positionally(built):
-    from ehr2cdm.discover import inspect
+    from ehr2trace.discover import inspect
 
     report = inspect(built[1], compute_hashes=False)
     narratives = [s for s in report.sources if s.source_id == "pft_narrative"]
@@ -321,9 +321,9 @@ def test_the_masked_duration_is_kept_verbatim_and_never_parsed(events):
 
 def test_the_full_pipeline_publishes_and_validates(built):
     """The fixture also exercises OMOP and MEDS, including the approved-approximation path."""
-    from ehr2cdm.meds import build_meds
-    from ehr2cdm.omop import build_omop
-    from ehr2cdm.validate import run_checks
+    from ehr2trace.meds import build_meds
+    from ehr2trace.omop import build_omop
+    from ehr2trace.validate import run_checks
 
     layout, cfg = built
     omop_result = build_omop(cfg, layout, vocabulary_dir=None)
@@ -341,7 +341,7 @@ def test_disagreeing_ages_block_that_patient_and_say_why(built):
     """Two extracts, two ages, no reference date: a birth year cannot be derived."""
     import duckdb
 
-    from ehr2cdm.omop import build_omop
+    from ehr2trace.omop import build_omop
 
     layout, cfg = built
     build_omop(cfg, layout, vocabulary_dir=None)
@@ -398,7 +398,7 @@ def test_a_clinical_result_that_reads_like_a_cohort_label_is_not_leakage(built):
     that cries wolf on clinical text is one people learn to ignore — while a
     distinctive label appearing in the same place still has to be caught.
     """
-    from ehr2cdm.validate import MIN_DISTINCTIVE_LABEL
+    from ehr2trace.validate import MIN_DISTINCTIVE_LABEL
 
     layout, cfg = built
     labels = [p.membership_label for p in cfg.partitions if p.membership_label]
@@ -414,7 +414,7 @@ def test_a_patient_can_be_followed_from_key_to_raw_file(built):
     ask. This is that way: a patient key in, and for each sampled event the file and
     row number of every source row behind it.
     """
-    from ehr2cdm.trace import render, trace_patient
+    from ehr2trace.trace import render, trace_patient
 
     layout, cfg = built
     result = trace_patient(cfg, layout, CROSS_LABEL_PATIENT, samples=3)
@@ -443,7 +443,7 @@ def test_a_patient_can_be_followed_from_key_to_raw_file(built):
 
 
 def test_tracing_an_unknown_patient_says_so_rather_than_inventing_one(built):
-    from ehr2cdm.trace import trace_patient
+    from ehr2trace.trace import trace_patient
 
     layout, cfg = built
     result = trace_patient(cfg, layout, "NO-SUCH-PATIENT")

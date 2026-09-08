@@ -4,7 +4,7 @@ Derived from the pinned DDL in `sql/omop_5.4/` (see `SOURCE.md` for the commit).
 Regenerate with `python3 tools/make_standards_reference.py`. Never hand-edited: if this
 disagrees with the DDL, the DDL is right.
 
-`NOT NULL` matters more than it looks. Half the decisions in `src/ehr2cdm/omop.py` are
+`NOT NULL` matters more than it looks. Half the decisions in `src/ehr2trace/omop.py` are
 about what to do when the source cannot supply a required field, and the answer is never
 to invent one.
 

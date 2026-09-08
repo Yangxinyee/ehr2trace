@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import pytest
 
-from ehr2cdm.config import load_dataset_config
-from ehr2cdm.ingest import plan_ingest, run_ingest_task, write_manifest
-from ehr2cdm.paths import WorkLayout
-from ehr2cdm.run import execute
-from ehr2cdm.validate import run_checks
+from ehr2trace.config import load_dataset_config
+from ehr2trace.ingest import plan_ingest, run_ingest_task, write_manifest
+from ehr2trace.paths import WorkLayout
+from ehr2trace.run import execute
+from ehr2trace.validate import run_checks
 from tests.integration.test_ctpe_shape_anomalies import CONFIG, FIXTURE
 
 

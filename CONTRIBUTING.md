@@ -11,7 +11,7 @@ The path is:
 
 1. Copy `datasets/generic_ehr.yaml` and describe your export: partitions, file globs,
    sheet aliases, and for each source the column aliases for each canonical field role.
-2. `ehr2cdm inspect --dataset datasets/yours.yaml`. This reads no data. It reports what
+2. `ehr2trace inspect --dataset datasets/yours.yaml`. This reads no data. It reports what
    it found, what it could not find, and — importantly — the **blockers**: questions
    only the data owner can answer.
 3. Answer them in the YAML. Do not work around them. A blocker exists because guessing
@@ -19,7 +19,7 @@ The path is:
 4. `ingest` → `identity` → `canonical` → `omop` / `meds` → `validate`.
 
 If your export needs a field role or a row shape that does not exist, that is a change
-to `src/ehr2cdm/registry.py` and the relevant shape — a genuine core change, and worth
+to `src/ehr2trace/registry.py` and the relevant shape — a genuine core change, and worth
 opening an issue about first.
 
 ## Blockers are not obstacles
@@ -34,7 +34,7 @@ it is visible and reviewable, rather than in code where it is not.
 
 ## Adding a check
 
-Checks live in `src/ehr2cdm/validate.py` behind the `@check("ID")` decorator. A good one:
+Checks live in `src/ehr2trace/validate.py` behind the `@check("ID")` decorator. A good one:
 
 - **reads the artifact that ships**, not the code or config that produced it. Every one
   of the four gaps found by fault injection was a check looking at the wrong artifact —
@@ -47,7 +47,7 @@ Checks live in `src/ehr2cdm/validate.py` behind the `@check("ID")` decorator. A 
 
 ## Adding a fault
 
-`src/ehr2cdm/faults.py`. Two rules, and they are what make the experiment mean anything:
+`src/ehr2trace/faults.py`. Two rules, and they are what make the experiment mean anything:
 
 1. **The fault must be drawn from something that actually happened.** Invented faults are
    the ones you already knew how to prevent, which is exactly why they flatter a detector

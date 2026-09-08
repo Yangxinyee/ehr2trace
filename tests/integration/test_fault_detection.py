@@ -13,12 +13,12 @@ from __future__ import annotations
 
 import pytest
 
-from ehr2cdm.config import load_dataset_config
-from ehr2cdm.faults import FAULTS, clone_work_tree
-from ehr2cdm.meds import build_meds
-from ehr2cdm.omop import build_omop
-from ehr2cdm.paths import WorkLayout
-from ehr2cdm.validate import run_checks
+from ehr2trace.config import load_dataset_config
+from ehr2trace.faults import FAULTS, clone_work_tree
+from ehr2trace.meds import build_meds
+from ehr2trace.omop import build_omop
+from ehr2trace.paths import WorkLayout
+from ehr2trace.validate import run_checks
 from tests.integration.test_ctpe_shape_anomalies import CONFIG, FIXTURE
 
 
@@ -32,10 +32,10 @@ def clean_build(tmp_path_factory):
     """
     import os
 
-    from ehr2cdm.canonical.build import merge_buckets, plan_canonical, plan_stage, run_canonical_task, run_stage_task
-    from ehr2cdm.identity import build_identity
-    from ehr2cdm.ingest import plan_ingest, run_ingest_task, write_manifest
-    from ehr2cdm.run import execute
+    from ehr2trace.canonical.build import merge_buckets, plan_canonical, plan_stage, run_canonical_task, run_stage_task
+    from ehr2trace.identity import build_identity
+    from ehr2trace.ingest import plan_ingest, run_ingest_task, write_manifest
+    from ehr2trace.run import execute
 
     os.environ["CTPE_SHAPE_ROOT"] = str(FIXTURE)
     cfg = load_dataset_config(CONFIG)

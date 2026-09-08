@@ -732,7 +732,7 @@ ehr-to-omop-meds/
 ├── prompts/                       # 3 prompt templates
 ├── docs/standards/                # OMOP/MEDS specs, for ripgrep
 ├── sql/omop_5.4/                  # official DDL, with source and version recorded
-├── src/ehr2cdm/
+├── src/ehr2trace/
 │   ├── cli.py
 │   ├── config.py                  # YAML → Pydantic models
 │   ├── hashing.py                 # §5.1 canonical serialization + stable IDs
@@ -764,15 +764,15 @@ Dependencies: Python 3.11+, Pydantic v2, Typer, Polars, PyArrow, DuckDB, openpyx
 ### 9.2 CLI
 
 ```bash
-ehr2cdm inspect      --dataset ctpe            # discover files, schemas, blocker report
-ehr2cdm ingest       --dataset ctpe [--workers N]
-ehr2cdm canonical    --dataset ctpe [--workers N]
-ehr2cdm propose      --dataset ctpe            # writes review/pending.csv
-ehr2cdm compile                                # decisions.csv → mappings/
-ehr2cdm omop         --dataset ctpe
-ehr2cdm meds         --dataset ctpe
-ehr2cdm validate     --dataset ctpe [--all]
-ehr2cdm report       --dataset ctpe --run-id <id>
+ehr2trace inspect      --dataset ctpe            # discover files, schemas, blocker report
+ehr2trace ingest       --dataset ctpe [--workers N]
+ehr2trace canonical    --dataset ctpe [--workers N]
+ehr2trace propose      --dataset ctpe            # writes review/pending.csv
+ehr2trace compile                                # decisions.csv → mappings/
+ehr2trace omop         --dataset ctpe
+ehr2trace meds         --dataset ctpe
+ehr2trace validate     --dataset ctpe [--all]
+ehr2trace report       --dataset ctpe --run-id <id>
 ```
 
 Conventions:
@@ -788,7 +788,7 @@ Conventions:
 
 ```bash
 EHR_DATA_ROOT=/path/to/read-only/ehr-export
-EHR_WORK_ROOT=/path/to/work/ehr2cdm
+EHR_WORK_ROOT=/path/to/work/ehr2trace
 OMOP_BACKEND=duckdb                # or postgres
 LLM_BASE_URL=http://127.0.0.1:8000/v1
 OFFLINE_MODE=1
@@ -902,7 +902,7 @@ Six stages; each ends with something runnable.
 
 Freeze the schema of `datasets/ctpe.yaml`, the canonical event schema, and the `source_row_id` / canonical serialization rules. Build the repository skeleton and the three-patient fixtures. Turn every baseline in §2 into a test.
 
-**Done when**: `ehr2cdm inspect --dataset ctpe` lists 25 files and 40 sources and reports the known blockers (timezone, `age_as_of_date`, has/no definition, whether CT reports exist).
+**Done when**: `ehr2trace inspect --dataset ctpe` lists 25 files and 40 sources and reports the known blockers (timezone, `age_as_of_date`, has/no definition, whether CT reports exist).
 
 ### Phase 1 — Deterministic source → canonical
 

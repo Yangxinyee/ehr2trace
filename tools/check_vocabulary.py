@@ -32,7 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ehr2cdm.terminology import DOMAIN_FOR_KIND, _unpunctuated  # noqa: E402
+from ehr2trace.terminology import DOMAIN_FOR_KIND, _unpunctuated  # noqa: E402
 
 REQUIRED = ("CONCEPT", "CONCEPT_RELATIONSHIP", "VOCABULARY", "DOMAIN", "CONCEPT_CLASS", "RELATIONSHIP")
 RECOMMENDED = ("CONCEPT_ANCESTOR", "DRUG_STRENGTH")
@@ -86,7 +86,7 @@ def main(argv: list[str]) -> int:
         print(f"not a directory: {directory}")
         return 2
 
-    from ehr2cdm.config import find_dataset_config, load_dataset_config
+    from ehr2trace.config import find_dataset_config, load_dataset_config
 
     try:
         cfg = load_dataset_config(find_dataset_config(args.dataset))
@@ -174,7 +174,7 @@ def main(argv: list[str]) -> int:
     con.close()
     print("\nIf this all looks right:")
     print(f"    export OMOP_VOCAB_DIR={directory}")
-    print(f"    ehr2cdm omop --dataset {args.dataset}")
+    print(f"    ehr2trace omop --dataset {args.dataset}")
     return 0
 
 
@@ -183,12 +183,12 @@ def _estimate_structured_drugs(cfg, con, free: list[tuple[str, str]]) -> None:
 
     A term whose `code_system` is SOURCE has no code to look up, so the four gates above
     say nothing about it. Drug names are the exception: they are structured, and
-    `ehr2cdm.drug_match` resolves them by ingredient, strength and dose form. Reporting
+    `ehr2trace.drug_match` resolves them by ingredient, strength and dose form. Reporting
     them as plain free text would understate what this vocabulary can do by millions of
     rows, which is the same failure -- an estimate that does not model the ETL -- that
     the stride sample above exists to avoid.
     """
-    from ehr2cdm.drug_match import DrugIndex, match_drug
+    from ehr2trace.drug_match import DrugIndex, match_drug
 
     drugs = sorted({code for code, kind in free if DOMAIN_FOR_KIND.get(kind) == "Drug"})
     other = len(free) - len(drugs)
@@ -212,7 +212,7 @@ def _estimate_structured_drugs(cfg, con, free: list[tuple[str, str]]) -> None:
 def _estimate(con, args, cfg) -> None:
     """Test-map a sample of the dataset's own pending terms against this bundle.
 
-    Modelled on the same gates `ehr2cdm.terminology` applies, in the same order, because
+    Modelled on the same gates `ehr2trace.terminology` applies, in the same order, because
     an estimate that models fewer of them is not conservative -- it is wrong in whichever
     direction it happens to be wrong. Matching on the literal string alone reported 0.0%
     for a code system the ETL then resolved almost completely, which reads as "this
@@ -226,8 +226,8 @@ def _estimate(con, args, cfg) -> None:
       3. the concept found is standard, or has a `Maps to` hop to one;
       4. that standard concept's domain is the one this event kind publishes into.
     """
-    from ehr2cdm.paths import WorkLayout
-    from ehr2cdm.review import read_pending
+    from ehr2trace.paths import WorkLayout
+    from ehr2trace.review import read_pending
 
     if not os.environ.get("EHR_WORK_ROOT"):
         return

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from ehr2cdm.terminology import MappingRegistry, TermRequest, Vocabulary, resolve_terms_batch
+from ehr2trace.terminology import MappingRegistry, TermRequest, Vocabulary, resolve_terms_batch
 
 from tests.unit.test_unpunctuated_codes import write_vocab
 

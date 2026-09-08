@@ -8,7 +8,7 @@
 # Built once and reused across all eighteen runs (clean baseline plus seventeen
 # faults). Reinstalling the R stack per run would take longer than the experiment.
 #
-#   docker build -t ehr2cdm-dqd tools/dqd
+#   docker build -t ehr2trace-dqd tools/dqd
 #
 # rocker/r-ver pins a CRAN snapshot, so the CRAN dependency set is reproducible; the
 # four OHDSI packages are pinned to release tags below for the same reason. The

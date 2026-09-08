@@ -6,9 +6,9 @@ from datetime import date, datetime
 
 import pytest
 
-from ehr2cdm.errors import QuarantineRow
-from ehr2cdm.schema import QualityFlag
-from ehr2cdm.timeutil import TimeContext, days_between, looks_date_only, parse_naive, parse_utc, to_utc
+from ehr2trace.errors import QuarantineRow
+from ehr2trace.schema import QualityFlag
+from ehr2trace.timeutil import TimeContext, days_between, looks_date_only, parse_naive, parse_utc, to_utc
 
 FORMATS = ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d")
 CTX = TimeContext(formats=FORMATS, null_literals=("NULL",), timezone_name=None)

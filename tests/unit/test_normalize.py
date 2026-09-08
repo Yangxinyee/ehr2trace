@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from ehr2cdm.canonical.normalize import (
+from ehr2trace.canonical.normalize import (
     COL_PREFIX,
     kind_resolver,
     Row,
@@ -17,10 +17,10 @@ from ehr2cdm.canonical.normalize import (
     build_role_map,
     get_shape,
 )
-from ehr2cdm.canonical.values import ValueParsingSpec
-from ehr2cdm.config import DatasetConfig
-from ehr2cdm.schema import EventKind, QualityFlag, QuarantineReason, SourceRelation
-from ehr2cdm.timeutil import TimeContext
+from ehr2trace.canonical.values import ValueParsingSpec
+from ehr2trace.config import DatasetConfig
+from ehr2trace.schema import EventKind, QualityFlag, QuarantineReason, SourceRelation
+from ehr2trace.timeutil import TimeContext
 
 BASE_CONFIG = {
     "dataset_id": "t",
@@ -455,7 +455,7 @@ RECORDS = [
 
 
 def test_row_filter_keeps_only_declared_values_case_insensitively():
-    from ehr2cdm.canonical.normalize import filter_rows
+    from ehr2trace.canonical.normalize import filter_rows
 
     ctx = make_ctx("orders", {**ORDERS_SPEC, "row_filter": {"column": "kind", "keep": ["Medications"]}})
     rows = make_rows(ctx, RECORDS)
@@ -465,7 +465,7 @@ def test_row_filter_keeps_only_declared_values_case_insensitively():
 
 
 def test_no_row_filter_keeps_every_row():
-    from ehr2cdm.canonical.normalize import filter_rows
+    from ehr2trace.canonical.normalize import filter_rows
 
     ctx = make_ctx("orders", ORDERS_SPEC)
     rows = make_rows(ctx, RECORDS)
@@ -477,7 +477,7 @@ def test_row_filter_naming_an_absent_column_raises_rather_than_keeping_everythin
     """The failure mode worth a test: a typo that silently disables the filter."""
     import pytest
 
-    from ehr2cdm.canonical.normalize import filter_rows
+    from ehr2trace.canonical.normalize import filter_rows
 
     ctx = make_ctx("orders", {**ORDERS_SPEC, "row_filter": {"column": "order_typo", "keep": ["x"]}})
     rows = make_rows(ctx, RECORDS)
@@ -487,7 +487,7 @@ def test_row_filter_naming_an_absent_column_raises_rather_than_keeping_everythin
 
 
 def test_code_split_turns_one_cell_into_one_row_per_code():
-    from ehr2cdm.canonical.normalize import split_codes
+    from ehr2trace.canonical.normalize import split_codes
 
     ctx = make_ctx("problems", {**PROBLEMS_SPEC, "code_split": {"separator": ",", "roles": ["source_code"]}})
     rows = make_rows(ctx, [{"PID": "PID1", "dx": "R78.81, B95.7, Z16.29", "t": "2024-01-01"}])
@@ -499,7 +499,7 @@ def test_code_split_turns_one_cell_into_one_row_per_code():
 
 
 def test_code_split_leaves_a_single_code_alone():
-    from ehr2cdm.canonical.normalize import split_codes
+    from ehr2trace.canonical.normalize import split_codes
 
     ctx = make_ctx("problems", {**PROBLEMS_SPEC, "code_split": {"separator": ",", "roles": ["source_code"]}})
     rows = make_rows(ctx, [{"PID": "PID1", "dx": "I26.99", "t": "2024-01-01"}])
@@ -507,7 +507,7 @@ def test_code_split_leaves_a_single_code_alone():
 
 
 def test_split_codes_is_a_no_op_without_the_declaration():
-    from ehr2cdm.canonical.normalize import split_codes
+    from ehr2trace.canonical.normalize import split_codes
 
     ctx = make_ctx("problems", PROBLEMS_SPEC)
     rows = make_rows(ctx, [{"PID": "PID1", "dx": "R78.81, B95.7", "t": "2024-01-01"}])

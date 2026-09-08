@@ -2,7 +2,7 @@
 
 MIMIC-IV is a normalized relational database: ``labevents`` carries an ``itemid`` and
 the human-readable label lives in ``d_labitems``. A hospital extract does not look like
-that -- it is a pile of flat, already-joined files, which is what ``ehr2cdm`` targets.
+that -- it is a pile of flat, already-joined files, which is what ``ehr2trace`` targets.
 This script closes that gap, and it does so *outside* the trusted boundary on purpose:
 everything the converter validates happens after this point, so this step must be small,
 deterministic and auditable.

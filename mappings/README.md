@@ -2,7 +2,7 @@
 
 Human-confirmed terminology decisions, versioned in git. This directory is the **only**
 thing that can turn a source string into a concept id, and the only writer is
-`ehr2cdm compile`, which reads `review/decisions.csv`.
+`ehr2trace compile`, which reads `review/decisions.csv`.
 
 Nothing else may write here. Not the vocabulary lookup, not the model, not a retry
 path. That rule is what makes it possible to answer, for any published row, who

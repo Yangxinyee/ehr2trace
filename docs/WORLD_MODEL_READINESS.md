@@ -4,7 +4,7 @@
 
 ## 1. 系统定位与贡献
 
-**ehr2cdm 是面向患者世界模型和 agent 学习的、可审计的纵向患者事件数据基础层。**
+**ehr2trace 是面向患者世界模型和 agent 学习的、可审计的纵向患者事件数据基础层。**
 
 主要使用场景按“患者世界模型作为环境，为临床决策 agent 提供训练/评估基础”解释；若训练的是模拟患者对话与行为的 agent，还需第 6 节的额外数据边界。患者世界模型、模拟患者角色和决策策略是不同组件，不能仅凭 MEDS 导出宣称三者已经实现。
 
@@ -89,4 +89,4 @@ MIMIC 的时间外验证不能简单排序不同患者的去标识化绝对年�
 
 ## 7. 本轮论文修改边界
 
-标题改为 **ehr2cdm: Auditable EHR Data Preparation for Patient World Models and Agent Learning**。摘要、引言、贡献、相关工作、系统边界和讨论围绕上游数据准备展开。增加拟议的 transition 接口和实测 readiness 缺口；draw.io 架构图将未实现的任务层与学习系统用虚线明确区分。保留原始转换/验证/历史实验数值与局限。未将规模数字改称 RL transition 数或完整可用 episode 数，也未声称新世界模型/RL 实验已经完成。
+标题改为 **ehr2trace: Auditable EHR Data Preparation for Patient World Models and Agent Learning**。摘要、引言、贡献、相关工作、系统边界和讨论围绕上游数据准备展开。增加拟议的 transition 接口和实测 readiness 缺口；draw.io 架构图将未实现的任务层与学习系统用虚线明确区分。保留原始转换/验证/历史实验数值与局限。未将规模数字改称 RL transition 数或完整可用 episode 数，也未声称新世界模型/RL 实验已经完成。

@@ -7,8 +7,8 @@ models served locally on the workstation GPU.
 Reproduce with:
 
 ```bash
-ehr2cdm measure --dataset ctpe --kind columns          # column semantics
-ehr2cdm measure --dataset ctpe --from-decisions        # terminology (needs a vocabulary)
+ehr2trace measure --dataset ctpe --kind columns          # column semantics
+ehr2trace measure --dataset ctpe --from-decisions        # terminology (needs a vocabulary)
 ```
 
 ## Column semantics — measured

@@ -39,11 +39,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from ehr2cdm.config import load_dataset_config  # noqa: E402
-from ehr2cdm.drug_match import (  # noqa: E402
+from ehr2trace.config import load_dataset_config  # noqa: E402
+from ehr2trace.drug_match import (  # noqa: E402
     DrugIndex, _canonical, _round, _vocabulary_signature, match_drug,
 )
-from ehr2cdm.terminology import Vocabulary  # noqa: E402
+from ehr2trace.terminology import Vocabulary  # noqa: E402
 
 
 def strength_index(con):
