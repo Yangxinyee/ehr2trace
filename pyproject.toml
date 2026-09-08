@@ -43,6 +43,11 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+# Several integration modules import a sibling for its fixture setup, so the
+# repository root has to be importable. `python -m pytest` puts it on sys.path
+# and the bare `pytest` CI runs with does not, which is how this stayed green
+# locally while every CI run failed at collection.
+pythonpath = ["."]
 markers = [
     "realdata: requires EHR_DATA_ROOT with the real read-only export",
     "slow: full-dataset scans",
