@@ -7,13 +7,13 @@ type: software
 authors:
   - given-names: Xinye
     family-names: Yang
-    email: yangxinye2001@gmail.com
     affiliation: University of Colorado Anschutz School of Medicine
   - given-names: Yuli
     family-names: Wang
     affiliation: University of Colorado Anschutz School of Medicine
   - given-names: Harrison
     family-names: Bai
+    email: harrison.bai@cuanschutz.edu
     affiliation: University of Colorado Anschutz School of Medicine
 repository-code: https://github.com/Yangxinyee/ehr2trace
 license: Apache-2.0
