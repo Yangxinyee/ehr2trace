@@ -12,8 +12,7 @@ is precisely why they make a detector suite look better than it is.
 Reproduce with:
 
 ```bash
-python tools/run_fault_experiment.py --dataset datasets/ctpe_shape.yaml \
-  --built <work>/ctpe_shape --work /tmp/faultlab --out results/faults_fixture.json --slow
+.venv/bin/pytest tests/integration/test_fault_detection.py
 ```
 
 The experiment runs against `tests/fixtures/ctpe_shape/`, which contains no patient
@@ -22,17 +21,18 @@ sensitivity is a property of the checks, not of the dataset's size.
 
 ## Result
 
-| | checks run | faults detected |
-|---|---:|---:|
-| OHDSI Data Quality Dashboard 2.8.9 | 2,374 | **5 / 17** |
-| Suite as it stood before the experiment | 30 | **13 / 17** |
-| Suite after the four checks the experiment motivated | 35 | **17 / 17** |
+Every fault in the catalogue below is detected: a check that passes on the clean
+build fails on the corrupted one. That is asserted by the test above and gated in CI.
 
-The first row is the standard OMOP data-quality tooling, run on the same corrupted
-builds (`tools/run_dqd_experiment.py`). Eight of the seventeen faults never reach an OMOP
-database at all, so they are out of scope for it rather than missed; four more do reach
-it and survive. Two of those four *lower* DQD's failing-check count — deleting every
-post-death record removes the rows whose implausibility the checks were reporting.
+The number worth reading is not seventeen out of seventeen. Four of those seventeen got
+past the suite the first time and motivated the four checks that now catch them, and a
+detector written in response to a fault is guaranteed to catch it. What the four have in
+common is the transferable part: each compares an artifact against independently stored
+information, which no check reading a single artifact in isolation could do.
+
+Eight of the seventeen never reach an OMOP database at all, so standard CDM-level
+data-quality tooling cannot be pointed at them; they are faults in the canonical layer,
+the anchors, or the identities, above the target schema.
 
 Detection is also not the same as being able to act on it. Comparing each mutated clone
 against the tree it was cloned from establishes which artifacts a fault actually damaged;

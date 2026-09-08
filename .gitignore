@@ -6,6 +6,9 @@ tools/baselines.local.json
 # Environment and outputs
 .env
 work/
+# Local experiment and audit output. The tools under tools/ write here; the
+# records are about one operator's build, not about the software.
+results/
 __pycache__/
 *.pyc
 

@@ -6,46 +6,16 @@ judgment is genuinely required — and a human confirming every proposal.
 
 **A research converter, not a production system.**
 
-## Paper and current evidence
+This is source-linked conversion plus executable checks, for data intended for patient
+world models, clinical agents, and offline reinforcement learning. Task-specific
+episodes, rewards, world models and agent policies are downstream work and are not here.
+The [readiness audit and development priorities](docs/WORLD_MODEL_READINESS.md) record
+the visibility and action-semantics gaps in the current outputs.
 
-**ehr2cdm: Auditable EHR Data Infrastructure for Patient World Models and Clinical Agents**
+The repository carries the software, its configuration and synthetic fixtures. It
+carries no patient data, no conversion output and no clinical vocabulary; see
+[Data sensitivity](#data-sensitivity).
 
-[Manuscript PDF](paper/main.pdf) · [arXiv source package](paper/arxiv-source.zip)
-
-The system provides source-linked conversion and executable checks for data intended
-for patient world models, clinical agents, and offline reinforcement learning.
-Task-specific episodes, rewards, world models, and agent policies remain downstream
-work. The [readiness audit and development priorities](docs/WORLD_MODEL_READINESS.md)
-document the visibility and action-semantics gaps in the current outputs.
-
-Current aggregate evidence (September 6, 2026):
-
-| | CTPE | MIMIC-IV |
-|---|---:|---:|
-| Canonical events | 31,752,664 | 296,595,466 |
-| Subjects with canonical events | 22,980 | 364,673 |
-| Validation: pass / skip / fail | 36 / 0 / 0 | 29 / 5 / 2 |
-
-The MIMIC rerun reports unflagged inverted intervals and missing dataset acceptance
-records for two registry entries. These outputs do not satisfy the current contract.
-See the [aggregate snapshot](results/paper_snapshot.json),
-[rerun record](results/mimiciv_validation_rerun.json), and
-[readiness results](results/world_model_readiness.json). Historical experiments below
-retain their original counts and versions.
-
-To verify the manuscript quantities and build the PDF/source package from the included
-figure PDFs (Python 3, LaTeX, and BibTeX required):
-
-```bash
-python3 tools/verify_paper_numbers.py
-python3 tools/build_paper.py
-```
-
-Figures are TikZ sources that compile with the manuscript; see
-[figure instructions](paper/figures/README.md).
-The repository includes aggregate evidence and synthetic fixtures. Patient-level
-outputs are not distributed, and neither are the clinical vocabularies: see
-[Licensed vocabularies](#licensed-vocabularies) below.
 
 ## What it does
 
@@ -350,78 +320,44 @@ mappings record that they depended on ignoring punctuation.
 
 ## Does the check suite detect anything?
 
-Thirty-five checks passing on the pipeline that produced the data is weak evidence. The
-other direction is measured: `src/ehr2cdm/faults.py` holds seventeen corruptions, each
-drawn from an incident that actually happened here, each silent by construction — row
-counts plausible, schemas valid, a spot check on a few patients clean.
+Checks passing on the pipeline that produced the data is weak evidence. The other
+direction is built in: `src/ehr2cdm/faults.py` holds seventeen corruptions, each drawn
+from an incident that actually happened here, each silent by construction — row counts
+plausible, schemas valid, a spot check on a few patients clean. Detection means a check
+that passed on the clean build fails on the corrupted one, and `docs/FAULT_CATALOGUE.md`
+says what each fault is for.
+
+Four checks in the registry exist because a fault in that catalogue got past the suite
+first. A detector written in response to a fault is guaranteed to catch it, so the
+catalogue records that order rather than only a score, and the four that were added
+share one shape: a check that compares an artifact against independently stored
+information, which the ones reading a single artifact could not do.
+
+It runs on the PHI-free fixture, so it reproduces from a clone with no data access, and
+it is a CI gate:
 
 ```bash
-python tools/run_fault_experiment.py --dataset datasets/ctpe_shape.yaml \
-  --built $EHR_WORK_ROOT/ctpe_shape --work /tmp/faultlab \
-  --out results/faults_fixture.json --slow
+.venv/bin/pytest tests/integration/test_fault_detection.py
 ```
 
-| | checks run | faults detected |
-|---|---:|---:|
-| OHDSI Data Quality Dashboard 2.8.9 | 2,374 | **5 / 17** |
-| Suite before the experiment | 30 | **13 / 17** |
-| Suite after the four checks it motivated | 35 | **17 / 17** |
-
-The middle row is the one that carries information, and `docs/FAULT_CATALOGUE.md` says
-why: a detector written in response to a fault is guaranteed to catch it. All four misses
-were the same shape — a check reading an artifact the fault did not touch. The experiment
-runs on the PHI-free fixture, so it reproduces from a clone, and it is a CI gate.
-
-The first row is the comparison against the standard OMOP tooling. Eight of the
-seventeen faults never reach an OMOP database at all, so they are outside what a CDM
-assessment can be pointed at; four more do reach it and survive. Reproducing it needs
-Docker (PostgreSQL plus an R image built from `tools/dqd/`):
-
-```bash
-python tools/run_dqd_experiment.py --dataset datasets/ctpe_shape.yaml \
-  --built $EHR_WORK_ROOT/ctpe_shape --work /tmp/dqdlab \
-  --out results/dqd_baseline.json
-```
-
-## Does a fault actually cost anything downstream?
-
-Detection rates measure the detector. This measures the damage: one cohort, one task, one
-model, three feature matrices differing only in the rule about when a fact became
-knowable. Dating each admission's diagnoses to the admission — what an admission-level
-diagnosis table forces — lifts held-out AUROC for in-hospital mortality from 0.844 to
-0.969, and the inflated score does not move as the prediction horizon grows, which is
-what reading an answer looks like.
-
-```bash
-python tools/run_leakage_experiment.py --meds $EHR_WORK_ROOT/mimiciv/meds \
-  --scratch /tmp/leaklab --out results/leakage_downstream.json
-```
 
 ## Is the conversion reproducible, and does the suite cry wolf?
 
-The same inputs under four legal concurrency settings, compared artifact by artifact on a
-digest of row content rather than bytes — parquet embeds a writer version, so two
-identical builds differ on disk. All four agree on all 58 artifacts, and none of the 35
-checks fires on any of them.
+The same inputs under four legal concurrency settings, compared artifact by artifact on
+a digest of row content rather than bytes — parquet embeds a writer version, so two
+identical builds differ on disk. Determinism is designed for rather than hoped for:
+every merge sorts before it chooses, and output paths are content addressed from the
+input hashes, the configuration and the code version, so a file that already carries a
+given name is the answer for those inputs.
+
+The same run answers the other half. A suite that fires on a correct build detects every
+fault and is worthless, so the false-alarm count is asserted beside the agreement. Both
+are CI gates:
 
 ```bash
-python tools/run_reproducibility_experiment.py --dataset datasets/ctpe_shape.yaml \
-  --root-env CTPE_SHAPE_ROOT --data tests/fixtures/ctpe_shape \
-  --work /tmp/repro --out results/reproducibility.json
+.venv/bin/pytest tests/integration/test_reproducibility.py
 ```
 
-A four-subject fixture is evidence about the code, not about the scale it is claimed to
-work at. Running the same comparison on MIMIC-IV — discard the OMOP database and the
-364,673 MEDS shards from a hard-linked clone, rebuild, compare — found a real defect:
-26,562 ICD-10-CM codes map to several standard concepts, and with no `ORDER BY` on the
-resolution query the thread count decided which one was published. Fixed in 0.5.0; both
-layers now reproduce.
-
-```bash
-python tools/measure_scale_cost.py --dataset datasets/mimiciv.yaml \
-  --built $EHR_WORK_ROOT/mimiciv --work /tmp/scalelab \
-  --stages omop,meds --out results/cost.json
-```
 
 ## Verifying the numbers in the design spec
 
@@ -461,23 +397,10 @@ It is not de-identified.
 ### Licensed vocabularies
 
 Concept names in OMOP's standard Condition, Measurement and Drug domains come from
-SNOMED CT, LOINC and RxNorm. None of them is this project's to redistribute, so no
-vocabulary download is carried here and the recorded terminology experiments under
-`results/` keep concept identifiers, ranks and every measured quantity but not the
-vocabulary strings the models were shown. ICD-10-CM descriptions stay, being US public
-domain.
-
-That is enforced rather than intended. `tools/strip_vocabulary_strings.py` removes the
-strings, and its `--check` mode is a CI gate, so a rerun of an experiment that writes
-names back into `results/` fails the build:
-
-```bash
-python3 tools/strip_vocabulary_strings.py --check
-```
-
-Anyone with the vocabulary build named in each record's `vocabulary_version` can restore
-the full files by rerunning `tools/measure_retrieval.py` and
-`tools/measure_terminology_llm.py`. See [NOTICE](NOTICE) for the full third-party
+SNOMED CT, LOINC and RxNorm, and are licensed separately by their owners. Nothing here
+carries them: the repository ships no vocabulary download and no conversion output, and
+`tools/check_vocabulary.py` inspects a build you obtained yourself from
+<https://athena.ohdsi.org> under its own terms. [NOTICE](NOTICE) is the full third-party
 inventory.
 
 **Patient identifiers are pseudonymized.** Documents and scripts refer only to `PT-A` /

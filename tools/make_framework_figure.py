@@ -21,7 +21,7 @@ from lxml import etree
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'docs' / 'figures' / 'system_framework.pptx'
 
-# Palette shared with the manuscript figures (paper/figures/figstyle.tex).
+# Teal for what this repository delivers, grey for what it only identifies.
 TEAL = RGBColor(0x0D, 0x6E, 0x66)
 BLUE = RGBColor(0x1F, 0x56, 0x8C)
 ORANGE = RGBColor(0xBF, 0x57, 0x20)

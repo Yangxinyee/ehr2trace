@@ -33,13 +33,6 @@ jobs:
       - name: Generality guard
         run: pytest tests/test_no_hardcoded_dataset_strings.py -q
 
-      # SNOMED CT, LOINC and RxNorm concept names are not this project's to
-      # redistribute, and the terminology experiments read them out of a local
-      # vocabulary build. A rerun that writes them back into results/ fails here
-      # rather than quietly republishing licensed content.
-      - name: No licensed vocabulary strings
-        run: python3 tools/strip_vocabulary_strings.py --check
-
       # The paper's central experiment, as a gate: every catalogued fault must still be
       # detected by something.
       - name: Fault detection

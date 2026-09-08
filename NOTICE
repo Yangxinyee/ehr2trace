@@ -32,15 +32,14 @@ Material deliberately NOT redistributed here
 
 Clinical vocabularies. Concept names in OMOP's standard Condition, Measurement
 and Drug domains come from SNOMED CT, LOINC and RxNorm, and are licensed
-separately by their owners. This repository ships no vocabulary download, and
-the recorded terminology experiments under results/ keep concept identifiers and
-measured quantities but not the vocabulary strings -- see
-tools/strip_vocabulary_strings.py, whose --check mode is a CI gate. Obtain a
-vocabulary build from https://athena.ohdsi.org under its own terms and point
-OMOP_VOCAB_DIR at it.
+separately by their owners. This repository ships no vocabulary download and no
+conversion output, so it carries none of them. Obtain a vocabulary build from
+https://athena.ohdsi.org under its own terms, point OMOP_VOCAB_DIR at it, and
+inspect it with tools/check_vocabulary.py.
 
-ICD-10-CM descriptions that remain in the Condition records are US public domain
-(NCHS/CMS).
+The curated mapping registry under mappings/ records the concept a reviewer
+accepted for a source string, its identifier and its name. It is a review record
+of decisions made here, not a vocabulary extract, and it holds 213 entries.
 
 Patient data. No patient-level data appears in this repository or in its history.
 The CT pulmonary embolism extract is private. MIMIC-IV is available only under
