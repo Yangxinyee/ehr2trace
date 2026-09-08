@@ -8,6 +8,13 @@ authors:
   - given-names: Xinye
     family-names: Yang
     email: yangxinye2001@gmail.com
+    affiliation: University of Colorado Anschutz School of Medicine
+  - given-names: Yuli
+    family-names: Wang
+    affiliation: University of Colorado Anschutz School of Medicine
+  - given-names: Harrison
+    family-names: Bai
+    affiliation: University of Colorado Anschutz School of Medicine
 repository-code: https://github.com/Yangxinyee/ehr-to-omop-meds-agent
 license: Apache-2.0
 version: 0.5.0
@@ -15,7 +22,7 @@ abstract: >-
   ehr2cdm converts local hospital EHR extracts (delimited text and spreadsheets)
   into OMOP CDM 5.4 and MEDS. The two targets are derived independently from a
   single canonical layer rather than one from the other, every published row
-  carries a link back to the source rows it came from, and thirty-four checks encode
+  carries a link back to the source rows it came from, and thirty-eight checks encode
   the properties a conversion must satisfy before it can be used as training
   data -- including the leakage failures that are invisible to schema validation.
   Where the data does not answer a question, the converter blocks and says so
