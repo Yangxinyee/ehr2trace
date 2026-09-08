@@ -1,0 +1,48 @@
+ehr2cdm
+Copyright 2026 Xinye Yang
+
+This product includes software developed at the Observational Health Data
+Sciences and Informatics (OHDSI) program.
+
+--------------------------------------------------------------------------------
+Third-party material redistributed in this repository
+--------------------------------------------------------------------------------
+
+sql/omop_5.4/OMOPCDM_duckdb_5.4_ddl.sql
+sql/omop_5.4/OMOPCDM_duckdb_5.4_constraints.sql
+sql/omop_5.4/OMOPCDM_duckdb_5.4_primary_keys.sql
+
+    Copyright OHDSI, licensed under the Apache License, Version 2.0.
+    Taken verbatim from https://github.com/OHDSI/CommonDataModel at commit
+    0dd2175a77db0ae2e087e9138db193e60704a1e7, path inst/ddl/5.4/duckdb/, and
+    never edited. Provenance and file hashes: sql/omop_5.4/SOURCE.md.
+
+docs/standards/omop_cdm_5.4_fields.md
+
+    Generated from the OHDSI DDL above by tools/make_standards_reference.py, and
+    therefore a derivative of Apache-2.0 licensed material.
+
+docs/standards/meds_schema.md
+
+    Generated from the `meds` package pinned in requirements.lock.
+
+--------------------------------------------------------------------------------
+Material deliberately NOT redistributed here
+--------------------------------------------------------------------------------
+
+Clinical vocabularies. Concept names in OMOP's standard Condition, Measurement
+and Drug domains come from SNOMED CT, LOINC and RxNorm, and are licensed
+separately by their owners. This repository ships no vocabulary download, and
+the recorded terminology experiments under results/ keep concept identifiers and
+measured quantities but not the vocabulary strings -- see
+tools/strip_vocabulary_strings.py, whose --check mode is a CI gate. Obtain a
+vocabulary build from https://athena.ohdsi.org under its own terms and point
+OMOP_VOCAB_DIR at it.
+
+ICD-10-CM descriptions that remain in the Condition records are US public domain
+(NCHS/CMS).
+
+Patient data. No patient-level data appears in this repository or in its history.
+The CT pulmonary embolism extract is private. MIMIC-IV is available only under
+PhysioNet credentialing and its data use agreement, which does not permit
+redistribution; every test fixture here is fabricated.

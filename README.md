@@ -44,7 +44,8 @@ python3 tools/build_paper.py
 Figures are TikZ sources that compile with the manuscript; see
 [figure instructions](paper/figures/README.md).
 The repository includes aggregate evidence and synthetic fixtures. Patient-level
-outputs and licensed vocabularies are not distributed.
+outputs are not distributed, and neither are the clinical vocabularies: see
+[Licensed vocabularies](#licensed-vocabularies) below.
 
 ## What it does
 
@@ -456,6 +457,28 @@ It is not de-identified.
 - `subject_id` is a one-way hash of the patient key, salted by `EHR_SUBJECT_SALT` if
   set. The mapping table lives under `EHR_WORK_ROOT/identity/` with owner-only
   permissions. Neither OMOP nor MEDS carries a direct identifier.
+
+### Licensed vocabularies
+
+Concept names in OMOP's standard Condition, Measurement and Drug domains come from
+SNOMED CT, LOINC and RxNorm. None of them is this project's to redistribute, so no
+vocabulary download is carried here and the recorded terminology experiments under
+`results/` keep concept identifiers, ranks and every measured quantity but not the
+vocabulary strings the models were shown. ICD-10-CM descriptions stay, being US public
+domain.
+
+That is enforced rather than intended. `tools/strip_vocabulary_strings.py` removes the
+strings, and its `--check` mode is a CI gate, so a rerun of an experiment that writes
+names back into `results/` fails the build:
+
+```bash
+python3 tools/strip_vocabulary_strings.py --check
+```
+
+Anyone with the vocabulary build named in each record's `vocabulary_version` can restore
+the full files by rerunning `tools/measure_retrieval.py` and
+`tools/measure_terminology_llm.py`. See [NOTICE](NOTICE) for the full third-party
+inventory.
 
 **Patient identifiers are pseudonymized.** Documents and scripts refer only to `PT-A` /
 `PT-B` / `PT-C`. Real MRNs and patient-level service dates live in
