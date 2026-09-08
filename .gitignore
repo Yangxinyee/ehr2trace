@@ -27,7 +27,6 @@ docs/standards/*.pdf
 vocabulary_download_*.zip
 omop_vocab/
 
-# Understand Anything knowledge graph scratch files
-.ua/intermediate/
-.ua/.trash-*/
-.ua/diff-overlay.json
+# Understand Anything knowledge graph. Generated from the code by a local tool,
+# large, and regenerable, so it is not carried in the repository.
+.ua/
