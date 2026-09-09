@@ -307,6 +307,16 @@ def collect_blockers(cfg: DatasetConfig, sources: list[SourceRecord]) -> list[Bl
             )
 
     answers = cfg.owner_answers
+    for question_id, question in sorted(answers.open_questions.items()):
+        if question.answer is None:
+            blockers.append(
+                Blocker(
+                    f"OPEN_QUESTION:{question_id}",
+                    question.question,
+                    "data owner",
+                    question.blocks or "unstated",
+                )
+            )
     if not answers.batch_relationship:
         blockers.append(
             Blocker(

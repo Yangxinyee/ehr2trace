@@ -1,0 +1,324 @@
+# Dataset contract for the CU CTPA export (design section 4).
+#
+# A second hospital, a second Epic extract, and structurally unlike the reference one:
+# comma-separated CSV instead of tab-delimited text plus workbooks, surrogate person and
+# encounter ids instead of MRN/CSN, one cohort instead of four labelled partitions, a
+# per-patient CT timestamp where the reference export had a per-row "closest to CT"
+# rank, and free-text clinical notes -- ED notes, H&P, discharge summaries -- which the
+# reference export does not contain at all.
+#
+# The flat CSVs are already the shape ehr2trace ingests; tools/prepare_cu.py closes
+# three gaps a config must not close itself, and records a hash manifest across the
+# boundary. See that script's docstring.
+
+dataset_id: cu_ctpa
+root_env: CU_CTPA_DATA_ROOT
+description: >-
+  University of Colorado CT pulmonary angiography cohort: 127,955 patients scanned
+  2013-12-29 to 2025-07-31, delivered as ten flat CSVs plus 553 GB of DICOM/NIfTI.
+
+identity:
+  # Surrogate keys assigned by the extract, not hospital identifiers. The salt still
+  # applies: subject_id must not be reversible to the export's own id either.
+  person_key: arb_person_id
+  encounter_key: arb_encounter_id
+  subject_salt_env: EHR_SUBJECT_SALT
+
+time:
+  # OPEN QUESTION for the data owner. `CTA_timestamp` is the only column in the export
+  # that names a zone, and it says UTC; every other date arrives bare. Either the whole
+  # extract is UTC and this should be UTC, or the CTA column was converted on export and
+  # the rest is Denver local. America/Denver is declared here because it is the
+  # hospital's zone and because it is the assumption that makes the *clinical* dates
+  # right; if the owner answers "all UTC" this line changes and nothing else does.
+  timezone_assumption: America/Denver
+  naive_time_policy: block
+  formats:
+    - "%Y-%m-%d %H:%M:%S.%f"
+    - "%Y-%m-%d %H:%M:%S"
+    - "%Y-%m-%dT%H:%M:%S.%f"
+    - "%Y-%m-%dT%H:%M:%S"
+    - "%Y-%m-%d"
+  null_literals: ["", "NULL", "None", "No matching concept"]
+
+partitions:
+  # One cohort, one extract. No has/no split: whether a patient had a pulmonary embolism
+  # is a claim the diagnosis codes make, not a claim a directory name makes.
+  - id: "cu_ctpa"
+    dir: "cu_ctpa"
+    membership_label: null
+    batch: "C4225"
+
+sources:
+
+  # -- person ---------------------------------------------------------------------
+  demographics:
+    adapter: parquet
+    file_glob: "demographics.parquet"
+    shape: person_attributes
+    event_kind: demographic
+    required: true
+    fields:
+      person_id:    {from: [arb_person_id], required: true}
+      birth_date:   {from: [birth_date]}
+      age:          {from: [age]}
+      gender:       {from: [sex]}
+      race:         {from: [race]}
+      ethnicity:    {from: [ethnicity]}
+      vital_status: {from: [vital_status]}
+      death_time:   {from: [death_date]}
+      # The CT the cohort was assembled around. Provenance, never an event: nothing in
+      # this extract says what the scan showed.
+      anchor_time:  {from: [cta_time]}
+    untimed_values:
+      # "BMI closest to the first inclusion procedure" -- a real measurement whose own
+      # time the export dropped. Quarantined rather than dated by the CT's timestamp.
+      - {column: bmi, code: BMI, unit: "kg/m2"}
+
+  # -- vitals ---------------------------------------------------------------------
+  flowsheets:
+    adapter: parquet
+    file_glob: "flowsheets.parquet"
+    shape: point_event
+    event_kind: measurement
+    required: true
+    # Blood pressure arrives as one cell, "135/76". It is kept verbatim as text rather
+    # than split here: splitting one recorded observation into two asserts that the
+    # source recorded two, and if systolic and diastolic are wanted as numbers that is a
+    # declaration for the data owner to make, not a regex in a converter.
+    fields:
+      person_id:    {from: [arb_person_id], required: true}
+      encounter_id: {from: [arb_encounter_id]}
+      event_time:   {from: [observed_at], required: true}
+      source_code:  {from: [flowsheet_row_name], required: true}
+      source_name:  {from: [flowsheet_row_name]}
+      value:        {from: [value]}
+      unit:         {from: [unit]}
+
+  # -- conditions -----------------------------------------------------------------
+  diagnoses:
+    adapter: parquet
+    file_glob: "diagnoses.parquet"
+    shape: point_event
+    event_kind: condition
+    code_system: ICD10CM
+    required: true
+    # `diagnosis_date` runs from 1956 to the extraction date. The early rows are
+    # historical problem-list entries carried into Epic, not encounters; they are kept
+    # as recorded and the observation-period rule is what keeps them honest.
+    fields:
+      person_id:    {from: [arb_person_id], required: true}
+      encounter_id: {from: [arb_encounter_id]}
+      event_time:   {from: [diagnosis_date], required: true}
+      source_code:  {from: [code], required: true}
+      source_name:  {from: [code_description]}
+
+  # -- procedures -----------------------------------------------------------------
+  # Two sources rather than one because code_system is a property of the source: a CPT4
+  # code and an ICD-10-PCS code that spell the same are not the same code.
+  procedures_cpt:
+    adapter: parquet
+    file_glob: "procedures.parquet"
+    shape: point_event
+    event_kind: procedure
+    code_system: CPT4
+    required: true
+    row_filter: {column: code_type, keep: [CPT4]}
+    fields:
+      person_id:    {from: [arb_person_id], required: true}
+      encounter_id: {from: [arb_encounter_id]}
+      event_time:   {from: [procedure_start_date], required: true}
+      end_time:     {from: [procedure_end_date]}
+      source_code:  {from: [code], required: true}
+      source_name:  {from: [code_description, procedure_name]}
+    keep_columns: [procedure_category, procedure_name]
+
+  procedures_pcs:
+    adapter: parquet
+    file_glob: "procedures.parquet"
+    shape: point_event
+    event_kind: procedure
+    code_system: ICD10PCS
+    required: false
+    row_filter: {column: code_type, keep: [ICD10PCS]}
+    fields:
+      person_id:    {from: [arb_person_id], required: true}
+      encounter_id: {from: [arb_encounter_id]}
+      event_time:   {from: [procedure_start_date], required: true}
+      end_time:     {from: [procedure_end_date]}
+      source_code:  {from: [code], required: true}
+      source_name:  {from: [code_description, procedure_name]}
+    keep_columns: [procedure_category, procedure_name]
+
+  # -- medications ----------------------------------------------------------------
+  medications:
+    adapter: parquet
+    file_glob: "medications.parquet"
+    shape: point_event
+    event_kind: drug_order
+    required: true
+    # Ordering intent. This export carries no administration table at all, so nothing
+    # here is evidence that a drug reached a patient, and no source is declared
+    # drug_admin. `order_status` is kept as recorded.
+    fields:
+      person_id:    {from: [arb_person_id], required: true}
+      encounter_id: {from: [arb_encounter_id]}
+      event_time:   {from: [start_date], required: true}
+      end_time:     {from: [end_date]}
+      source_code:  {from: [medication_name], required: true}
+      source_name:  {from: [medication_name]}
+      dose:         {from: [ordered_dose]}
+      route:        {from: [route]}
+      status:       {from: [order_status]}
+    keep_columns:
+      - therapeutic_class
+      - pharmaceutical_class
+      - pharmaceutical_subclass
+      - form
+      - dose_unit
+      - ordered_frequency
+
+  # -- notes ----------------------------------------------------------------------
+  notes:
+    adapter: parquet
+    file_glob: "notes.parquet"
+    shape: point_event
+    event_kind: note
+    value_expect: text
+    required: false
+    # One row is one whole note, so this is a point event carrying text -- the same
+    # declaration MIMIC-IV's notes use. `narrative_lines` is the wrong shape here: it
+    # groups rows into one document by (subject, encounter, title, time), which is
+    # right when a report arrives one line per row and wrong when each row is already a
+    # whole note. On this export that grouping merged 2 to 7 genuinely different notes
+    # into one event for 9,156 of 52,102 groups.
+    #
+    # No sequence number is declared, and that is deliberate. The note text is part of
+    # the event's identity, so two different notes on one day stay two events, while the
+    # same note appearing in both the 2026-03-10 and 2026-03-23 pulls -- 56% of distinct
+    # texts do -- collapses to one event with both source rows still linked. A row-order
+    # discriminator would defeat exactly that.
+    #
+    # `note_date` is a date with no time. Every note in a day therefore lands at local
+    # midnight, and an availability-aware model must not read that as "known at 00:00".
+    # The time component is missing in the source and is not invented here.
+    fields:
+      person_id:    {from: [arb_person_id], required: true}
+      encounter_id: {from: [arb_encounter_id]}
+      source_code:  {from: [NoteType], required: true}
+      source_name:  {from: [NoteType]}
+      event_time:   {from: [note_date], required: true}
+      text:         {from: [NoteText]}
+    keep_columns: [AuthorService, note_author, source_file]
+
+  # -- outcomes as visits ---------------------------------------------------------
+  icu_stays:
+    adapter: parquet
+    file_glob: "icu_stays.parquet"
+    shape: visit
+    event_kind: visit
+    required: false
+    # `visit_type` is a constant the preparation step projects from the table's own
+    # identity -- see tools/prepare_cu.py. Strictly, an ICU stay inside a hospitalisation
+    # is a VISIT_DETAIL and not a VISIT_OCCURRENCE; there is no visit_detail publisher
+    # here because the canonical event kinds are a closed set, so this is the same
+    # compromise datasets/mimiciv.yaml records for its service transfers, made once and
+    # written down rather than left for a reader to discover.
+    fields:
+      person_id:      {from: [arb_person_id], required: true}
+      event_time:     {from: [icu_start_date], required: true}
+      length_of_stay: {from: [icu_los]}
+      visit_type:     {from: [visit_type]}
+
+  readmissions:
+    adapter: parquet
+    file_glob: "readmissions.parquet"
+    shape: visit
+    event_kind: visit
+    required: false
+    # No `visit_type`. `readmission_date` says a readmission happened on that date and
+    # never that it was an inpatient one, so the visit concept stays 0 -- an honest
+    # "the source did not say" rather than an invented Inpatient Visit.
+    #
+    # The 7/30/90/180/365-day flags are the export's own derivations. They are kept in
+    # the source layer as attributes and never become events: a flag is a label someone
+    # computed, not something that happened to the patient at a time. They are also not
+    # reproducible from this delivery -- see owner_answers.readmission_index_event.
+    fields:
+      person_id:  {from: [arb_person_id], required: true}
+      event_time: {from: [readmission_date], required: true}
+    keep_columns:
+      - readmission_flag_7day
+      - readmission_flag_30day
+      - readmission_flag_90day
+      - readmission_flag_6months
+      - readmission_flag_1year
+
+anchors:
+  anchor_type: ctpa
+  from_field: anchor_time
+  # The CT timestamp carries a time, so anchors could be compared at datetime
+  # granularity; date is kept for comparability with the reference export, and
+  # anchor_time_known records that the time was in fact present.
+  granularity: date
+  dedup_key: [anchor_date, partition_id]
+  rank_field: null
+
+# No cohort label. The reference export encoded has/no embolism in a directory name;
+# this one does not encode it anywhere, and an I26.* code in `diagnoses` is a coded
+# diagnosis rather than a cohort assignment.
+labels: []
+
+omop:
+  backend: duckdb
+  cdm_version: "5.4"
+  person_birth_policy:
+    # No waiver needed. The export gives an age together with the CT it was current at,
+    # so year_of_birth is derived exactly. Only the day within the year is unknown, and
+    # it is not invented.
+    mode: strict
+  observation_period_rule: "first_to_last_trustworthy_event_date/v1"
+  source_name: cu_ctpa
+  cdm_holder: null
+  source_release_date: null
+
+meds:
+  splits: [["train", 0.8], ["tuning", 0.1], ["held_out", 0.1]]
+  split_salt: "cu_ctpa/meds-split/v1"
+  shard_size: 1
+  include_membership_label: false
+
+execution:
+  bucket_count: 16
+  workers: 4
+  chunk_rows: 200000
+
+owner_answers:
+  batch_relationship: "one cohort, one extract; the three note files are disjoint pulls"
+  # Unlike the reference export, the images are here: 553 GB of DICOM and NIfTI for the
+  # 2016 and 2017 scans. The *report text* is not: nothing in the export states a CT
+  # finding, so no imaging conclusion may be derived from an anchor date.
+  imaging_reports_included: false
+  imaging_note: >-
+    DICOM/NIfTI delivered for the 2016 and 2017 scans and linked by ACCESSIONNUMBER in
+    T1a. Radiology report text is not in this extract. T1a carries no date, so the
+    accession numbers are not declared as a source here.
+  open_questions:
+    readmission_index_event:
+      # Measured 2026-09-09, and this is why the question is asked rather than guessed:
+      # the flags are not a function of the interval from the CT (flagged rows run from
+      # -1 to 4,163 days and unflagged ones from 30 to 4,405, which overlap), nor of the
+      # interval from the patient's previous readmission (42,133 unflagged rows sit
+      # inside 30 days of one, and 14,584 flagged rows are a first readmission with no
+      # previous interval at all). They vary within a patient for 11,568 patients and
+      # are constant for 47,654. So they are computed against a discharge date that was
+      # not delivered.
+      question: >-
+        Which event are readmission_flag_7day/30day/90day/6months/1year measured from?
+        No date in this delivery reproduces them, so they cannot be recomputed, checked,
+        or bound to a decision time.
+      answer: null
+      blocks: "readmission as a downstream label"
+  vocabulary_source: null
+  answered_by: null
+  answered_on: null

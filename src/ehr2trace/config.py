@@ -395,6 +395,26 @@ class MedsSpec(BaseModel):
     include_membership_label: bool = False
 
 
+class OpenQuestion(BaseModel):
+    """A question this particular delivery raises that the fixed fields cannot hold.
+
+    The fields on :class:`OwnerAnswers` are the questions every hospital extract raises.
+    Each delivery also raises one or two of its own -- what a derived column was computed
+    against, which encounters a cohort word covers -- and there is no end to that list.
+    Growing a field per dataset is how a config schema starts encoding somebody's
+    hospital, so they are keyed here instead, and an unanswered one blocks exactly like
+    a fixed field left null.
+    """
+
+    model_config = Strict
+
+    question: str
+    #: ``None`` means unanswered, and unanswered is a blocker
+    answer: str | None = None
+    #: what stays unusable until it is answered
+    blocks: str | None = None
+
+
 class OwnerAnswers(BaseModel):
     """Questions only the data owner can answer (design section 12 / checklist P0-6).
 
@@ -413,6 +433,8 @@ class OwnerAnswers(BaseModel):
     imaging_note: str | None = None
     #: provenance and version of the terminology download
     vocabulary_source: str | None = None
+    #: questions specific to this delivery; see :class:`OpenQuestion`
+    open_questions: dict[str, OpenQuestion] = Field(default_factory=dict)
     #: free-form record of who answered what, kept in git next to the config
     answered_by: str | None = None
     answered_on: str | None = None
