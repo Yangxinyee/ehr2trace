@@ -118,11 +118,19 @@ def main(argv: list[str]) -> int:
     import duckdb
 
     con = duckdb.connect()
-    concept = next(p for p in directory.glob("*") if p.stem.upper() == "CONCEPT")
-    con.register(
-        "concept",
-        con.read_csv(str(concept), sep="\t", header=True, quotechar="", all_varchar=True),
-    )
+    # CONCEPT answers questions 1 and 2. CONCEPT_RELATIONSHIP and DRUG_STRENGTH are
+    # registered too because question 3 builds a DrugIndex, which joins all three:
+    # registering only CONCEPT made that construction fail and the failure was reported
+    # as "DRUG_STRENGTH missing" on a bundle that had it, which is the one thing a
+    # vocabulary checker must never say.
+    for table in ("CONCEPT", "CONCEPT_RELATIONSHIP", "DRUG_STRENGTH"):
+        path = next((p for p in directory.glob("*") if p.stem.upper() == table), None)
+        if path is None:
+            continue
+        con.register(
+            table.lower(),
+            con.read_csv(str(path), sep="\t", header=True, quotechar="", all_varchar=True),
+        )
     total = con.execute("SELECT count(*) FROM concept").fetchone()[0]
     print(f"\n{total:,} concepts\n")
     rows = con.execute(
@@ -178,7 +186,7 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-def _estimate_structured_drugs(cfg, con, free: list[tuple[str, str]]) -> None:
+def _estimate_structured_drugs(cfg, con, free: list[tuple[str, str]], directory: Path) -> None:
     """What the structured drug pass would settle out of the free-text terms.
 
     A term whose `code_system` is SOURCE has no code to look up, so the four gates above
@@ -198,9 +206,16 @@ def _estimate_structured_drugs(cfg, con, free: list[tuple[str, str]]) -> None:
         return
     try:
         index = DrugIndex(con)
-    except Exception:
-        print(f"  {'SOURCE drugs':<12} {len(drugs):>7,} terms   DRUG_STRENGTH missing -- "
-              "structured matching unavailable")
+    except Exception as exc:
+        # Say which table was actually absent, and otherwise say what went wrong. The
+        # earlier version named DRUG_STRENGTH unconditionally, so a bundle that carried
+        # it was told it did not -- a diagnostic that lies is worse than none.
+        absent = [t for t in ("CONCEPT", "CONCEPT_RELATIONSHIP", "DRUG_STRENGTH")
+                  if not any(p.stem.upper() == t for p in directory.glob("*"))]
+        reason = (f"{', '.join(absent)} missing from the bundle" if absent
+                  else f"{type(exc).__name__}: {exc}")
+        print(f"  {'SOURCE drugs':<12} {len(drugs):>7,} terms   structured matching "
+              f"unavailable -- {reason}")
         return
     noise = list(cfg.terminology.drug_name_noise)
     settled = sum(1 for name in drugs if match_drug(index, name, noise)[1] == "unique")
@@ -250,7 +265,7 @@ def _estimate(con, args, cfg) -> None:
     coded = {s: v for s, v in by_system.items() if s.upper() != "SOURCE"}
     free = by_system.get("SOURCE", [])
     if free:
-        _estimate_structured_drugs(cfg, con, free)
+        _estimate_structured_drugs(cfg, con, free, args.directory)
     if not coded:
         return
 
