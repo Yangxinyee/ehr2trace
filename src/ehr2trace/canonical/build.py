@@ -230,12 +230,21 @@ class CanonicalTask:
     timezone_name: str | None
     timezone_assumed: bool
     bucket_count: int
+    #: address of the staged rows this task reads, folded in from the stage plan
+    staged_digest: str = ""
     mapping_version: str = DEFAULT_MAPPING_VERSION
 
     @property
     def digest(self) -> str:
         # `bucket` alone is not enough to identify this unit of work: bucket 5 of 64 and
         # bucket 5 of 256 hold different subjects and would otherwise share an address.
+        #
+        # `staged_digest` is the input. Without it this address described only *how* to
+        # build a bucket and never *what from*, so a run whose data changed while its
+        # config, code version and bucket count did not kept every old address, reported
+        # success, and silently republished the previous answer. Re-preparing a source,
+        # fixing a preparation script and receiving a corrected extract all take that
+        # path, and none of them announces itself.
         return task_hash(
             "canonical",
             CODE_VERSION,
@@ -246,6 +255,7 @@ class CanonicalTask:
             self.timezone_assumed,
             self.bucket_count,
             self.bucket,
+            self.staged_digest,
         )
 
 
@@ -261,9 +271,28 @@ class CanonicalResult:
     reused: bool
 
 
-def plan_canonical(cfg: DatasetConfig, layout: WorkLayout, config_path: Path, tz: str | None, tz_assumed: bool) -> list[CanonicalTask]:
+def plan_canonical(
+    cfg: DatasetConfig,
+    layout: WorkLayout,
+    config_path: Path,
+    tz: str | None,
+    tz_assumed: bool,
+    strict: bool = True,
+) -> list[CanonicalTask]:
+    """Plan one task per staged bucket, addressed by the staged rows it will read.
+
+    The staged address is taken from the stage plan rather than from the staged files
+    themselves. Staging is already content-addressed -- its digest folds in the source
+    parquet paths, and those paths *are* content addresses -- so hashing the plan
+    carries source content through to here without reading gigabytes to find out that
+    nothing changed. ``strict`` follows :func:`plan_stage`: only ``clean`` wants a plan
+    over artifacts a version bump has already stranded.
+    """
     buckets = sorted(
         int(p.name.split("=")[1]) for p in layout.staged_dir.glob("bucket=*") if p.is_dir()
+    )
+    staged_digest = task_hash(
+        "staged", *sorted(task.digest for task in plan_stage(cfg, layout, strict=strict))
     )
     return [
         CanonicalTask(
@@ -275,6 +304,7 @@ def plan_canonical(cfg: DatasetConfig, layout: WorkLayout, config_path: Path, tz
             timezone_name=tz,
             timezone_assumed=tz_assumed,
             bucket_count=cfg.execution.bucket_count,
+            staged_digest=staged_digest,
         )
         for b in buckets
     ]

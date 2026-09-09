@@ -263,3 +263,63 @@ def test_cleanup_still_works_when_everything_is_stale(tmp_path_factory, monkeypa
     with pytest.raises(RuntimeError):
         plan_stage(cfg, layout)
     assert plan_stage(cfg, layout, strict=False) == []
+
+
+def test_new_source_data_is_not_answered_from_the_previous_build(tmp_path):
+    """A rebuild after the data changed must not republish the previous answer.
+
+    The canonical bucket address once described only *how* to build a bucket -- code
+    version, config, timezone, bucket count -- and never *what from*. Re-preparing a
+    source therefore left every bucket at the address it already had, the build reported
+    success, and the new rows were never read. It is silent by construction: counts are
+    plausible because they are the previous run's counts, and every check passes because
+    the previous run was correct for the data it saw.
+
+    Nothing else in this suite catches it. The reproducibility test varies worker counts
+    over identical inputs, which is precisely the case where reusing the earlier answer
+    is right.
+    """
+    root = tmp_path / "data"
+    shutil.copytree(FIXTURE, root)
+    work = tmp_path / "work"
+    previous = os.environ.get("GENERIC_EHR_ROOT")
+    os.environ["GENERIC_EHR_ROOT"] = str(root)
+    try:
+        layout = _run_pipeline_from(root, work)
+        before = pl.read_parquet(layout.canonical_path("events")).height
+
+        # One more diagnosis for a patient the fixture already carries -- the shape of
+        # change a corrected extract or a fixed preparation script produces.
+        diagnoses = root / "site_a" / "diagnoses.csv"
+        diagnoses.write_text(
+            diagnoses.read_text()
+            + "PX-1,J96.01,Acute respiratory failure with hypoxia,2021-01-05 00:00:00,Active\n"
+        )
+
+        layout = _run_pipeline_from(root, work)
+        after = pl.read_parquet(layout.canonical_path("events")).height
+    finally:
+        if previous is None:
+            os.environ.pop("GENERIC_EHR_ROOT", None)
+        else:
+            os.environ["GENERIC_EHR_ROOT"] = previous
+
+    assert after == before + 1, (
+        f"the added row never reached the canonical layer: {before} events before, "
+        f"{after} after. The rebuild answered from the previous build."
+    )
+
+
+def _run_pipeline_from(data_root: Path, work_root: Path) -> WorkLayout:
+    """Run the whole pipeline against ``data_root``, into a work root that may be warm."""
+    os.environ["GENERIC_EHR_ROOT"] = str(data_root)
+    cfg = load_dataset_config(CONFIG)
+    layout = WorkLayout(root=work_root / cfg.dataset_id, dataset_id=cfg.dataset_id).ensure()
+    results = execute(plan_ingest(cfg, layout), run_ingest_task, 1)
+    write_manifest(layout, cfg, results)
+    build_identity(cfg, layout)
+    execute(plan_stage(cfg, layout), run_stage_task, 1)
+    tasks = plan_canonical(cfg, layout, CONFIG, cfg.time.timezone_assumption, False)
+    execute(tasks, run_canonical_task, 1)
+    merge_buckets(layout, {t.bucket: t.digest for t in tasks})
+    return layout

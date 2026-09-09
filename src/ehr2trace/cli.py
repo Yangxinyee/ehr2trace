@@ -457,7 +457,8 @@ def clean(
         keep.add(layout.staged_dir / "_done" / f"{task.partition_id}__{task.source_id}__{task.digest}.json")
     try:
         tz, tz_assumed = _resolve_timezone(cfg, assume_timezone)
-        for task in plan_canonical(cfg, layout, path, tz, tz_assumed):
+        # Not strict, for the same reason plan_stage above is not.
+        for task in plan_canonical(cfg, layout, path, tz, tz_assumed, strict=False):
             keep.add(layout.bucket_dir(task.bucket) / task.digest)
     except BlockerError:
         typer.echo("note: canonical buckets left alone (no timezone resolved for this run)")
