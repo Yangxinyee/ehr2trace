@@ -167,6 +167,62 @@ def narrative_rows(anchor: str, lines: list[str]) -> list[dict]:
     ]
 
 
+NOTE_SPEC = {
+    "adapter": "delimited",
+    "shape": "point_event",
+    "event_kind": "note",
+    "value_expect": "text",
+    "fields": {
+        "person_id": {"from": ["PID"]},
+        "event_time": {"from": ["charted"]},
+        "source_code": {"from": ["kind"]},
+        "text": {"from": ["body"]},
+    },
+}
+
+
+def test_a_whole_note_per_row_publishes_its_text():
+    """A row that is one whole document carries its content in the `text` role.
+
+    Only `narrative_lines` used to read that role, so a source shaped like this
+    converted without complaint and published notes with nothing in them. The events
+    had codes, times and lineage, so every check was satisfied.
+    """
+    ctx = make_ctx("notes", NOTE_SPEC)
+    rows = make_rows(ctx, [{"PID": "PID1", "charted": "2021-05-04", "kind": "Discharge Summary",
+                            "body": "Patient seen. Plan: discharge home."}])
+    out = get_shape("point_event")(ctx, rows)
+
+    assert len(out.events) == 1
+    assert out.events[0].value_text == "Patient seen. Plan: discharge home."
+    assert out.events[0].event_kind == str(EventKind.note)
+
+
+def test_two_notes_of_one_kind_on_one_day_stay_two_events():
+    """Their text is part of their identity, so same day and same kind is not same note."""
+    ctx = make_ctx("notes", NOTE_SPEC)
+    rows = make_rows(ctx, [
+        {"PID": "PID1", "charted": "2021-05-04", "kind": "Consults", "body": "First consult."},
+        {"PID": "PID1", "charted": "2021-05-04", "kind": "Consults", "body": "Second consult."},
+    ])
+    out = get_shape("point_event")(ctx, rows)
+
+    assert len({e.event_id for e in out.events}) == 2
+    assert {e.value_text for e in out.events} == {"First consult.", "Second consult."}
+
+
+def test_the_same_note_delivered_twice_collapses_to_one_event():
+    """Two extracts of one cohort overlap; identical text at one time is one document."""
+    ctx = make_ctx("notes", NOTE_SPEC)
+    rows = make_rows(ctx, [
+        {"PID": "PID1", "charted": "2021-05-04", "kind": "H&P", "body": "Admitted overnight."},
+        {"PID": "PID1", "charted": "2021-05-04", "kind": "H&P", "body": "Admitted overnight."},
+    ])
+    out = get_shape("point_event")(ctx, rows)
+
+    assert len({e.event_id for e in out.events}) == 1
+
+
 def test_a_report_repeated_once_per_anchor_collapses_to_one_note():
     """The whole table is duplicated per anchor; the note must not be."""
     ctx = make_ctx("echo", NARRATIVE_SPEC)

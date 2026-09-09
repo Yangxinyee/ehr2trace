@@ -130,6 +130,18 @@ omop:
     assert ok.omop.person_birth_policy.mode == "approved_approximation"
 
 
+def test_a_source_may_not_claim_its_content_twice(tmp_path: Path):
+    """`value` and `text` both claim the event's content, and no shape publishes both.
+
+    Declaring both used to be accepted and one of them silently dropped, which is how
+    MIMIC-IV published 2,652,887 notes with no text.
+    """
+    text = MINIMAL.replace("      source_code: {from: [C]}", "      source_code: {from: [C]}\n      value: {from: [V]}\n      text: {from: [X]}")
+    with pytest.raises(ConfigError) as exc:
+        load_dataset_config(write(tmp_path, text))
+    assert "'value' or 'text'" in str(exc.value)
+
+
 def test_any_of_requires_variants(tmp_path: Path):
     text = MINIMAL.replace("adapter: delimited", "adapter: any_of")
     with pytest.raises(ConfigError):

@@ -1,6 +1,6 @@
 # Fault catalogue
 
-Thirty-five checks passing on the pipeline that produced the data proves very little.
+Thirty-nine checks passing on the pipeline that produced the data proves very little.
 The question a reader should ask is the other one: when a specific corruption is
 present, does anything fire?
 
@@ -24,15 +24,15 @@ sensitivity is a property of the checks, not of the dataset's size.
 Every fault in the catalogue below is detected: a check that passes on the clean
 build fails on the corrupted one. That is asserted by the test above and gated in CI.
 
-The number worth reading is not seventeen out of seventeen. Four of those seventeen got
-past the suite the first time and motivated the four checks that now catch them, and a
-detector written in response to a fault is guaranteed to catch it. What the four have in
+The number worth reading is not seventeen out of seventeen. **Five** of the eighteen got
+past the suite the first time and motivated the five checks that now catch them, and a
+detector written in response to a fault is guaranteed to catch it. What the five have in
 common is the transferable part: each compares an artifact against independently stored
 information, which no check reading a single artifact in isolation could do.
 
-Eight of the seventeen never reach an OMOP database at all, so standard CDM-level
+Thirteen of the seventeen never reach an OMOP database at all, so standard CDM-level
 data-quality tooling cannot be pointed at them; they are faults in the canonical layer,
-the anchors, or the identities, above the target schema.
+the anchors, the identities, or the MEDS shards, above or beside the target schema.
 
 Detection is also not the same as being able to act on it. Comparing each mutated clone
 against the tree it was cloned from establishes which artifacts a fault actually damaged;
@@ -44,10 +44,10 @@ moves between the two rows.
 
 The honest caveat, stated up front: a detector written in response to a specific fault
 is guaranteed to catch that fault. 17/17 is not evidence that the suite is complete. The
-value of the experiment is in the first row — four corruptions that the suite was
-supposed to cover and did not — and in the four gaps being of a kind that recur.
+value of the experiment is in the first row — five corruptions that the suite was
+supposed to cover and did not — and in the five gaps being of a kind that recur.
 
-## What the four misses had in common
+## What the five misses had in common
 
 Each miss was a check looking at the wrong artifact.
 
@@ -57,11 +57,14 @@ Each miss was a check looking at the wrong artifact.
 | `PARTITION_COLUMN_LEAKED_INTO_CANONICAL` | A unit test covered the canonical *writer*. Nothing covered the canonical *artifact*, which is what actually ships. |
 | `IDENTITY_NOT_RESOLVED_ACROSS_PARTITIONS` | `IDENTITY_RESOLVED_ACROSS_PARTITIONS` reads the identity map and confirms it is internally consistent. Nothing joined the map to the events, so subject ids in the event table that the map never issued were invisible. |
 | `BIRTH_YEAR_INVENTED_UNDER_STRICT_POLICY` | `OMOP_BIRTH_POLICY_ENFORCED` verifies the right *policy* was applied and that derived years were flagged. It never compares the published number to the number the source implies, so a systematic offset applied to every patient survives it — and is invisible to a distribution check too. |
+| `NOTE_TEXT_SILENTLY_DROPPED` | Every check read what was published. None compared it against what the *config* said would be published, so a source that declared a text column and emitted none satisfied all of them: the events had codes, times and lineage, and the OMOP exporter's `coalesce` turned the missing text into an empty string that counted as present. |
 
-The four checks added in response — `ANCHOR_TIMES_ARE_NOT_THE_EVENT_CLOCK`,
+The five checks added in response — `ANCHOR_TIMES_ARE_NOT_THE_EVENT_CLOCK`,
 `CANONICAL_SCHEMA_AS_DECLARED`, `EVENT_SUBJECTS_WERE_ISSUED_BY_IDENTITY`,
-`OMOP_BIRTH_YEAR_IS_REPRODUCIBLE` — are all of the same shape: check the artifact that
-ships, and check it against something derived independently of it.
+`OMOP_BIRTH_YEAR_IS_REPRODUCIBLE`, `TEXT_SOURCES_PUBLISH_THEIR_TEXT` — are all of the
+same shape: check the artifact that ships, and check it against something derived
+independently of it. The last one makes the pattern explicit, because the independent
+thing it checks against is the dataset's own declaration.
 
 ## The catalogue
 
@@ -80,6 +83,7 @@ failures are not interesting — they are caught by the pipeline crashing.
 | `QUARANTINE_REASON_ERASED` | A globbing bug staged two ingest versions of every source, exactly doubling the quarantine. Nobody noticed, because events deduplicate by id and the headline counts still looked right. |
 | `LINEAGE_LINKS_DANGLE` | Rebuilding one layer without the other leaves links pointing at events that no longer exist, while the published tables still look complete. |
 | `IDENTITY_NOT_RESOLVED_ACROSS_PARTITIONS` | 6,784 patients appear in more than one partition. Hashing the partition into the subject key splits each into several people, inflating the cohort and truncating every timeline. |
+| `NOTE_TEXT_SILENTLY_DROPPED` | `text` was a declared field role that only one shape read. A source whose rows are each a whole note mapped its text column, converted without a complaint, and published 2,652,887 MIMIC-IV notes with nothing in them. |
 
 ### OMOP layer
 
@@ -114,3 +118,23 @@ corruption then leaked across subsequent faults and inflated their detector coun
 above are from after that fix. The incident is recorded here because it is the same
 class of failure the catalogue is about — a sharing relationship that is invisible
 until something writes.
+
+## An incident this catalogue cannot hold
+
+Faults here mutate a built artifact, which is what makes them measurable: clone, inject,
+re-run the checks. One incident from the same period does not fit that shape and is
+recorded here anyway, because leaving it out would make the catalogue look more complete
+than the record is.
+
+A canonical bucket's content address held the code version, the config, the mapping
+version, the timezone and the bucket count — how to build a bucket, and never what from.
+A run whose *data* changed while its config and code did not therefore kept every
+address it already had, reported success, and republished the previous answer. Splitting
+a blood pressure into its two measurements staged 5,580 new rows and produced not one
+new event, and `clean` could not help, because the stale output matched the address the
+current code would give it.
+
+There is nothing to inject: the artifact is correct for the input the build actually
+read. The defect is in which input it read. Its regression test lives in
+`tests/integration/test_generic_ehr_pipeline.py` instead, and it fails on the previous
+revision — which is the same standard every fault above is held to.

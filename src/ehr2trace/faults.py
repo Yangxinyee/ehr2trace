@@ -1,6 +1,6 @@
 """Fault injection: does the check suite actually detect anything?
 
-Thirty checks passing on the pipeline that produced the data proves very little. What a
+Thirty-nine checks passing on the pipeline that produced the data proves very little. What a
 reader needs to know is the opposite direction: when a specific corruption is present,
 does anything fire, and is it the check you would expect?
 
@@ -528,6 +528,33 @@ def _truncate_codes(layout: WorkLayout, cfg: DatasetConfig) -> str:
 #: must be real copies: a hard link shares the inode, so a mutation would reach through
 #: the clone and corrupt the build it was cloned from.
 _MUST_COPY_SUFFIXES = {".duckdb", ".db", ".sqlite", ".wal"}
+
+
+@fault(
+    "NOTE_TEXT_SILENTLY_DROPPED",
+    "canonical",
+    "`text` was a declared field role that only one shape read. A source whose rows are "
+    "each a whole note could map its text column, convert without a complaint, and "
+    "publish notes with no content; MIMIC-IV shipped 2,652,887 of them that way, and "
+    "the OMOP exporter's coalesce turned the absence into an empty string that counted "
+    "as present.",
+    SILENT,
+    "Blank the text on every note event, leaving the events themselves intact.",
+    expect=("TEXT_SOURCES_PUBLISH_THEIR_TEXT",),
+)
+def _note_text_dropped(layout: WorkLayout, cfg: DatasetConfig) -> str:
+    epath, events = _canonical(layout, "events")
+    notes = pl.col("event_kind") == "note"
+    changed = events.filter(notes & pl.col("value_text").is_not_null()).height
+    if not changed:
+        return "skipped: this dataset publishes no note text"
+    _replace(
+        epath,
+        events.with_columns(
+            pl.when(notes).then(None).otherwise(pl.col("value_text")).alias("value_text")
+        ).select(events.columns),
+    )
+    return f"{changed:,} note events keep their code, time and lineage and lose their text"
 
 
 def clone_work_tree(src: Path, dst: Path) -> None:

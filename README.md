@@ -184,8 +184,18 @@ technical one:
 2. Register at <https://athena.ohdsi.org/> and use its Download tab to request a bundle
    containing at least **SNOMED, ICD10CM, ICD9CM, ICD10PCS, ICD9Proc, LOINC, RxNorm,
    RxNorm Extension, NDC, UCUM** plus the default type/gender/race vocabularies. Athena
-   emails a link when the build is ready. CPT4 is not needed here and costs an extra
-   Java reconstitution step.
+   emails a link when the build is ready. Add **CPT4** if you are converting the
+   Colorado export: 815,466 of its 816,628 procedure rows carry one, and without it that
+   whole domain maps to nothing. It is the one vocabulary Athena cannot ship complete,
+   because the AMA licenses the code *names* separately, so the bundle arrives with
+   18,403 nameless CPT4 rows plus a `cpt4.jar` that fills them in from your UMLS account:
+
+   ```bash
+   cp CONCEPT.csv CONCEPT.csv.bak     # the jar rewrites it in place
+   ./cpt.sh <your UMLS API key>
+   ```
+
+   The reference export and MIMIC-IV need none of this; neither carries a CPT4 code.
 
    Ask for the whole list even when the dataset in front of you declares fewer code
    systems than that. An absent vocabulary is indistinguishable downstream from a code
@@ -286,7 +296,7 @@ names for every role, no anchor concept at all — and it converts end to end th
 `datasets/generic_ehr.yaml`. A grep test forbids hospital-specific strings and hardcoded
 concept ids anywhere in `src/`.
 
-It is also tested against a real second dataset. `datasets/mimiciv.yaml` converts
+It is also tested against two more real datasets. `datasets/mimiciv.yaml` converts
 MIMIC-IV v3.1 (hosp + ed) and v2.2 notes with no MIMIC-specific conversion code:
 
 | | |
@@ -347,17 +357,20 @@ mappings record that they depended on ignoring punctuation.
 ## Does the check suite detect anything?
 
 Checks passing on the pipeline that produced the data is weak evidence. The other
-direction is built in: `src/ehr2trace/faults.py` holds seventeen corruptions, each drawn
+direction is built in: `src/ehr2trace/faults.py` holds eighteen corruptions, each drawn
 from an incident that actually happened here, each silent by construction — row counts
 plausible, schemas valid, a spot check on a few patients clean. Detection means a check
 that passed on the clean build fails on the corrupted one, and `docs/FAULT_CATALOGUE.md`
 says what each fault is for.
 
-Four checks in the registry exist because a fault in that catalogue got past the suite
+Five checks in the registry exist because a fault in that catalogue got past the suite
 first. A detector written in response to a fault is guaranteed to catch it, so the
-catalogue records that order rather than only a score, and the four that were added
+catalogue records that order rather than only a score, and the five that were added
 share one shape: a check that compares an artifact against independently stored
-information, which the ones reading a single artifact could not do.
+information, which the ones reading a single artifact could not do. The fifth makes the
+shape explicit: `TEXT_SOURCES_PUBLISH_THEIR_TEXT` compares what a source *published*
+against what its configuration *said it would publish*, which is how 2,652,887 MIMIC-IV
+notes were shipped with no text in them while every other check passed.
 
 It runs on the PHI-free fixture, so it reproduces from a clone with no data access, and
 it is a CI gate:
