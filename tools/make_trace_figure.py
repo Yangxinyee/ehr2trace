@@ -228,8 +228,9 @@ def main() -> int:
     return 0
 
 
-LANE_Y = (8.2, 15.4, 21.6)
-AX_X, AX_W, PANEL_H = 17.0, 68.0, 33.0
+LANE_Y = (6.8, 12.2, 17.6)
+AX_X, AX_W, PANEL_H = 17.0, 68.0, 25.0
+PANEL_GAP = 3.5
 HEAD_SHARE = 0.72          # axis width given to the dense part of the encounter
 
 STATE = {"in":       ("ehrblue",   "ehrblue",  "ehrblue!55"),
@@ -279,7 +280,7 @@ def render(model: dict) -> str:
            r"\begin{tikzpicture}[figbase, x=\figunit, y=\figunit]"]
 
     for p_i, panel in enumerate(model["panels"]):
-        top = -p_i * (PANEL_H + 5.0)
+        top = -p_i * (PANEL_H + PANEL_GAP)
         fx, brk, span = axis_map(panel)
         out.append(f"% ------------------------------------------------- subject {p_i + 1}")
         out.append(f"\\node[minitext, anchor=north west] at (0,{top:.2f}) "
@@ -287,7 +288,7 @@ def render(model: dict) -> str:
                    f"\\ \\ {{\\color{{black!45}}{panel['n_shown']} events in one encounter,"
                    f" {span:.0f}\\,h}}}};")
 
-        y_top, y_bot = top - 4.6, top - 24.4
+        y_top, y_bot = top - 3.6, top - 20.4
         if panel["tau"] is not None:
             tx = fx(panel["tau"])
             out.append(f"\\fill[black!4] ({tx:.2f},{y_top:.2f}) rectangle ({AX_X + AX_W:.2f},{y_bot:.2f});")
@@ -342,7 +343,7 @@ def render(model: dict) -> str:
                            f"\\,+{o['at']:.0f}\\,h}};")
                 break
 
-        ay = top - 26.2
+        ay = top - 21.6
         out.append(f"\\draw[black!45, line width=0.5pt] ({AX_X:.2f},{ay:.2f}) -- ({AX_X + AX_W:.2f},{ay:.2f});")
         if brk:
             bx = brk[0]
@@ -356,11 +357,11 @@ def render(model: dict) -> str:
             out.append(f"\\draw[black!45, line width=0.5pt] ({tx:.2f},{ay:.2f}) -- ({tx:.2f},{ay - 0.9:.2f});")
             out.append(f"\\node[anchor=north, inner sep=0.3\\figunit] at ({tx:.2f},{ay - 0.9:.2f}) "
                        f"{{\\fontsize{{5.8}}{{7}}\\selectfont\\color{{black!60}}{h:g}}};")
-        out.append(f"\\node[anchor=north east, inner sep=0pt] at ({AX_X + AX_W:.2f},{ay - 3.0:.2f}) "
+        out.append(f"\\node[anchor=north east, inner sep=0pt] at ({AX_X + AX_W:.2f},{ay - 2.7:.2f}) "
                    f"{{\\fontsize{{5.8}}{{7}}\\selectfont\\color{{black!55}}hours from admission}};")
         out.append("")
 
-    out.append(_legend(-2 * (PANEL_H + 5.0) + 3.0))
+    out.append(_legend(-(len(model['panels']) - 1) * (PANEL_H + PANEL_GAP) - 28.6))
     out.append(r"\end{tikzpicture}")
     return "\n".join(out) + "\n"
 
@@ -381,29 +382,26 @@ def _ticks(span: float, brk) -> list[float]:
     return sorted(set(ticks))
 
 
-def _legend(y: float) -> str:
-    parts, x = [], 17.0
-    for mark, text in (("obs", "observation"), ("order", "order"),
-                       ("admin", "administration"), ("death", "death")):
-        parts.append(_glyph(mark, x, y, "ehrblue" if mark != "death" else "ehrslate",
-                            "ehrblue" if mark != "death" else "ehrslate"))
-        parts.append(f"\\node[anchor=west, inner sep=0pt] at ({x + 1.4:.2f},{y:.2f}) "
-                     f"{{\\fontsize{{6}}{{7}}\\selectfont\\color{{black!62}}{text}}};")
-        x += 4.0 + 1.62 * len(text)
-    y2 = y - 4.4
-    parts.append(f"\\draw[ehrorange!65, line width=1.4pt] (17.0,{y2:.2f}) -- (20.2,{y2:.2f});")
-    parts.append(f"\\draw[ehrorange, line width=0.6pt, fill=white] (20.2,{y2:.2f}) circle (0.78);")
-    parts.append(f"\\node[anchor=west, inner sep=0pt] at (21.6,{y2:.2f}) "
-                 f"{{\\fontsize{{6}}{{7}}\\selectfont\\color{{ehrorange}}"
-                 f"occurrence to availability; observed before $\\tau$, readable only after it}};")
-    return "\n".join(parts)
-
-
 def _tick_step(span: float) -> float:
     for s in (1, 2, 3, 6, 12, 24, 48, 96):
         if span / s <= 9:
             return float(s)
     return 168.0
+
+
+def _legend(y: float) -> str:
+    parts, x = [], 4.0
+    for mark, text in (("obs", "observation"), ("order", "order"), ("admin", "administration")):
+        parts.append(_glyph(mark, x, y, "ehrblue", "ehrblue"))
+        parts.append(f"\\node[anchor=west, inner sep=0pt] at ({x + 1.4:.2f},{y:.2f}) "
+                     f"{{\\fontsize{{6}}{{7}}\\selectfont\\color{{black!62}}{text}}};")
+        x += 4.0 + 1.62 * len(text)
+    parts.append(f"\\draw[ehrorange!65, line width=1.4pt] ({x:.2f},{y:.2f}) -- ({x + 3.2:.2f},{y:.2f});")
+    parts.append(f"\\draw[ehrorange, line width=0.6pt, fill=white] ({x + 3.2:.2f},{y:.2f}) circle (0.78);")
+    parts.append(f"\\node[anchor=west, inner sep=0pt] at ({x + 4.6:.2f},{y:.2f}) "
+                 f"{{\\fontsize{{6}}{{7}}\\selectfont\\color{{ehrorange}}"
+                 f"occurrence to availability}};")
+    return "\n".join(parts)
 
 
 def _glyph(mark: str, x: float, y: float, col: str, fill: str = "") -> str:
