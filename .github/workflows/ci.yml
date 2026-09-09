@@ -43,3 +43,40 @@ jobs:
       # of the paper, so both are checked rather than intended.
       - name: Determinism and false alarms
         run: pytest tests/integration/test_reproducibility.py -q
+
+  # A fabricated fixture proves the code runs; it does not prove the MIMIC dataset
+  # contract still matches MIMIC. The demonstration subset is 100 patients under an
+  # open licence with no credential, so the real thing can be converted here.
+  mimic-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Fetch MIMIC-IV demo
+        run: |
+          wget -q -r -N -c -np -nH --cut-dirs=1 -P data \
+            https://physionet.org/files/mimic-iv-demo/2.2/
+          test -f data/mimic-iv-demo/2.2/hosp/emar.csv.gz
+
+      - name: Convert and validate
+        env:
+          MIMICIV_DATA_ROOT: ${{ github.workspace }}/prepared
+          EHR_WORK_ROOT: ${{ github.workspace }}/work
+          OFFLINE_MODE: "1"
+        run: |
+          python tools/prepare_mimiciv.py \
+            --mimic-root data/mimic-iv-demo/2.2 \
+            --out "$MIMICIV_DATA_ROOT/mimiciv"
+          for step in inspect ingest identity canonical omop meds; do
+            ehr2trace "$step" -d datasets/mimiciv.yaml
+          done
+          # Non-zero exit means a check failed, which is the point of the job.
+          ehr2trace validate -d datasets/mimiciv.yaml

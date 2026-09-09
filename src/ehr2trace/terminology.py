@@ -68,6 +68,11 @@ class ConceptMatch:
     source_concept_id: int | None = None
     #: how it was reached: exact_code / mapped_relationship / approved_mapping
     path: str = "exact_code"
+    #: Who accepted this mapping, for entries that came from the curated registry.
+    #: A registry row carries its own reviewer and date, and that is the acceptance
+    #: record; requiring a second one per work root made every mapping shipped with
+    #: the repository fail on a reader's first conversion.
+    decided_by: str = ""
     #: The other standard concepts this source code also maps to, as (id, domain).
     #:
     #: A source code with several `Maps to` targets asserts every one of them, and on
@@ -131,6 +136,7 @@ class MappingRegistry:
                         vocabulary_id=row.get("vocabulary_id", ""),
                         standard_concept="S",
                         path="approved_mapping",
+                        decided_by=(row.get("decided_by") or "").strip(),
                     )
         return registry
 

@@ -49,6 +49,23 @@ def score(frame: pl.DataFrame) -> tuple[int, int, int, int]:
     return (lagged, actions, outcome, frame.height)
 
 
+def pick_encounter(frame: pl.DataFrame) -> str | None:
+    """The subject's encounter that exercises most of the contract.
+
+    Ranked the same way a subject is: an encounter that shows a laboratory result
+    arriving after its specimen, an order and the administration it led to, and a
+    manageable number of rows says more than the subject's longest stay.
+    """
+    ids = frame.filter(pl.col("encounter_id").is_not_null())["encounter_id"].unique().to_list()
+    if not ids:
+        return None
+    ranked = sorted(
+        ((score(frame.filter(pl.col("encounter_id") == e)), e) for e in ids),
+        key=lambda pair: (pair[0][0] > 0, pair[0][1], pair[0][2], -pair[0][3]), reverse=True,
+    )
+    return ranked[0][1]
+
+
 def pick_subjects(events: pl.DataFrame, n: int) -> list[str]:
     timed = events.filter(pl.col("event_time").is_not_null())
     ranked = sorted(
@@ -113,10 +130,14 @@ def build(events: pl.DataFrame, links: pl.DataFrame, subjects: list[str]) -> dic
             (pl.col("subject_id") == sid) & pl.col("event_time").is_not_null()
         ).sort("event_time")
 
-        # The panel is one encounter. Anchoring on the first event instead would put
-        # a years-old prior diagnosis at the origin and compress the stay to nothing;
-        # anchoring on the encounter is also how the paper's own cohort is defined.
-        inside = frame.filter(pl.col("encounter_id").is_not_null())
+        # The panel is one encounter, and on a real export that means one encounter
+        # id rather than every timed event that has one. A MIMIC subject carries
+        # several admissions over years: scoping to "has an encounter" put a stay
+        # three years later in the same window and left tau fifteen thousand hours
+        # from the origin.
+        encounter = pick_encounter(frame)
+        inside = (frame.filter(pl.col("encounter_id") == encounter)
+                  if encounter is not None else frame)
         if not inside.height:
             inside = frame
         origin = inside["event_time"].min()
@@ -129,10 +150,13 @@ def build(events: pl.DataFrame, links: pl.DataFrame, subjects: list[str]) -> dic
         for row in frame.iter_rows(named=True):
             at = hours(origin, row["event_time"])
             av = hours(origin, row["available_time"]) if row["available_time"] else at
-            if row["encounter_id"] is None and not (0.0 <= at <= span):
-                outside.append({"kind": row["event_kind"], "at": round(at, 3),
-                                "label": label_for(row),
-                                "side": "before" if at < 0 else "after"})
+            if row["encounter_id"] != encounter:
+                # Only the outcome is worth reporting from beyond the window, and on a
+                # real subject the rest runs to thousands of rows.
+                if row["event_kind"] == "death":
+                    outside.append({"kind": row["event_kind"], "at": round(at, 3),
+                                    "label": label_for(row),
+                                    "side": "before" if at < 0 else "after"})
                 continue
             if tau is None:
                 state = "in"
@@ -216,20 +240,43 @@ def elide(model: dict, cap: int) -> None:
         if len(rows) <= cap:
             continue
 
+        # Only the first visit is the anchor. MIMIC types every transfer and service
+        # change as a visit too, and ranking all of them first filled the table with
+        # ward moves and left out the laboratory results the argument rests on.
+        anchor = next((id(r) for r in rows if r["kind"] == "visit"), None)
+
         def rank(r: dict) -> int:
-            if r["kind"] == "visit":
+            if id(r) == anchor:
                 return 0        # the anchor "hours from admission" is measured from
-            if r["state"] == "withheld" or r["lag"] > 0.005:
-                return 1
+            if r["state"] == "withheld":
+                return 1        # the case the decision rule exists to make
             if r["kind"].startswith("drug_") or r["kind"] == "death":
                 return 2
+            if r["lag"] > 0.005:
+                return 3
             if any(f in (r["detail"] or "")
                    for f in ("NON_NUMERIC", "COMPARATOR", "RANGE_VALUE")):
-                return 3
-            return 4
+                return 4
+            return 5
 
+        # Rank alone fills the table with one kind: a real encounter administers six
+        # drugs in the same minute, and seven rows of drug_admin say once what one row
+        # says. Take at most two of a kind per pass, then come round again.
         order = {id(r): i for i, r in enumerate(rows)}
-        keep = sorted(rows, key=lambda r: (rank(r), order[id(r)]))[:cap]
+        pool = sorted(rows, key=lambda r: (rank(r), order[id(r)]))
+        keep: list[dict] = []
+        while pool and len(keep) < cap:
+            seen: dict[str, int] = {}
+            leftover = []
+            for r in pool:
+                if len(keep) < cap and seen.get(r["kind"], 0) < 2:
+                    keep.append(r)
+                    seen[r["kind"]] = seen.get(r["kind"], 0) + 1
+                else:
+                    leftover.append(r)
+            if len(leftover) == len(pool):
+                break
+            pool = leftover
         panel["rows"] = sorted(keep, key=lambda r: order[id(r)])
         panel["elided"] = len(rows) - len(keep)
 

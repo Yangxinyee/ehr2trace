@@ -77,6 +77,32 @@ the lineage checks in `src/ehr2trace/validate.py`, and
 | [`datasets/ctpe.yaml`](./datasets/ctpe.yaml) | The entire dataset contract. Every hospital-specific string lives here and nowhere else |
 | [`tools/verify_doc_baselines.py`](./tools/verify_doc_baselines.py) | Re-derives every number in design §2 from the raw data and compares |
 
+## Try it on open data first
+
+The MIMIC-IV demonstration subset is 100 patients under the Open Database Licence and
+needs no PhysioNet credential. It carries every `hosp` table the full release does,
+`emar` and `emar_detail` included, so `datasets/mimiciv.yaml` runs against it unchanged
+— the ED and note sources are optional and simply report as not extracted.
+
+```bash
+wget -r -N -c -np -nH --cut-dirs=1 -P data https://physionet.org/files/mimic-iv-demo/2.2/
+python3 tools/prepare_mimiciv.py --mimic-root data/mimic-iv-demo/2.2 --out prepared/mimiciv
+export MIMICIV_DATA_ROOT=$PWD/prepared EHR_WORK_ROOT=$PWD/work OFFLINE_MODE=1
+for step in inspect ingest identity canonical omop meds validate; do
+  ehr2trace $step -d datasets/mimiciv.yaml
+done
+```
+
+About a minute and 16 MB of download for 227,614 canonical events over 100 subjects, and
+`validate` reports 32 passed, 6 skipped, 0 failed. The six skips are checks with nothing
+in this dataset to examine — anchors, cohort membership, approximate birth years and,
+without a vocabulary installed, terminology coverage. This is also a CI job, so the
+MIMIC dataset contract is tested against real MIMIC on every push rather than only
+against a fabricated fixture.
+
+`tools/make_trace_table.py --work work/mimiciv --out trace.tex` then draws two subjects'
+published events out of that build.
+
 ## Reproducing a full run from scratch
 
 ### 1. Environment

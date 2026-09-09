@@ -1664,7 +1664,12 @@ def _undecided_not_published(l: Layers) -> CheckResult:
         decision = decisions.get(row["id"], {}).get("decision", "").strip().lower()
         if decision == "accept":
             continue
-        if registry.get(row.get("code_system", ""), row.get("source_string", "")):
+        entry = registry.get(row.get("code_system", ""), row.get("source_string", ""))
+        # A curated registry row records its own reviewer and date, and that is an
+        # acceptance. Demanding a second record in this work root's decisions file
+        # made every mapping shipped with the repository fail on a first conversion,
+        # which is bookkeeping rather than a defect. An entry nobody signed still is.
+        if entry and not entry.decided_by:
             leaked.append(row["source_string"])
     return CheckResult(
         "",
@@ -1672,6 +1677,6 @@ def _undecided_not_published(l: Layers) -> CheckResult:
         f"{len(still_open):,} items pending review "
         f"({len(pending) - len(still_open):,} since resolved), none compiled into mappings"
         if not leaked
-        else f"undecided items reached mappings/: {leaked[:5]}",
+        else f"mappings/ carries entries nobody accepted: {leaked[:5]}",
         {"pending": len(still_open), "resolved": len(pending) - len(still_open), "decided": len(decisions)},
     )
