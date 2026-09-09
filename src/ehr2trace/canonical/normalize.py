@@ -461,6 +461,17 @@ def shape_point_event(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
             out.quarantine_row(row, q.issue, q.detail, ctx.source_id)
             continue
 
+        # A source may carry its content as free text rather than as a result value, and
+        # a whole note per row is the case that matters. `text` is a declared role and
+        # this shape used to drop it, which published every such note as an empty shell
+        # that all thirty-eight checks accepted -- a note event with a code, a time and
+        # lineage is structurally valid, so nothing had a reason to object. The content
+        # goes where `narrative_lines` puts a report body, `value_text`, which is what
+        # the OMOP note exporter reads and what makes it part of the event's identity.
+        body = row.text("text", ctx.null_literals)
+        if body is not None:
+            value = ParsedValue(text=body, unit=value.unit, form="text")
+
         if event_time is None:
             # A clinical event with no time is not publishable and is never given one.
             out.quarantine_row(

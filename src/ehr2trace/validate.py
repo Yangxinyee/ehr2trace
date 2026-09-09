@@ -752,6 +752,59 @@ def _kind_matches_source(l: Layers) -> CheckResult:
     )
 
 
+@check("TEXT_SOURCES_PUBLISH_THEIR_TEXT")
+def _declared_text_reaches_the_output(l: Layers) -> CheckResult:
+    """A source that declares a text role must publish text.
+
+    `text` is a declared field role and, for a long time, only one shape read it. A
+    source whose rows each carry a whole note could therefore map its text column,
+    convert without a single complaint, and publish notes with no content: the events
+    had codes, times and lineage, so every other check in this file was satisfied, and
+    the OMOP exporter's `coalesce(value_text, '')` turned the absence into an empty
+    string that counted as present. 2,652,887 MIMIC-IV notes were published that way,
+    and the build reported success.
+
+    Nothing else here compares a source's *declaration* against the content of what it
+    produced. That is the gap the fault got through, and this is the check that closes
+    it: declaring a text column is a claim that text was published, so it is verified
+    against the artifact rather than trusted.
+    """
+    if l.events is None:
+        return _skip("canonical layer not built")
+    declared = sorted(sid for sid, spec in l.cfg.sources.items() if "text" in spec.fields)
+    if not declared:
+        return _skip("no source declares a text role")
+
+    published = (
+        l.events.filter(pl.col("source_id").is_in(declared))
+        .group_by("source_id")
+        .agg(
+            pl.len().alias("events"),
+            (pl.col("value_text").is_not_null() & (pl.col("value_text").str.len_chars() > 0))
+            .sum()
+            .alias("with_text"),
+        )
+    )
+    counts = {r["source_id"]: (r["events"], r["with_text"]) for r in published.iter_rows(named=True)}
+    # A source that produced no events at all is a coverage question, reported by
+    # SOURCE_COVERAGE_REPORTED. Only a source that published events without text is a
+    # failure here: it declared text and its output has none.
+    offenders = [(sid, counts[sid][0]) for sid in declared if counts.get(sid, (0, 0))[0] and counts[sid][1] == 0]
+    total_events = sum(counts.get(sid, (0, 0))[0] for sid in declared)
+    total_text = sum(counts.get(sid, (0, 0))[1] for sid in declared)
+    return CheckResult(
+        "",
+        not offenders,
+        f"{len(declared)} sources declare a text column and publish it: "
+        f"{total_text:,} of {total_events:,} of their events carry text"
+        if not offenders
+        else "; ".join(f"{sid} declares a text column and published {n:,} events with no text at all"
+                       for sid, n in sorted(offenders, key=lambda o: -o[1])),
+        {"sources_declaring_text": len(declared), "sources_publishing_none": len(offenders),
+         "events": total_events, "events_with_text": total_text},
+    )
+
+
 @check("ONLY_ADMINISTRATIONS_BECOME_DRUG_EXPOSURE")
 def _not_administered_excluded(l: Layers) -> CheckResult:
     """A record that is not evidence of administration must not be published as one.

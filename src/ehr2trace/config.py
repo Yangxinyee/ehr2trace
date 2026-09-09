@@ -246,6 +246,16 @@ class SourceSpec(BaseModel):
         return v
 
     @model_validator(mode="after")
+    def _one_way_to_carry_content(self) -> "SourceSpec":
+        if "value" in self.fields and "text" in self.fields:
+            raise ValueError(
+                "declare either 'value' or 'text', not both: both roles claim the "
+                "event's content and no shape publishes the two side by side, so one "
+                "of them would be dropped without saying so"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _variants_only_for_any_of(self) -> "SourceSpec":
         if self.adapter == "any_of" and not self.variants:
             raise ValueError("adapter 'any_of' requires at least one variant")
