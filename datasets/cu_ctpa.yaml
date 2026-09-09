@@ -289,7 +289,7 @@ meds:
   include_membership_label: false
 
 execution:
-  bucket_count: 16
+  bucket_count: 64
   workers: 4
   chunk_rows: 200000
 
