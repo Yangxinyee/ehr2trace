@@ -359,6 +359,6 @@ owner_answers:
     Images exist off-site and are not delivered here. Report text unconfirmed. Nothing in
     this extract contains a CT finding, so no imaging conclusion may be derived from an
     anchor date or a partition name.
-  vocabulary_source: null
+  vocabulary_source: "Athena OMOP vocabulary v5.0 29-AUG-26, CPT4 reconstituted from UMLS 2026-09-09"
   answered_by: null
   answered_on: null

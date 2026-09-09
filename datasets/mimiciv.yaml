@@ -544,6 +544,10 @@ owner_answers:
   imaging_note: >-
     Radiology report text is included (mimic-iv-note 2.2). The images themselves are a
     separate PhysioNet resource and are not part of this conversion.
-  vocabulary_source: "Athena OMOP vocabulary v5.0 27-FEB-26"
+  # Changed from v5.0 27-FEB-26 on 2026-09-09: that build is no longer on disk, and a
+  # record naming a vocabulary nobody can produce is worse than no record. Terminology
+  # coverage measured under the earlier build is not comparable with coverage measured
+  # under this one, and the difference is the vocabulary rather than the converter.
+  vocabulary_source: "Athena OMOP vocabulary v5.0 29-AUG-26, CPT4 reconstituted from UMLS 2026-09-09"
   answered_by: "PhysioNet published documentation"
   answered_on: "2026-08-23"

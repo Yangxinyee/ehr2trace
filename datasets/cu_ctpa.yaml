@@ -319,6 +319,10 @@ owner_answers:
         or bound to a decision time.
       answer: null
       blocks: "readmission as a downstream label"
-  vocabulary_source: null
+  # CPT4 matters here and nowhere else in this repository: 815,466 of this export's
+  # 816,628 procedure rows carry one, and Athena ships CPT4 without its names because
+  # the AMA licenses them separately, so the bundle is unusable for this dataset until
+  # cpt4.jar has filled them in from a UMLS account.
+  vocabulary_source: "Athena OMOP vocabulary v5.0 29-AUG-26, CPT4 reconstituted from UMLS 2026-09-09"
   answered_by: null
   answered_on: null
