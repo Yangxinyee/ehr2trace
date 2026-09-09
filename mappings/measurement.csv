@@ -4,6 +4,8 @@ source_string,code_system,concept_id,concept_name,domain_id,vocabulary_id,mappin
 6MW_RA_FEET,SOURCE,606289,6 minute walk test distance,Measurement,SNOMED,1,yxx,2026-09-02,
 6MW_RA_METERS,SOURCE,606289,6 minute walk test distance,Measurement,SNOMED,1,yxx,2026-09-02,
 BILITOT,SOURCE,4195338,Serum total bilirubin measurement,Measurement,SNOMED,1,yxx,2026-09-02,
+BP diastolic,SOURCE,3012888,Diastolic blood pressure,Measurement,LOINC,1,yxx,2026-09-09,LOINC 8462-4. Right half of the same cell.
+BP systolic,SOURCE,3004249,Systolic blood pressure,Measurement,LOINC,1,yxx,2026-09-09,LOINC 8480-6. Left half of a '135/76' cell the source labels value_type='Blood Pressure'.
 BUN,SOURCE,3004295,Urea nitrogen [Mass/volume] in Blood,Measurement,LOINC,1,yxx,2026-09-02,"corrected by cross-check 2026-09-04: BUN is the measured value; BUN/Creatinine ratio is a different, derived quantity"
 CREATININE,SOURCE,4324383,Creatinine measurement,Measurement,SNOMED,1,yxx,2026-09-02,
 DIASTOLIC BP,SOURCE,3012888,Diastolic blood pressure,Measurement,LOINC,1,yxx,2026-09-02,
@@ -50,17 +52,25 @@ FVC_APP,SOURCE,4176265,Forced vital capacity,Measurement,SNOMED,1,yxx,2026-09-02
 HCT,SOURCE,37209030,Haematocrit volume fraction of blood,Measurement,SNOMED,1,yxx,2026-09-02,
 K,SOURCE,4154489,Serum potassium measurement,Measurement,SNOMED,1,yxx,2026-09-02,
 NA,SOURCE,37392172,Serum sodium level,Measurement,SNOMED,1,yxx,2026-09-02,
+NIBP diastolic,SOURCE,3012888,Diastolic blood pressure,Measurement,LOINC,1,yxx,2026-09-09,"LOINC 8462-4. Same, diastolic."
+NIBP systolic,SOURCE,3004249,Systolic blood pressure,Measurement,LOINC,1,yxx,2026-09-09,LOINC 8480-6. NIBP is the non-invasive cuff; the measurand is the same systolic pressure and the method is not in this concept.
 O2SATART,SOURCE,3016502,Oxygen saturation in Arterial blood,Measurement,LOINC,1,yxx,2026-09-02,
 P AXIS,SOURCE,3006698,P wave axis,Measurement,LOINC,1,yxx,2026-09-02,corrected by cross-check 2026-09-04: P axis is atrial depolarisation; the QRS axis is ventricular and a different measurement
 P-R INTERVAL,SOURCE,3007794,P-R Interval,Measurement,LOINC,1,yxx,2026-09-02,
 PHART,SOURCE,3019977,pH of Arterial blood,Measurement,LOINC,1,yxx,2026-09-02,
+Pulse,SOURCE,3027018,Heart rate,Measurement,LOINC,1,yxx,2026-09-09,LOINC 8867-4. Source unit 'counts per minute' agrees with the concept.
 Q-T INTERVA,SOURCE,3025809,Q-T interval,Measurement,LOINC,1,yxx,2026-09-02,
 Q-T INTERVAL,SOURCE,3025809,Q-T interval,Measurement,LOINC,1,yxx,2026-09-02,
 QRS DURATION,SOURCE,3022022,QRS duration,Measurement,LOINC,1,yxx,2026-09-02,
 QTC CALCULATION(BEZET),SOURCE,46235174,Q-T interval corrected based on Bazett formula,Measurement,LOINC,1,yxx,2026-09-02,
 R AXIS,SOURCE,3006277,QRS axis,Measurement,LOINC,1,yxx,2026-09-02,
+Resp,SOURCE,3024171,Respiratory rate,Measurement,LOINC,1,yxx,2026-09-09,LOINC 9279-1. Source unit 'counts per minute' agrees.
+Respirations,SOURCE,3024171,Respiratory rate,Measurement,LOINC,1,yxx,2026-09-09,"LOINC 9279-1. A second local spelling of Resp, not a different measurement."
 RV/TLC - PRE PREDICTED,SOURCE,3047243,Residual volume/Total capacity Predicted,Measurement,LOINC,1,yxx,2026-09-02,
+SpO2,SOURCE,40762499,Oxygen saturation in Arterial blood by Pulse oximetry,Measurement,LOINC,1,yxx,2026-09-09,LOINC 59408-5. Source unit 'percent' agrees. SpO2 is by definition pulse oximetry.
 SYSTOLIC BP,SOURCE,3004249,Systolic blood pressure,Measurement,LOINC,1,yxx,2026-09-02,
 T AXIS,SOURCE,45770409,T wave axis,Measurement,SNOMED,1,yxx,2026-09-02,
+Temp,SOURCE,3020891,Body temperature,Measurement,LOINC,1,yxx,2026-09-09,LOINC 8310-5. Source unit 'degree Celsius' agrees; the concept is unit-agnostic.
+Temp (in Celsius),SOURCE,3020891,Body temperature,Measurement,LOINC,1,yxx,2026-09-09,LOINC 8310-5. The '(in Celsius)' is a local flowsheet label; the unit column already carries the unit.
 VENTRICULAR RATE,SOURCE,3027018,Heart rate,Measurement,LOINC,1,yxx,2026-09-02,
 WBC,SOURCE,4298431,White blood cell count,Measurement,SNOMED,1,yxx,2026-09-02,

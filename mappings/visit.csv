@@ -1,2 +1,11 @@
 source_string,code_system,concept_id,concept_name,domain_id,vocabulary_id,mapping_version,decided_by,decided_on,note
+AMBULATORY OBSERVATION,SOURCE,9201,Inpatient Visit,Visit,Visit,1,yxx,2026-09-09,"admission_type. Grouped with the other observation types rather than read as 9202 Outpatient Visit, so that one convention covers all four."
+DIRECT EMER.,SOURCE,9201,Inpatient Visit,Visit,Visit,1,yxx,2026-09-09,"admission_type. Emergency in urgency but admitted directly, with no ED encounter to record."
+DIRECT OBSERVATION,SOURCE,9201,Inpatient Visit,Visit,Visit,1,yxx,2026-09-09,"admission_type. Same decision, without the emergency unit."
+ELECTIVE,SOURCE,9201,Inpatient Visit,Visit,Visit,1,yxx,2026-09-09,admission_type. Planned inpatient admission.
+EU OBSERVATION,SOURCE,9201,Inpatient Visit,Visit,Visit,1,yxx,2026-09-09,"admission_type. Observation counted as an inpatient stay because in MIMIC-IV it occupies a bed. Note the inconsistency this leaves with EW EMER.: both begin in the emergency unit and only that one records it, and 581385 Observation Room was the alternative reading."
+EW EMER.,SOURCE,262,Emergency Room and Inpatient Visit,Visit,Visit,1,yxx,2026-09-09,"admission_type. Admitted through the emergency ward, so the stay is both."
 Inpatient,SOURCE,9201,Inpatient Visit,Visit,Visit,1,yxx,2026-09-02,
+OBSERVATION ADMIT,SOURCE,9201,Inpatient Visit,Visit,Visit,1,yxx,2026-09-09,admission_type. Same decision as EU OBSERVATION; 581385 Observation Room was the alternative.
+SURGICAL SAME DAY ADMISSION,SOURCE,9201,Inpatient Visit,Visit,Visit,1,yxx,2026-09-09,admission_type. A same-day surgical admission is an inpatient stay in MIMIC-IV.
+URGENT,SOURCE,9201,Inpatient Visit,Visit,Visit,1,yxx,2026-09-09,admission_type. An urgent admission is still an inpatient visit; urgency is not a visit type.
