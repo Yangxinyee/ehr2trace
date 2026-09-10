@@ -792,6 +792,12 @@ def _declared_text_reaches_the_output(l: Layers) -> CheckResult:
     offenders = [(sid, counts[sid][0]) for sid in declared if counts.get(sid, (0, 0))[0] and counts[sid][1] == 0]
     total_events = sum(counts.get(sid, (0, 0))[0] for sid in declared)
     total_text = sum(counts.get(sid, (0, 0))[1] for sid in declared)
+    if not total_events:
+        # Every text-carrying source is absent from this build -- the MIMIC-IV
+        # demonstration subset ships no note tables, for instance. Passing here would
+        # report that those sources publish their text, on a build where they published
+        # nothing at all, which is the shape of claim this check exists to refuse.
+        return _skip(f"no events from the {len(declared)} sources that declare a text column")
     return CheckResult(
         "",
         not offenders,
