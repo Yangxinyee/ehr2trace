@@ -82,10 +82,11 @@ sources:
     shape: point_event
     event_kind: measurement
     required: true
-    # Blood pressure arrives as one cell, "135/76". It is kept verbatim as text rather
-    # than split here: splitting one recorded observation into two asserts that the
-    # source recorded two, and if systolic and diastolic are wanted as numbers that is a
-    # declaration for the data owner to make, not a regex in a converter.
+    # Blood pressure arrives as one cell, "135/76". It is not split here: splitting one
+    # recorded observation into two asserts that the source recorded two, which is a
+    # declaration to make in the open, not a regex in a converter. tools/prepare_cu.py
+    # makes it, on the source's own `value_type = 'Blood Pressure'` rows and only where
+    # the cell is exactly `N/N`, and its manifest says how many rows that added.
     fields:
       person_id:    {from: [arb_person_id], required: true}
       encounter_id: {from: [arb_encounter_id]}
@@ -319,6 +320,18 @@ owner_answers:
         or bound to a decision time.
       answer: null
       blocks: "readmission as a downstream label"
+    age_reference_date_missing:
+      # Measured 2026-09-10 on the full extract: 3 of 127,955 demographics rows carry an
+      # age and an empty cta_time. An age says when someone was born only together with
+      # the date it was current at, so under the strict birth policy these three have no
+      # derivable year of birth. They were withheld from PERSON, and every clinical row of
+      # theirs with them; their events stay in the canonical layer and in MEDS. The rows
+      # are listed in etl_audit.quality_issue as OMOP_PERSON_BLOCKED. No identifier here.
+      question: >-
+        What date were the ages of the three patients without a cta_time current at, or
+        can their cta_time be supplied?
+      answer: null
+      blocks: "OMOP PERSON rows for these three patients, and OMOP_BIRTH_POLICY_ENFORCED"
   # CPT4 matters here and nowhere else in this repository: 815,466 of this export's
   # 816,628 procedure rows carry one, and Athena ships CPT4 without its names because
   # the AMA licenses them separately, so the bundle is unusable for this dataset until
