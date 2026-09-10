@@ -132,6 +132,41 @@ def mentions(text: str, artifacts: Iterable[str]) -> list[str]:
     return sorted(set(hit))
 
 
+def digest_parquet_files(files: dict[str, Path], temp_dir: Path | None = None) -> dict[str, str]:
+    """Per-file digests of parquet tables, computed in the engine.
+
+    `digest_parquet` reads a file through polars, which is fine for a fixture and not
+    for MIMIC-IV's canonical layer: 311 million events and 317 million links do not
+    fit in memory as a frame. This is `digest_duckdb`'s aggregate over files instead of
+    tables, so the same order-independent digest is measurable at full scale.
+    """
+    import duckdb
+
+    con = duckdb.connect()
+    try:
+        con.execute("SET enable_progress_bar = false")
+        con.execute("PRAGMA preserve_insertion_order = false")
+        if temp_dir:
+            con.execute("SET temp_directory = ?", [str(temp_dir)])
+        out: dict[str, str] = {}
+        for name, path in sorted(files.items()):
+            if not Path(path).exists():
+                out[name] = "absent"
+                continue
+            source = f"read_parquet('{path}')"
+            columns = sorted(r[0] for r in con.execute(f"DESCRIBE SELECT * FROM {source}").fetchall())
+            expr = " || '\x1f' || ".join(
+                f'coalesce(CAST("{c}" AS VARCHAR), \'\\x00\')' for c in columns
+            )
+            count, total = con.execute(
+                f"SELECT count(*), coalesce(sum(hash({expr})::HUGEINT), 0) FROM {source}"
+            ).fetchone()
+            out[name] = f"{count}:{total}"
+        return out
+    finally:
+        con.close()
+
+
 def digest_meds_data(meds_dir: Path, temp_dir: Path | None = None) -> str:
     """One digest over every MEDS shard, computed in the engine.
 

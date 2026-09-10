@@ -21,6 +21,7 @@ from ehr2trace.digest import (
     digest_frame,
     digest_meds_data,
     digest_parquet,
+    digest_parquet_files,
     mentions,
 )
 
@@ -145,3 +146,15 @@ def test_a_changed_shard_still_changes_the_meds_digest(tmp_path: Path):
         edited / "data" / "train" / "000000.parquet"
     )
     assert digest_meds_data(original) != digest_meds_data(edited)
+
+
+def test_engine_side_file_digest_is_blind_to_row_order_and_not_to_values(tmp_path: Path):
+    frame = _frame()
+    frame.write_parquet(tmp_path / "a.parquet")
+    frame.reverse().write_parquet(tmp_path / "b.parquet")
+    frame.with_columns(pl.col("value").fill_null(0.0)).write_parquet(tmp_path / "c.parquet")
+    out = digest_parquet_files({"a": tmp_path / "a.parquet", "b": tmp_path / "b.parquet",
+                                "c": tmp_path / "c.parquet", "d": tmp_path / "d.parquet"})
+    assert out["a"] == out["b"]
+    assert out["a"].startswith("3:") and out["a"] != out["c"]
+    assert out["d"] == "absent"
