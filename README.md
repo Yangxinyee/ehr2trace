@@ -301,14 +301,14 @@ MIMIC-IV v3.1 (hosp + ed) and v2.2 notes with no MIMIC-specific conversion code:
 
 | | |
 |---|---:|
-| Source rows | 304,123,813 |
-| Canonical events | 296,595,466 |
-| Event ↔ source-row links | 301,135,325 |
+| Source rows | 321,971,380 |
+| Canonical events | 311,633,030 |
+| Event ↔ source-row links | 317,480,691 |
 | Subjects | 364,673 |
 | Persons published to OMOP | 364,627 |
 | MEDS shards | 364,673 |
-| Rows quarantined rather than guessed at | 6,557,159 |
-| Validation | 30 passed, 5 skipped, 0 failed |
+| Rows quarantined rather than guessed at | 8,021,059 |
+| Validation | 34 passed, 5 skipped, 0 failed |
 
 The five skips are honest ones: MIMIC has no extraction anchors and no cohort
 partitions, so four checks have nothing to examine, and its birth years come from the
@@ -327,11 +327,48 @@ MIMICIV_DATA_ROOT=... ehr2trace inspect --dataset datasets/mimiciv.yaml
 The prepared files derive from PhysioNet credentialed data and must not be
 redistributed. The YAML is a recipe, not data.
 
+`datasets/cu_ctpa.yaml` converts the University of Colorado CT pulmonary angiography
+extract: nine tables exported for a study rather than a database, 127,955 patients,
+again with no site-specific conversion code:
+
+| | |
+|---|---:|
+| Source rows | 16,682,059 |
+| Canonical events | 13,701,547 |
+| Event ↔ source-row links | 16,385,449 |
+| Subjects | 127,955 |
+| Persons published to OMOP | 127,952 |
+| MEDS shards | 127,955 |
+| Rows quarantined rather than guessed at | 224,173 |
+| Validation | 34 passed, 4 skipped, 1 failed |
+
+The skips are of the same kind: no cohort labels, no source that says which of its
+statuses mean administered, no approximated birth years to recompute. The failure is the
+birth policy doing its job. The export dates each patient's age by the CT it was current
+at, so the year of birth is derived exactly; three patients have an age and no CT time,
+and under `person_birth_policy: strict` no year is invented for them. They are withheld
+from PERSON, and with them every clinical row of theirs, while their events stay in the
+canonical layer and in MEDS. The check stays red until the data owner says what date
+those ages were measured at. `tools/prepare_cu.py` flattens the export the way
+`prepare_mimiciv.py` does, with one deliberate exception: a blood pressure delivered as
+one cell, `135/76`, becomes the two measurements OMOP records, so that step writes more
+rows than it reads and its manifest says so.
+
+```bash
+python tools/prepare_cu.py --cu-root .../CU_Data --out $CU_CTPA_DATA_ROOT/cu_ctpa
+CU_CTPA_DATA_ROOT=... ehr2trace inspect --dataset datasets/cu_ctpa.yaml
+```
+
 Adding the second dataset found defects that development against one dataset could not:
 a blocker that fired on the *best* case, a discovery path that could not see columnar
 inputs, a validator that reported every check passed on a build whose canonical, OMOP
 and MEDS layers had all failed, two out-of-core promises that had never been true, and
 the one below.
+The third found two that had survived both: a note adapter that read every column but
+the text, so 2.6 million notes were published empty, and a canonical cache keyed on code
+and configuration but not on its input, which answered a changed source from the previous
+build. The first became the fifth check and the eighteenth fault below; the second cannot
+be injected as a fault, so it is a regression test instead.
 
 ### A conversion that passed everything and mapped nothing
 
