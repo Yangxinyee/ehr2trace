@@ -362,7 +362,7 @@ sources:
       event_time:   {from: [starttime], required: true}
       end_time:     {from: [stoptime]}
       source_code:  {from: [ndc], required: true}
-      source_name:  {from: [drug, prod_strength]}
+      source_name:  {from: [drug_full, drug]}
       dose:         {from: [dose_val_rx]}
       unit:         {from: [dose_unit_rx]}
       route:        {from: [route]}
@@ -382,7 +382,7 @@ sources:
       event_time:   {from: [starttime], required: true}
       end_time:     {from: [stoptime]}
       source_code:  {from: [drug], required: true}
-      source_name:  {from: [drug, prod_strength]}
+      source_name:  {from: [drug_full, drug]}
       dose:         {from: [dose_val_rx]}
       unit:         {from: [dose_unit_rx]}
       route:        {from: [route]}

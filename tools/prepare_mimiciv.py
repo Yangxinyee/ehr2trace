@@ -271,7 +271,12 @@ def build(mimic: Path, ed: Path | None, note: Path | None, out: Path) -> dict:
             """
             SELECT subject_id, hadm_id, pharmacy_id, poe_id, starttime, stoptime,
                    drug_type, drug, formulary_drug_cd, gsn, ndc, prod_strength,
-                   dose_val_rx, dose_unit_rx, route, doses_per_24_hrs
+                   dose_val_rx, dose_unit_rx, route, doses_per_24_hrs,
+                   -- the name with its strength and form, which is what the structured
+                   -- drug reading needs: `Potassium Chloride` names nothing RxNorm can
+                   -- pin down, `Potassium Chloride 10mEq ER Tablet` names one concept
+                   CASE WHEN prod_strength IS NOT NULL AND trim(prod_strength) <> ''
+                        THEN drug || ' ' || prod_strength ELSE drug END AS drug_full
             FROM prescriptions
             """,
             "prescriptions",
