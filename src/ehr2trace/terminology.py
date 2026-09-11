@@ -700,9 +700,12 @@ def _resolve_unpunctuated(con, pending: Sequence[TermRequest]):
         if concept_id is None:
             continue
         for term in by_stripped.get((code_system, stripped), ()):
-            expected = DOMAIN_FOR_KIND.get(term.event_kind or "")
-            if expected and domain != expected:
-                continue
+            # No domain test here, and none in the first pass either: the vocabulary
+            # decides the domain and the publisher routes by it. This pass used to
+            # refuse a match whose concept sat outside the event kind's domain, which
+            # left every Z and V code MIMIC-IV writes without its decimal point -- a
+            # million rows whose standard concept is an Observation -- unresolved,
+            # while the same codes written with the point resolved a line above.
             if term.key in resolved:
                 continue
             resolved[term.key] = ConceptMatch(

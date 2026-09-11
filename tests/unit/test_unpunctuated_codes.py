@@ -106,3 +106,19 @@ def test_a_code_that_is_simply_absent_still_does_not_resolve(tmp_path):
     match, unresolved = resolve(tmp_path / "v", "Z9999")
     assert match is None
     assert len(unresolved) == 1
+
+
+def test_a_code_whose_concept_lives_in_another_domain_still_resolves(tmp_path):
+    # ICD-10-CM Z20.822 maps to an Observation, not a Condition. MIMIC-IV writes it
+    # Z20822, and refusing the match on domain grounds left a million such rows with
+    # no concept while the same codes with their point resolved. The domain is the
+    # vocabulary's to decide and the publisher's to route.
+    vocab = write_vocab(
+        tmp_path / "v",
+        "37311059\tExposure to SARS-CoV-2\tObservation\tSNOMED\tfinding\tS\t840546002\t19700101\t20991231\t\n"
+        "1076501\tContact with COVID-19\tCondition\tICD10CM\tbilling\t\tZ20.822\t19700101\t20991231\t\n",
+        "1076501\t37311059\tMaps to\t19700101\t20991231\t\n",
+    )
+    match, unresolved = resolve(vocab, "Z20822")
+    assert match is not None and match.concept_id == 37311059, unresolved
+    assert match.domain_id == "Observation"
