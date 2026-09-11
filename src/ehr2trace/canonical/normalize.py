@@ -160,11 +160,16 @@ def filter_rows(spec: SourceSpec, rows: Sequence["Row"], columns: Iterable[str])
             f"available: {sorted(available)[:20]}"
         )
     keep = {v.strip().lower() for v in rf.keep}
+    drop = {v.strip().lower() for v in rf.drop}
     out = []
     for row in rows:
         value = row.data.get(column)
-        if value is not None and str(value).strip().lower() in keep:
-            out.append(row)
+        text = "" if value is None else str(value).strip().lower()
+        if keep and text not in keep:
+            continue
+        if text in drop:
+            continue
+        out.append(row)
     return out
 
 

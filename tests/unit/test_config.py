@@ -189,3 +189,10 @@ def test_ctpe_anchor_is_not_wired_to_any_event_time(ctpe_config: DatasetConfig):
                 assert not (set(a.lower() for a in anchor.from_) & set(a.lower() for a in other.from_)), (
                     f"{name}.{role} reuses the anchor column"
                 )
+
+
+def test_a_row_filter_may_name_values_to_drop_instead_of_keep():
+    from ehr2trace.config import RowFilterSpec
+    assert RowFilterSpec.model_validate({"column": "ndc", "drop": ["0", ""]}).drop == ["0", ""]
+    with pytest.raises(ValueError):
+        RowFilterSpec.model_validate({"column": "ndc"})

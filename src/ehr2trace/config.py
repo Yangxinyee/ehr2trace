@@ -71,15 +71,19 @@ class RowFilterSpec(BaseModel):
     model_config = Strict
 
     column: str
-    #: values to keep, compared case-insensitively after stripping
+    #: values to keep, compared case-insensitively after stripping; a null cell
+    #: compares as the empty string, so `keep: [""]` names the rows with nothing there
     keep: list[str] = Field(default_factory=list)
+    #: values to drop, same comparison. The complement of `keep` for a column whose
+    #: admissible values cannot be listed: every real NDC is admissible, and only the
+    #: placeholder `0` and the empty cell are not.
+    drop: list[str] = Field(default_factory=list)
 
-    @field_validator("keep")
-    @classmethod
-    def _nonempty(cls, v: list[str]) -> list[str]:
-        if not v:
-            raise ValueError("'keep' must list at least one value; omit row_filter to keep every row")
-        return v
+    @model_validator(mode="after")
+    def _one_side_named(self) -> "RowFilterSpec":
+        if not self.keep and not self.drop:
+            raise ValueError("row_filter must list values to keep or to drop; omit it to keep every row")
+        return self
 
 
 class EventKindFromSpec(BaseModel):
