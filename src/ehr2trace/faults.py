@@ -543,9 +543,12 @@ def _meds_without_vocabulary(layout: WorkLayout, cfg: DatasetConfig) -> str:
     from ehr2trace.meds import _write_code_metadata
     from ehr2trace.terminology import normalize_term
 
+    import pyarrow.parquet as pq
+
     changed = 0
     for path in _meds_shards(layout):
-        shard = pl.read_parquet(path)
+        original = pq.read_table(path)
+        shard = pl.from_arrow(original)
         mapped = pl.col("omop_concept_id").is_not_null()
         n = shard.filter(mapped).height
         if not n:
@@ -558,14 +561,18 @@ def _meds_without_vocabulary(layout: WorkLayout, cfg: DatasetConfig) -> str:
                 lambda v: normalize_term(v) or "unspecified", return_dtype=pl.Utf8
             )
         )
-        _replace(
-            path,
-            shard.with_columns(
-                pl.when(mapped & (pl.col("event_kind") != "death"))
-                .then(unresolved).otherwise(pl.col("code")).alias("code"),
-                pl.lit(None).cast(shard.schema["omop_concept_id"]).alias("omop_concept_id"),
-            ).select(shard.columns),
-        )
+        mutated = shard.with_columns(
+            pl.when(mapped & (pl.col("event_kind") != "death"))
+            .then(unresolved).otherwise(pl.col("code")).alias("code"),
+            pl.lit(None).cast(shard.schema["omop_concept_id"]).alias("omop_concept_id"),
+        ).select(shard.columns)
+        # Written back with the shard's own arrow types. A polars round trip widens
+        # strings to large_string, and the MEDS schema check would fire on that rather
+        # than on the missing concepts -- a detection the build that shipped never
+        # offered, and so not one this fault is allowed to.
+        tmp = path.with_suffix(path.suffix + ".mutating")
+        pq.write_table(mutated.to_arrow().cast(original.schema), tmp)
+        tmp.replace(path)
     if not changed:
         return "skipped: no mapped concepts to strip"
     con = duckdb.connect()
