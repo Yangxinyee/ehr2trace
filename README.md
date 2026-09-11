@@ -245,13 +245,14 @@ A hospital writes `OXYCODONE 5 MG TABLET`, and the vocabulary says the same thre
 about `oxycodone hydrochloride 5 MG Oral Tablet` -- with the strength as a *number* in
 `DRUG_STRENGTH`. So `ehr2trace.drug_match` matches by ingredient, strength and dose form
 rather than by text similarity, deterministically and only when exactly one standard
-concept fits all three. On this export that settles 9,574 of 26,629 medication names and
-takes drug coverage from 23.7% to 86.3%; measured against 139 mappings a physician had
-already confirmed, it reproduces 93.7% of them exactly and the rest as the same drug at
-the same strength under another spelling, with no case of a different drug. The names it
-cannot settle -- compounded infusions, multi-ingredient solutions the vocabulary has under
-no name the source uses, strengths stated as an element, anything with no strength --
-still go to a person.
+concept fits all three -- or, for a name that states an ingredient and nothing else, the
+ingredient. On this export that settles 9,850 of 26,629 medication names and takes drug
+coverage from 23.7% to 86.3%; measured against 139 mappings a physician had already
+confirmed, it reproduces 93.8% of them exactly and the rest as the same drug at the same
+strength under another spelling, with no case of a different drug. The names it cannot
+settle -- compounded infusions, multi-ingredient solutions the vocabulary has under no
+name the source uses, strengths stated as an element, a number it did not read -- still
+go to a person.
 
 ```bash
 python3 tools/measure_drug_match.py --vocabulary "$OMOP_VOCAB_DIR" \
