@@ -524,6 +524,59 @@ def _truncate_codes(layout: WorkLayout, cfg: DatasetConfig) -> str:
     return f"{codes.height - keep:,} of {codes.height:,} code descriptions removed"
 
 
+@fault(
+    "MEDS_BUILT_WITHOUT_VOCABULARY",
+    "meds",
+    "The vocabulary reaches the MEDS stage through an environment variable. A stage "
+    "rerun by hand without it -- after an out-of-memory kill, on 2026-09-10 -- published "
+    "311 million MIMIC-IV events with every code SOURCE/ and every concept null, beside "
+    "an OMOP layer carrying 29,459 concepts, and thirty-nine checks passed on the pair.",
+    SILENT,
+    "Strip every concept from the shards, rewrite each mapped code in the SOURCE/ form "
+    "an unresolved term takes, and regenerate codes.parquet so it still documents "
+    "exactly the codes in use.",
+    expect=("MEDS_CONCEPTS_ARE_OMOPS",),
+)
+def _meds_without_vocabulary(layout: WorkLayout, cfg: DatasetConfig) -> str:
+    import duckdb
+
+    from ehr2trace.meds import _write_code_metadata
+    from ehr2trace.terminology import normalize_term
+
+    changed = 0
+    for path in _meds_shards(layout):
+        shard = pl.read_parquet(path)
+        mapped = pl.col("omop_concept_id").is_not_null()
+        n = shard.filter(mapped).height
+        if not n:
+            continue
+        changed += n
+        # The code an unresolved term gets, spelled the way the MEDS stage spells it.
+        unresolved = (
+            pl.lit("SOURCE/") + pl.col("source_table").fill_null("unknown") + pl.lit("/")
+            + pl.col("source_code").map_elements(
+                lambda v: normalize_term(v) or "unspecified", return_dtype=pl.Utf8
+            )
+        )
+        _replace(
+            path,
+            shard.with_columns(
+                pl.when(mapped & (pl.col("event_kind") != "death"))
+                .then(unresolved).otherwise(pl.col("code")).alias("code"),
+                pl.lit(None).cast(shard.schema["omop_concept_id"]).alias("omop_concept_id"),
+            ).select(shard.columns),
+        )
+    if not changed:
+        return "skipped: no mapped concepts to strip"
+    con = duckdb.connect()
+    try:
+        _write_code_metadata(con, str(layout.meds_dir / "data" / "*" / "*.parquet"), layout)
+    finally:
+        con.close()
+    return (f"{changed:,} rows lost their concept and their code became SOURCE/; "
+            "codes.parquet regenerated to match")
+
+
 #: Files that are opened for writing in place rather than replaced wholesale. These
 #: must be real copies: a hard link shares the inode, so a mutation would reach through
 #: the clone and corrupt the build it was cloned from.

@@ -394,23 +394,28 @@ mappings record that they depended on ignoring punctuation.
 ## Does the check suite detect anything?
 
 Checks passing on the pipeline that produced the data is weak evidence. The other
-direction is built in: `src/ehr2trace/faults.py` holds eighteen corruptions, each drawn
+direction is built in: `src/ehr2trace/faults.py` holds nineteen corruptions, each drawn
 from an incident that actually happened here, each silent by construction — row counts
 plausible, schemas valid, a spot check on a few patients clean. Detection means a check
 that passed on the clean build fails on the corrupted one, and `docs/FAULT_CATALOGUE.md`
 says what each fault is for.
 
-Five checks in the registry exist because a fault in that catalogue got past the suite
+Six checks in the registry exist because a fault in that catalogue got past the suite
 first. A detector written in response to a fault is guaranteed to catch it, so the
-catalogue records that order rather than only a score, and the five that were added
+catalogue records that order rather than only a score, and the six that were added
 share one shape: a check that compares an artifact against independently stored
 information, which the ones reading a single artifact could not do. The fifth makes the
 shape explicit: `TEXT_SOURCES_PUBLISH_THEIR_TEXT` compares what a source *published*
 against what its configuration *said it would publish*, which is how 2,652,887 MIMIC-IV
-notes were shipped with no text in them while every other check passed.
+notes were shipped with no text in them while every other check passed. The sixth,
+`MEDS_CONCEPTS_ARE_OMOPS`, compares the two targets against each other: a MEDS stage
+rerun by hand without the vocabulary the OMOP stage had published 311 million events with
+every code unmapped, all thirty-nine checks passed, and a digest comparison of a rebuild
+was what noticed. The stage now refuses to build that way, and the check would fail it.
 
 It runs on the PHI-free fixture, so it reproduces from a clone with no data access, and
-it is a CI gate:
+it is a CI gate; the two faults that corrupt concepts need a vocabulary to apply and are
+skipped without one:
 
 ```bash
 .venv/bin/pytest tests/integration/test_fault_detection.py

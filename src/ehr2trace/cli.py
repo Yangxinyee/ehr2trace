@@ -307,13 +307,17 @@ def omop(
 
 
 @app.command()
-def meds(dataset: str = DatasetOpt, as_json: bool = JsonOpt) -> None:
+def meds(
+    dataset: str = DatasetOpt,
+    as_json: bool = JsonOpt,
+    vocabulary: Optional[Path] = typer.Option(None, "--vocabulary", help="OMOP vocabulary directory, the one the OMOP layer was built with"),
+) -> None:
     """canonical -> MEDS shards plus metadata."""
     from ehr2trace.meds import build_meds
 
     cfg, _path = _load(dataset)
     layout = _layout(cfg)
-    result = build_meds(cfg, layout)
+    result = build_meds(cfg, layout, vocabulary_dir=vocabulary)
     if as_json:
         _echo_json(result)
     else:

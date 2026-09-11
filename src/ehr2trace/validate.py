@@ -1641,6 +1641,62 @@ def _meds_codes(l: Layers) -> CheckResult:
     )
 
 
+@check("MEDS_CONCEPTS_ARE_OMOPS")
+def _meds_concepts(l: Layers) -> CheckResult:
+    """A term resolves to the same concept in both targets, or in neither.
+
+    Both layers come from one canonical layer through one resolver, so the only way
+    they can disagree is that one was built differently -- which is what happened when
+    the MEDS stage was rerun without the vocabulary the OMOP stage had: every code
+    SOURCE/, every concept null, and every check green beside an OMOP layer carrying
+    29,459 concepts. OMOP keeps one row per concept a combination code asserts and MEDS
+    picks one, so the test is membership, not equality; a term neither layer resolves
+    is agreement too. code_system is a property of the source, not of the row, so the
+    MEDS row's source and the config's declaration for it name the term.
+    """
+    files = _meds_files(l)
+    if not files:
+        return _skip("MEDS not built")
+    con = _omop_connection(l)
+    if con is None:
+        return _skip("OMOP not built or empty")
+    try:
+        omop: dict[tuple[str, str], set[int]] = {}
+        for system, code, concept in con.execute(
+            "SELECT code_system, source_code, concept_id FROM term_map"
+        ).fetchall():
+            omop.setdefault((system, code), set()).add(int(concept))
+    finally:
+        con.close()
+    system_of = {sid: spec.code_system or "SOURCE" for sid, spec in l.cfg.sources.items()}
+    rows = _meds_query(
+        files,
+        "SELECT DISTINCT source_table, source_code, omop_concept_id FROM meds "
+        "WHERE source_code IS NOT NULL",
+    )
+    agreeing = 0
+    disagreeing: list[str] = []
+    for table, code, concept in rows:
+        targets = omop.get((system_of.get(table, "SOURCE"), code))
+        alike = (concept is None and targets is None) or (
+            concept is not None and bool(targets) and int(concept) in targets
+        )
+        if alike:
+            agreeing += 1
+        else:
+            disagreeing.append(f"{table}/{code}: meds={concept} omop={sorted(targets) if targets else None}")
+    mapped = sum(1 for _t, _c, concept in rows if concept is not None)
+    if not disagreeing:
+        detail = f"{agreeing:,} terms resolve alike in MEDS and OMOP, {mapped:,} of them to a concept"
+    else:
+        detail = (f"{len(disagreeing):,} of {len(rows):,} terms resolve differently in MEDS and OMOP, "
+                  "e.g. " + "; ".join(disagreeing[:3]))
+    return CheckResult(
+        "", not disagreeing, detail,
+        {"terms": len(rows), "mapped_in_meds": mapped, "agreeing": agreeing, "disagreeing": len(disagreeing)},
+    )
+
+
 @check("MEDS_SPLITS_DISJOINT_AND_COMPLETE")
 def _meds_splits(l: Layers) -> CheckResult:
     import meds as meds_spec

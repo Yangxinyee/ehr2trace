@@ -35,6 +35,7 @@ import pyarrow.parquet as pq
 import meds as meds_spec
 from ehr2trace.analytics import HEAVY_THREADS, analytic_connection
 from ehr2trace.config import DatasetConfig
+from ehr2trace.errors import BlockerError
 from ehr2trace.hashing import split_of
 from ehr2trace.paths import WorkLayout, write_table_atomic
 from ehr2trace.schema import EventKind, QualityFlag
@@ -102,9 +103,10 @@ FORBIDDEN_EVENT_COLUMNS = frozenset(
 SHARD_BATCH_ROWS = 200_000
 
 
-def build_meds(cfg: DatasetConfig, layout: WorkLayout) -> dict[str, Any]:
+def build_meds(cfg: DatasetConfig, layout: WorkLayout, vocabulary_dir: Path | None = None) -> dict[str, Any]:
 
-    vocabulary = Vocabulary.open(_vocab_dir())
+    vocabulary = Vocabulary.open(vocabulary_dir or _vocab_dir())
+    _refuse_to_unmap_what_omop_mapped(layout, vocabulary)
     mappings = MappingRegistry.load(mappings_directory())
 
     # The work below collapses a link table of hundreds of millions of rows and orders
@@ -171,6 +173,41 @@ def build_meds(cfg: DatasetConfig, layout: WorkLayout) -> dict[str, Any]:
 
 
 # --------------------------------------------------------------------------------
+
+
+def _refuse_to_unmap_what_omop_mapped(layout: WorkLayout, vocabulary) -> None:
+    """A MEDS layer built without the vocabulary its OMOP layer had is not one with fewer
+    concepts; it is one where every code is unmapped and nothing says so.
+
+    The vocabulary reaches this stage through an environment variable, and a stage rerun
+    by hand without it published 311 million MIMIC-IV events whose every code was
+    SOURCE/ while the OMOP layer beside them carried 29,459 concepts. Thirty-nine checks
+    passed on that pair. The OMOP layer records which vocabulary built it, so the
+    mismatch is knowable before a row is written, and a question the operator has to
+    answer is a blocker, not a default.
+    """
+    if getattr(vocabulary, "available", False):
+        return
+    db = layout.omop_dir / "omop.duckdb"
+    if not db.exists():
+        return
+    import duckdb
+
+    con = duckdb.connect(str(db), read_only=True)
+    try:
+        row = con.execute("SELECT vocabulary_version FROM cdm_source LIMIT 1").fetchone()
+    except duckdb.Error:
+        return
+    finally:
+        con.close()
+    if row and row[0] and row[0] != "none":
+        raise BlockerError(
+            "MEDS_VOCABULARY_MISSING",
+            f"the OMOP layer was built against vocabulary {row[0]!r} and none is available "
+            "here; MEDS would publish every code unmapped beside an OMOP layer that maps "
+            "them. Pass --vocabulary or set OMOP_VOCAB_DIR to the same directory",
+            needed_from="operator",
+        )
 
 
 def _build_term_map(con, vocabulary, mappings: MappingRegistry,

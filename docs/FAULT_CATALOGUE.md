@@ -1,6 +1,6 @@
 # Fault catalogue
 
-Thirty-nine checks passing on the pipeline that produced the data proves very little.
+Forty checks passing on the pipeline that produced the data proves very little.
 The question a reader should ask is the other one: when a specific corruption is
 present, does anything fire?
 
@@ -16,27 +16,29 @@ Reproduce with:
 ```
 
 The experiment runs against `tests/fixtures/ctpe_shape/`, which contains no patient
-data, so the result is reproducible by anyone who clones the repository. Detector
-sensitivity is a property of the checks, not of the dataset's size.
+data, so the result is reproducible by anyone who clones the repository. Two faults
+corrupt concepts and need a vocabulary installed to be applicable; the numbers below
+were measured with one, and the CI run, which has none, reports those two as skipped.
+Detector sensitivity is a property of the checks, not of the dataset's size.
 
 ## Result
 
 Every fault in the catalogue below is detected: a check that passes on the clean
 build fails on the corrupted one. That is asserted by the test above and gated in CI.
 
-The number worth reading is not seventeen out of seventeen. **Five** of the eighteen got
-past the suite the first time and motivated the five checks that now catch them, and a
-detector written in response to a fault is guaranteed to catch it. What the five have in
+The number worth reading is not nineteen out of nineteen. **Six** of the nineteen got
+past the suite the first time and motivated the six checks that now catch them, and a
+detector written in response to a fault is guaranteed to catch it. What the six have in
 common is the transferable part: each compares an artifact against independently stored
 information, which no check reading a single artifact in isolation could do.
 
-Thirteen of the seventeen never reach an OMOP database at all, so standard CDM-level
+Fourteen of the nineteen never reach an OMOP database at all, so standard CDM-level
 data-quality tooling cannot be pointed at them; they are faults in the canonical layer,
 the anchors, the identities, or the MEDS shards, above or beside the target schema.
 
 Detection is also not the same as being able to act on it. Comparing each mutated clone
 against the tree it was cloned from establishes which artifacts a fault actually damaged;
-a firing check localises the fault if it names one of them. Fourteen of seventeen do.
+a firing check localises the fault if it names one of them. Sixteen of nineteen do.
 
 Both numbers come from the identical harness; the "before" figure is measured by
 ignoring the four new check ids, not by checking out an older revision, so nothing else
@@ -58,6 +60,7 @@ Each miss was a check looking at the wrong artifact.
 | `IDENTITY_NOT_RESOLVED_ACROSS_PARTITIONS` | `IDENTITY_RESOLVED_ACROSS_PARTITIONS` reads the identity map and confirms it is internally consistent. Nothing joined the map to the events, so subject ids in the event table that the map never issued were invisible. |
 | `BIRTH_YEAR_INVENTED_UNDER_STRICT_POLICY` | `OMOP_BIRTH_POLICY_ENFORCED` verifies the right *policy* was applied and that derived years were flagged. It never compares the published number to the number the source implies, so a systematic offset applied to every patient survives it — and is invisible to a distribution check too. |
 | `NOTE_TEXT_SILENTLY_DROPPED` | Every check read what was published. None compared it against what the *config* said would be published, so a source that declared a text column and emitted none satisfied all of them: the events had codes, times and lineage, and the OMOP exporter's `coalesce` turned the missing text into an empty string that counted as present. |
+| `MEDS_BUILT_WITHOUT_VOCABULARY` | Every check read one target at a time. None compared the two targets against each other, so a MEDS layer whose every code was unmapped sat beside an OMOP layer carrying 29,459 concepts and satisfied all of them: the shards validated, the shards' codes were documented, the lineage was complete. A digest comparison of a rebuild noticed; `MEDS_CONCEPTS_ARE_OMOPS` now asks whether each term resolves alike in both, and the MEDS stage refuses to build without the vocabulary its OMOP layer had. |
 
 The five checks added in response — `ANCHOR_TIMES_ARE_NOT_THE_EVENT_CLOCK`,
 `CANONICAL_SCHEMA_AS_DECLARED`, `EVENT_SUBJECTS_WERE_ISSUED_BY_IDENTITY`,
@@ -104,6 +107,7 @@ failures are not interesting — they are caught by the pipeline crashing.
 | `SHARD_NOT_TIME_SORTED` | A shard whose rows are out of time order still validates against the MEDS schema. Every model that reads it as a sequence reads a shuffled history. |
 | `SUBJECT_IN_TWO_SPLITS` | Bucketing by anything that is not the subject key reintroduces the oldest leak there is. |
 | `CODE_METADATA_INCOMPLETE` | `codes.parquet` is the only description a downstream consumer gets of what a code means. Dropping entries leaves events referring to codes nothing documents. |
+| `MEDS_BUILT_WITHOUT_VOCABULARY` | The vocabulary reaches the MEDS stage through an environment variable. A stage rerun by hand without it, after an out-of-memory kill, published 311 million MIMIC-IV events with every code `SOURCE/` and every concept null while the OMOP layer beside them mapped 29,459, and thirty-nine checks passed on the pair. |
 
 ## A note on the harness
 
