@@ -245,3 +245,33 @@ under no name the source uses (`LACTATED RINGERS`), strengths stated as an eleme
 (`320 MG IODINE/ML`), a number the parser did not read, parenteral nutrition, and
 non-drugs (`BLOOD SUGAR DIAGNOSTIC STRIPS`) all still abstain and still go to a person.
 The queue is smaller, not gone.
+
+## Two CU-CTPA questions were answered by the study team, and say so
+
+The export dates each age by the first inclusion procedure, and three rows carry the
+age without the procedure's timestamp; its readmission flags are derived columns whose
+reference event was never stated. Both were recorded as open questions for the data
+owner, and on 2026-09-11 both were answered from the delivery itself instead, because
+the delivery could settle them and the owner had not.
+
+The age: vitals in this export are a one-day snapshot taken at the scan (the earliest
+flowsheet day is the CTA day for 92.0% of the 127,746 patients with both, within a day
+of it for 95.2%), and for two of the three the notes written that day state the same
+age. So `prepare_cu.py` dates those three ages by their earliest flowsheet day, says so
+in two output columns, and counts the rows in its manifest. The CTA time stays empty:
+nothing invents the scan.
+
+The flags: measured per patient rather than over all rows, each first row reproduces
+from `cta_time` alone (all five flags for 97.9%, the 30-day flag for 99.4%, boundaries
+exact: 7, 30 and 90 days inclusive, six calendar months, one calendar year), and the
+rows that do not are the same admission repeated with another flag vector -- never for a
+patient with one T1a accession, more often the more accessions a patient has. T5 holds
+one row per admission x scan and the export dropped the scan column. A readmission
+label at those horizons is therefore derived from `readmission_date` and `cta_time`,
+never copied from the flags; the flags for later scans cannot be reproduced because
+those scans' dates were not delivered.
+
+Both answers live in the YAML under `open_questions` as `answer` text that names the
+decider, the date and the evidence. The alternative of waiting kept three patients out
+of OMOP and a label unusable for reasons the data could settle; the alternative of
+answering silently in code is the quiet guess this design exists to prevent.

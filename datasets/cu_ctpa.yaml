@@ -237,7 +237,9 @@ sources:
     # is a VISIT_DETAIL and not a VISIT_OCCURRENCE; there is no visit_detail publisher
     # here because the canonical event kinds are a closed set, so this is the same
     # compromise datasets/mimiciv.yaml records for its service transfers, made once and
-    # written down rather than left for a reader to discover.
+    # written down rather than left for a reader to discover. The constant resolves to
+    # 32037 Intensive Care through mappings/visit.csv (accepted 2026-09-09; the row that
+    # carries it was missing until 2026-09-11, and every ICU stay sat at concept 0).
     fields:
       person_id:      {from: [arb_person_id], required: true}
       event_time:     {from: [icu_start_date], required: true}
@@ -256,8 +258,11 @@ sources:
     #
     # The 7/30/90/180/365-day flags are the export's own derivations. They are kept in
     # the source layer as attributes and never become events: a flag is a label someone
-    # computed, not something that happened to the patient at a time. They are also not
-    # reproducible from this delivery -- see owner_answers.readmission_index_event.
+    # computed, not something that happened to the patient at a time. What they were
+    # computed against is inferred, not stated -- see owner_answers.readmission_index_event:
+    # one row per admission x CTPA scan, the scan column dropped on export, so an
+    # admission date can carry several flag vectors here, of which the one for the first
+    # scan recomputes from cta_time.
     fields:
       person_id:  {from: [arb_person_id], required: true}
       event_time: {from: [readmission_date], required: true}
@@ -319,31 +324,68 @@ owner_answers:
     accession numbers are not declared as a source here.
   open_questions:
     readmission_index_event:
-      # Measured 2026-09-09, and this is why the question is asked rather than guessed:
-      # the flags are not a function of the interval from the CT (flagged rows run from
-      # -1 to 4,163 days and unflagged ones from 30 to 4,405, which overlap), nor of the
-      # interval from the patient's previous readmission (42,133 unflagged rows sit
-      # inside 30 days of one, and 14,584 flagged rows are a first readmission with no
-      # previous interval at all). They vary within a patient for 11,568 patients and
-      # are constant for 47,654. So they are computed against a discharge date that was
-      # not delivered.
+      # Measured 2026-09-09, and this is why the question was asked rather than guessed:
+      # taken over all rows the flags are not a function of the interval from the CT
+      # (flagged rows run from -1 to 4,163 days and unflagged ones from 30 to 4,405,
+      # which overlap), nor of the interval from the patient's previous readmission
+      # (42,133 unflagged rows sit inside 30 days of one, and 14,584 flagged rows are a
+      # first readmission with no previous interval at all).
+      #
+      # Re-measured 2026-09-11, per patient rather than over all rows. Each patient's
+      # first row reproduces from cta_time alone: all five flags for 97.9% of 59,219
+      # rows, the 30-day flag for 99.4%, with the boundaries exact -- 7, 30 and 90 days
+      # inclusive, six months as a calendar interval (181-184 days), a year as a calendar
+      # year (365-366). The rows that do not are the same admission date repeated with a
+      # different flag vector: 32,932 admission dates carry two or more, in 32,907 of them
+      # exactly one vector is the first scan's, patients with a single T1a accession
+      # never carry a repeat, and the number of vectors per date grows with the number
+      # of accessions (1.39 for two scans, 3.56 for eight). For two-scan patients the
+      # second vector behaves as the interval from one later date in 99.4% of cases. So
+      # T5 holds one row per admission x scan, and the export dropped the scan column.
+      # Of the 186,349 distinct admission dates, 290 (0.16%) have no vector that agrees
+      # with the first scan, all of them one day off a boundary, none far from it.
       question: >-
         Which event are readmission_flag_7day/30day/90day/6months/1year measured from?
         No date in this delivery reproduces them, so they cannot be recomputed, checked,
         or bound to a decision time.
-      answer: null
+      # Not the owner's answer: the study team's inference (D13, 2026-09-11), from the
+      # delivery itself, with the measurements above as its evidence.
+      answer: >-
+        Each flag is readmission_date within N of a CTPA scan date -- 7, 30 and 90 days
+        inclusive, six calendar months, one calendar year -- computed once per admission
+        and scan, and the export dropped the scan column. Against the first scan, whose
+        timestamp is cta_time, the flags recompute from delivered dates, so a readmission
+        label at those horizons is derived from readmission_date and cta_time rather
+        than copied from the flags; against later scans they cannot be, because those
+        scans' dates were not delivered (T1a carries accession numbers without dates).
+        Inferred by the study team on 2026-09-11, not answered by the data owner.
       blocks: "readmission as a downstream label"
     age_reference_date_missing:
       # Measured 2026-09-10 on the full extract: 3 of 127,955 demographics rows carry an
       # age and an empty cta_time. An age says when someone was born only together with
-      # the date it was current at, so under the strict birth policy these three have no
-      # derivable year of birth. They were withheld from PERSON, and every clinical row of
-      # theirs with them; their events stay in the canonical layer and in MEDS. The rows
-      # are listed in etl_audit.quality_issue as OMOP_PERSON_BLOCKED. No identifier here.
+      # the date it was current at, so under the strict birth policy these three had no
+      # derivable year of birth. Until 2026-09-11 they were withheld from PERSON, and
+      # every clinical row of theirs with them; their events stayed in the canonical
+      # layer and in MEDS, and the rows were listed in etl_audit.quality_issue as
+      # OMOP_PERSON_BLOCKED. No identifier here.
       question: >-
         What date were the ages of the three patients without a cta_time current at, or
         can their cta_time be supplied?
-      answer: null
+      # Not the owner's answer: the study team's decision (D12, 2026-09-11), made from the
+      # delivery itself. The vitals are a one-day snapshot taken at the scan -- the
+      # earliest flowsheet day is the CTA day for 92.0% of the 127,746 patients that
+      # have both, and within one day of it for 95.2% -- and for two of the three the
+      # notes written on that day state the same age, while the third patient's later
+      # note is consistent with it. The extraction date is excluded because later notes
+      # already state higher ages. tools/prepare_cu.py applies the rule and counts the
+      # rows it touched; cta_time stays empty, so no CT time is invented and the three
+      # anchor nothing.
+      answer: >-
+        The age is taken as current on the patient's earliest flowsheet day, which is
+        the day of the inclusion scan for the rest of the cohort. Decided by the study
+        team on 2026-09-11 from the delivery's own evidence, not answered by the data
+        owner; applied in tools/prepare_cu.py (age_reference_source =
+        earliest_flowsheet_day), with cta_time left empty.
       blocks: "OMOP PERSON rows for these three patients, and OMOP_BIRTH_POLICY_ENFORCED"
   # CPT4 matters here and nowhere else in this repository: 815,466 of this export's
   # 816,628 procedure rows carry one, and Athena ships CPT4 without its names because

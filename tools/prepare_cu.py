@@ -1,7 +1,7 @@
 """Denormalize the CU CTPA export into the flat shape ehr2trace ingests.
 
 Same contract as tools/prepare_mimiciv.py: projection and lookup joins only, no
-imputation, sha256 manifest across the boundary. Three CU-specific gaps are closed
+imputation, sha256 manifest across the boundary. Four CU-specific gaps are closed
 here because the dataset YAML has no expression language and must not grow one:
 
   * flowsheets carry `observation_date` and `observation_time` in two columns;
@@ -24,6 +24,15 @@ here because the dataset YAML has no expression language and must not grow one:
     which is an ICU length of stay and not a hospital one. The readmission half gains
     nothing: `readmission_date` says a readmission happened, never that it was an
     inpatient one, so its visit concept stays unmapped;
+  * T1 dates each age by the first inclusion procedure, and three rows carry the age
+    but not the procedure's timestamp. For those the earliest flowsheet day stands in
+    as the day the age was current at: the vitals are a one-day snapshot taken at the
+    scan, and that day is the CTA day for 92.0% of the 127,746 patients who have both
+    (within one day of it for 95.2%). This is a decision of the study team, not an
+    answer from the data owner, and the YAML's open_questions record it as such (D12,
+    2026-09-11). The CTA timestamp itself is not invented: `cta_time` stays empty for
+    the three, so they anchor nothing. `age_reference_day` and `age_reference_source`
+    say which rule each row took, and the manifest counts the rows under each;
   * everything is one flat directory, and partitions want a directory each.
 
 --sample N takes a deterministic every-Nth slice of the patient list so the whole
@@ -97,20 +106,33 @@ def main() -> None:
     J = "SEMI JOIN cohort USING (arb_person_id)"
     steps: list[tuple[str, str]] = [
         ("demographics", f"""
+            WITH first_vitals AS (
+              -- The extract's own proxy for the day of the inclusion procedure, used
+              -- only where T1 lacks the procedure's timestamp (see the module docstring).
+              SELECT arb_person_id, min(observation_date) AS first_flowsheet_day
+              FROM T2 WHERE observation_date IS NOT NULL GROUP BY arb_person_id
+            )
             SELECT t.arb_person_id, t.mrn,
                    t.age_at_first_inclusion_procedure AS age,
                    -- ' UTC' is stripped, not converted: whether the other tables are
                    -- also UTC is an open question for the data owner, and the YAML
                    -- declares one zone for the whole dataset.
                    replace(t.CTA_timestamp, ' UTC', '') AS cta_time,
-                   -- CU gives an age together with the procedure it was current at, so
-                   -- a birth year is derived exactly rather than approximated -- the
-                   -- same move prepare_mimiciv.py makes with anchor_age/anchor_year.
-                   -- The day is not known and is not invented: it stays 01-01 and the
-                   -- converter flags every year derived this way.
-                   CASE WHEN t.CTA_timestamp IS NULL
-                             OR t.age_at_first_inclusion_procedure IS NULL THEN NULL
-                        ELSE CAST(CAST(substr(t.CTA_timestamp, 1, 4) AS INTEGER)
+                   -- The day the age was current at: the procedure's own timestamp, or
+                   -- the earliest flowsheet day where the timestamp is missing.
+                   CASE WHEN t.CTA_timestamp IS NOT NULL THEN substr(t.CTA_timestamp, 1, 10)
+                        ELSE v.first_flowsheet_day END AS age_reference_day,
+                   CASE WHEN t.CTA_timestamp IS NOT NULL THEN 'cta_timestamp'
+                        WHEN v.first_flowsheet_day IS NOT NULL THEN 'earliest_flowsheet_day'
+                   END AS age_reference_source,
+                   -- CU gives an age together with the day it was current at, so a
+                   -- birth year is derived exactly rather than approximated -- the same
+                   -- move prepare_mimiciv.py makes with anchor_age/anchor_year. The day
+                   -- is not known and is not invented: it stays 01-01 and the converter
+                   -- flags every year derived this way.
+                   CASE WHEN t.age_at_first_inclusion_procedure IS NULL
+                             OR coalesce(t.CTA_timestamp, v.first_flowsheet_day) IS NULL THEN NULL
+                        ELSE CAST(CAST(substr(coalesce(t.CTA_timestamp, v.first_flowsheet_day), 1, 4) AS INTEGER)
                                   - CAST(t.age_at_first_inclusion_procedure AS INTEGER)
                                   AS VARCHAR) || '-01-01'
                    END AS birth_date,
@@ -119,7 +141,8 @@ def main() -> None:
                         THEN 'Alive' ELSE 'Deceased' END AS vital_status,
                    t.sex, t.race, t.ethnicity,
                    t.BMI_closet_to_first_inclusion_procedure AS bmi
-            FROM T1 t SEMI JOIN cohort USING (arb_person_id)"""),
+            FROM T1 t SEMI JOIN cohort USING (arb_person_id)
+            LEFT JOIN first_vitals v ON v.arb_person_id = t.arb_person_id"""),
         ("ct_studies", f"SELECT * FROM T1a {J}"),
         ("flowsheets", f"""
             WITH timed AS (
@@ -170,6 +193,13 @@ def main() -> None:
         rows = con.execute(f"SELECT count(*) FROM read_parquet('{dest}')").fetchone()[0]
         manifest["outputs"][dest.name] = {"rows": rows, "sha256": sha256_file(dest)}
         print(f"  {name:22} {rows:>10,} rows")
+
+    # Which rule dated each age, so the three that took the stand-in are counted and
+    # a future export that drops more timestamps shows up as a larger number here.
+    manifest["age_reference_source"] = dict(con.execute(f"""
+        SELECT coalesce(age_reference_source, 'none'), count(*)
+        FROM read_parquet('{out / 'demographics.parquet'}') GROUP BY 1 ORDER BY 1""").fetchall())
+    print(f"  age reference: {manifest['age_reference_source']}")
 
     if not a.skip_notes:
         present = [p for p in notes if p.exists()]

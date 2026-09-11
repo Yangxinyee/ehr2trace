@@ -336,25 +336,28 @@ again with no site-specific conversion code:
 | | |
 |---|---:|
 | Source rows | 16,682,059 |
-| Canonical events | 13,701,547 |
-| Event ↔ source-row links | 16,385,449 |
+| Canonical events | 13,701,522 |
+| Event ↔ source-row links | 16,385,424 |
 | Subjects | 127,955 |
-| Persons published to OMOP | 127,952 |
+| Persons published to OMOP | 127,955 |
 | MEDS shards | 127,955 |
 | Rows quarantined rather than guessed at | 224,173 |
-| Validation | 34 passed, 4 skipped, 1 failed |
+| Validation | 36 passed, 4 skipped, 0 failed |
 
 The skips are of the same kind: no cohort labels, no source that says which of its
-statuses mean administered, no approximated birth years to recompute. The failure is the
-birth policy doing its job. The export dates each patient's age by the CT it was current
-at, so the year of birth is derived exactly; three patients have an age and no CT time,
-and under `person_birth_policy: strict` no year is invented for them. They are withheld
-from PERSON, and with them every clinical row of theirs, while their events stay in the
-canonical layer and in MEDS. The check stays red until the data owner says what date
-those ages were measured at. `tools/prepare_cu.py` flattens the export the way
-`prepare_mimiciv.py` does, with one deliberate exception: a blood pressure delivered as
-one cell, `135/76`, becomes the two measurements OMOP records, so that step writes more
-rows than it reads and its manifest says so.
+statuses mean administered, no approximated birth years to recompute. The export dates
+each patient's age by the CT it was current at, so the year of birth is derived exactly;
+three patients have an age and no CT time, and under `person_birth_policy: strict` no
+year was invented for them: they were withheld from PERSON, and with them every clinical
+row of theirs, until the day their age was current at was established from the extract
+itself (each has a single day of vital signs, the scan day for the rest of the cohort)
+and recorded as a decision in the YAML's `open_questions`, with `tools/prepare_cu.py`
+counting the rows it dated that way. The same record holds the second question the
+delivery raised, what its readmission flags were computed against, answered by
+measurement rather than by the owner (see `docs/DECISIONS.md`). `tools/prepare_cu.py`
+flattens the export the way `prepare_mimiciv.py` does, with one deliberate exception: a
+blood pressure delivered as one cell, `135/76`, becomes the two measurements OMOP
+records, so that step writes more rows than it reads and its manifest says so.
 
 ```bash
 python tools/prepare_cu.py --cu-root .../CU_Data --out $CU_CTPA_DATA_ROOT/cu_ctpa
