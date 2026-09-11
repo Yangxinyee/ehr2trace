@@ -141,13 +141,56 @@ Tablet` and `Oral Capsule` have no drug in it with a millilitre denominator and
 `Injection` has 73%, and the gap is not close. It cost three of the confirmed mappings
 and removed a class of silent errors, which is the right trade.
 
+A second pass over every name the matcher left unresolved on the JHU-CTPE export
+(17,554 names, 2.35 million rows, 2026-09-11) found that most of what it missed was one
+of a few habits of pharmacy English, and that some of what it settled it had guessed.
+What changed, and why each is still a reading of the string rather than a weaker claim:
+
+- **route words and diluents say bag.** `IVPB`, `INFUSION`, `BOLUS FROM BAG`, `IN 0.9
+  % SODIUM CHLORIDE`, a bare `NS` or `D5W` name no dose form, but each rules out every
+  form that is not an injectable. A name carrying one and no form phrase is read as an
+  injectable, and the diluent is not part of the drug. The injectable spellings are
+  tried before `Intravenous Solution` because that is what the physician chose for
+  `CARBOPLATIN CHEMO IVPB`.
+- **a percent on an ointment is weight in weight.** RxNorm states those per gram;
+  `HYDROCORTISONE 2.5 % OINTMENT` is `hydrocortisone 25 MG/G`. The liquid reading is
+  tried first; the dose form decides.
+- **strengths agree within RxNorm's own rounding.** `LACTULOSE 20 GRAM/30 ML` is its
+  `667 MG/ML` and `ALBUTEROL 2.5 MG/3 ML` its `0.83 MG/ML`; a tolerance of 1% is what
+  that needs and no more, and the 54 JHU-CTPE names that resolve only within it were
+  read one by one.
+- **an export width is declared, not discovered.** JHU-CTPE and CU-CTPA both cut names
+  at 50 characters (`SOLUTION F`, `SUBCUTAN`); `terminology.drug_name_truncated_at`
+  says so, a name of exactly that width is read whole first, and only if that settles
+  nothing is the fragment dropped.
+- **the set of forms measured by volume had been empty.** RxNorm writes "per one
+  millilitre" with a blank denominator *value*, and the test for a liquid required the
+  value to be present, so the formless rule above had never admitted anything.
+
+And where the old rules guessed, they now abstain: a concentration that fits the drug in
+several forms with no form named (`HEPARIN 100 UNIT/ML` is a flush, a vial and an
+irrigation) was settled by the length of the concepts' names; the bag reading of
+`40 MEQ/250 ML` as `40 MEQ` matched an oral powder when nothing said bag; `300 MG
+IODINE/ML` compared against a drug mass found `Iohexol 302 MG/ML`, a different product;
+`insulin` reaches regular insulin through one national vocabulary and glargine through
+another; `BASAGLAR KWIKPEN` is filed under regular insulin while `Basaglar` is glargine;
+a dose range in parentheses (`(0-499 MG CUSTOM DOSE)`) read as a strength matched the 500
+mg product; and `insulin aspart-szjj` begins with `insulin aspart` and names a biosimilar
+the source did not. Each of these is a rule with a test, and each ends in the review
+queue rather than in a concept.
+
 Measured against the 139 drug mappings a physician had already confirmed, holding those
-mappings out so the matcher cannot short-cut them: 121 of 139 resolve, and of those,
-91.7% are the identical concept, 5.8% are the same ingredient and strength under the
-other spelling of one dose form, and 2.5% are the same ingredient under the other
-reading of a concentration. **None is a different drug and none is a different
-strength** — the failure that would matter is absent, and the 16 that do not resolve
-abstain rather than approximate.
+mappings out so the matcher cannot short-cut them: 126 of 139 resolve, and of those,
+94.4% are the identical concept, 4.8% are the same ingredient and strength under the
+other spelling of one dose form, and 0.8% (one name, a biosimilar written with no
+strength) are the same ingredient under the other reading of a concentration. **None is
+a different drug and none is a different strength** — the failure that would matter is
+absent, and the 13 that do not resolve abstain rather than approximate. Before the
+second pass the numbers were 121 of 139 and 91.7% / 5.8% / 2.5%. The eight mappings
+decided by hand on 2026-09-11 because the matcher abstains on them by design (lactated
+Ringer's, iodinated contrast stated as iodine) are held out of this set with
+`--gold-through 2026-09-10`. Over the export as a whole the pass settles 1,305 of the
+17,554 previously unresolved names, 475,777 of their 2.35 million rows.
 
 A second check reads the *concept name* — a different field, written by a different
 process from the numbers in `DRUG_STRENGTH` — re-derives a strength from it, and
@@ -167,7 +210,7 @@ Those numbers are re-derivable rather than remembered, and the tool exits non-ze
 disagreement ever turns out to be a different drug:
 
 ```bash
-python3 tools/measure_drug_match.py --vocabulary "$OMOP_VOCAB_DIR"   # -> results/drug_match.json
+python3 tools/measure_drug_match.py --vocabulary "$OMOP_VOCAB_DIR" --gold-through 2026-09-10   # -> results/drug_match.json
 ```
 
 The disagreements are classified from `DRUG_STRENGTH` rather than by reading names,
@@ -180,7 +223,8 @@ queue but is a maintenance cost. And the order in which it lists two spellings o
 dose form was calibrated against those 139 physician decisions; that is a preference
 recorded in a file a reviewer can read and change, not something derived from the data.
 
-What this does not do is replace review. Names that state no strength (`ONDANSETRON
-IVPB`), multi-ingredient solutions (`LACTATED RINGERS`), compounded infusions and
-non-drugs (`BLOOD SUGAR DIAGNOSTIC STRIPS`) all still abstain and still go to a person.
-The queue is smaller, not gone.
+What this does not do is replace review. Multi-ingredient solutions the vocabulary has
+under no name the source uses (`LACTATED RINGERS`), strengths stated as an element
+(`320 MG IODINE/ML`), names with no strength whose drug comes in several forms, parenteral
+nutrition, and non-drugs (`BLOOD SUGAR DIAGNOSTIC STRIPS`) all still abstain and still go
+to a person. The queue is smaller, not gone.

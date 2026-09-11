@@ -368,7 +368,7 @@ def test_a_concentration_that_fits_several_forms_abstains_when_no_form_was_named
 
 def test_a_route_word_reads_a_formless_name_as_the_injectable(index):
     parsed, status, matches = match_drug(index, "LORAZEPAM INFUSION 2 MG/ML")
-    assert parsed.dose_form == "INTRAVENOUS"
+    assert parsed.dose_form == "GIVEN INTRAVENOUSLY"
     assert parsed.components[0].ingredient_text == "LORAZEPAM"
     assert status == "unique" and matches[0].concept_id == 9999002
     _parsed, status, matches = match_drug(index, "LORAZEPAM BOLUS FROM BAG 2 MG/ML")
@@ -465,16 +465,16 @@ def test_the_bag_reading_needs_the_string_to_have_named_a_bag(index):
     assert [r for r, _ in _readings([ratio], formless=False)] == ["as_written", "total_amount"]
     assert [r for r, _ in _readings([ratio], formless=True)] == ["as_written"]
     parsed = parse_drug_name("LORAZEPAM 2 MG/100 ML NS")
-    assert parsed.dose_form == "INTRAVENOUS"     # the diluent says it was a bag
+    assert parsed.dose_form == "GIVEN INTRAVENOUSLY"     # the diluent says it was a bag
 
 
 def test_a_diluent_written_without_in_or_cut_short_still_says_bag():
     parsed = parse_drug_name("MORPHINE 100 MG/100 ML (1 MG/ML) 0.9% SODIUM CHLORIDE")
-    assert parsed.components[0].ingredient_text == "MORPHINE" and parsed.dose_form == "INTRAVENOUS"
+    assert parsed.components[0].ingredient_text == "MORPHINE" and parsed.dose_form == "GIVEN INTRAVENOUSLY"
     assert parsed.components[0].strength == Strength("ratio", 100.0, "mg", 100.0, "mL")
     cut = "TRANEXAMIC ACID 1,000 MG/100 ML(10 MG/ML)IN SOD CH"
     parsed = parse_drug_name(cut, truncated_at=len(cut))
-    assert parsed.components[0].ingredient_text == "TRANEXAMIC ACID" and parsed.dose_form == "INTRAVENOUS"
+    assert parsed.components[0].ingredient_text == "TRANEXAMIC ACID" and parsed.dose_form == "GIVEN INTRAVENOUSLY"
 
 
 def test_a_vein_drug_the_vocabulary_has_only_as_a_syringe_is_reached_last(index):
@@ -489,10 +489,10 @@ def test_a_percent_before_saline_is_a_diluent_only_at_a_diluent_strength():
     parsed = parse_drug_name("BUPIVACAINE 0.25% IN 250 ML NS EPIDURAL")
     assert parsed.components[0].strength == Strength("ratio", 0.25, "g", 100.0, "mL", "percent")
     parsed = parse_drug_name("MORPHINE 1 MG/ML 0.9% NS")
-    assert parsed.components[0].ingredient_text == "MORPHINE" and parsed.dose_form == "INTRAVENOUS"
+    assert parsed.components[0].ingredient_text == "MORPHINE" and parsed.dose_form == "GIVEN INTRAVENOUSLY"
     cut = "DOBUTAMINE 1,000 MG/250 ML (4,000 MCG/ML) IN 5 % D"
     parsed = parse_drug_name(cut, truncated_at=len(cut))
-    assert parsed.components[0].ingredient_text == "DOBUTAMINE" and parsed.dose_form == "INTRAVENOUS"
+    assert parsed.components[0].ingredient_text == "DOBUTAMINE" and parsed.dose_form == "GIVEN INTRAVENOUSLY"
 
 
 def test_a_strength_only_in_parentheses_is_the_strength():
@@ -502,3 +502,27 @@ def test_a_strength_only_in_parentheses_is_the_strength():
     parsed = parse_drug_name("NITROGLYCERIN 100 MG/250 ML (400 MCG/ML) D5W")
     assert parsed.components[0].ingredient_text == "NITROGLYCERIN"
     assert parsed.components[0].strength == Strength("ratio", 100.0, "mg", 250.0, "mL")
+
+
+def test_a_diluent_named_after_its_volume_is_still_the_diluent():
+    parsed = parse_drug_name("REMDESIVIR IV IN 250 ML NORMAL SALINE")
+    assert parsed.components[0].ingredient_text == "REMDESIVIR" and parsed.dose_form == "IV"
+    parsed = parse_drug_name("CISPLATIN CHEMO INFUSION IN 250 ML NS (TOTAL VOLUME)")
+    assert parsed.components[0].ingredient_text == "CISPLATIN"
+
+
+def test_saline_joined_by_and_is_an_ingredient_not_a_diluent():
+    parsed = parse_drug_name("DEXTROSE 5 % AND 0.9 % SODIUM CHLORIDE INTRAVENOUS SOLUTION")
+    assert [c.ingredient_text for c in parsed.components] == ["DEXTROSE", "SODIUM CHLORIDE"] or \
+        "SODIUM CHLORIDE" in parsed.components[-1].ingredient_text
+
+
+def test_a_half_tablet_is_a_tablet(index):
+    _parsed, status, matches = match_drug(index, "OXYCODONE 5 MG HALF-TAB")
+    assert status == "unique" and matches[0].concept_id == 1049621
+
+
+def test_a_whole_name_of_the_export_width_is_read_before_it_is_cut(index):
+    whole = "OXYCODONE 5 MG TABLET".ljust(21)          # exactly the width, cut between words
+    _parsed, status, matches = match_drug(index, "OXYCODONE 5 MG TABLET", truncated_at=21)
+    assert status == "unique" and matches[0].concept_id == 1049621 and matches[0].route == "as_written"

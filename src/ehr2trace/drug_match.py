@@ -48,7 +48,7 @@ nothing in the string says which form it was.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Sequence
 
 from .drug_lexicon import (
@@ -105,9 +105,10 @@ _DILUENT = re.compile(
 #: 0.9 %`. Only the strengths diluents come in count -- `BUPIVACAINE 0.25% NS` is
 #: bupivacaine at 0.25%, in saline.
 _DILUENT_PREFIXED = re.compile(
-    rf"\b(?:0\.9|0\.45|0\.225|5|10)\s*%\s*{_DILUENT_NAMES}(?![A-Z])", re.I)
+    rf"(?<!AND )(?<!/)(?<!/ )(?<!-)(?<!- )\b(?:0\.9|0\.45|0\.225|5|10)\s*%\s*{_DILUENT_NAMES}(?![A-Z])", re.I)
 #: "IN 50 ML" -- the volume it was diluted into, not a strength.
-_DILUENT_VOLUME = re.compile(rf"\bIN\s+{_NUM}\s*(?:ML|L)\b", re.I)
+_DILUENT_VOLUME = re.compile(
+    rf"\bIN\s+{_NUM}\s*(?:ML|L)\b(?:\s+(?:OF\s+)?(?:\d[\d.,]*\s*%\s*)?{_DILUENT_NAMES}(?![A-Z]))?", re.I)
 _NOISE_WORDS = re.compile(r"\b(?:%s)\b" % "|".join(re.escape(w) for w in NOISE_WORDS), re.I)
 
 _ELEMENT = "|".join(sorted((re.escape(e) for e in STRENGTH_ELEMENTS), key=len, reverse=True))
@@ -280,7 +281,7 @@ def _split_components(head: str) -> tuple[Component, ...] | None:
 def parse_drug_name(source: str, local_noise: Sequence[str] = (),
                     truncated_at: int | None = None) -> ParsedDrug:
     text = source.upper()
-    if truncated_at and len(source) >= truncated_at and not source[-1].isspace():
+    if truncated_at and len(source) == truncated_at and not source[-1].isspace():
         # The export cut the name at a fixed width, and whatever the cut fell on is a
         # fragment: `SOLUTION F`, `SUBCUTAN`, `(FOR EMERGENC`. An unclosed parenthesis
         # goes with what it holds; otherwise the last, partial, word goes. A name whose
@@ -303,7 +304,7 @@ def parse_drug_name(source: str, local_noise: Sequence[str] = (),
             break
     head, form = _take_dose_form(text)
     if form is None and given_intravenously:
-        form = "INTRAVENOUS"
+        form = "GIVEN INTRAVENOUSLY"
     head = re.sub(r"\s+", " ", _IV_MARKER.sub(" ", head)).strip(" ,-")
 
     shared: tuple[float, str] | None = None
@@ -803,8 +804,23 @@ def match_drug(index: DrugIndex, source: str, local_noise: Sequence[str] = (),
     ``status`` is ``unique`` only when exactly one concept satisfied a whole reading.
     Everything else -- ``ambiguous``, ``no_match``, ``no_ingredient``, ``no_dose_form``,
     ``unparsed_strength`` -- means the term is not resolved and stays in review.
+
+    A name of exactly the width the export cuts at is read whole first, since the cut
+    may have fallen between words; only when that settles nothing is the last token
+    taken for a fragment and dropped.
     """
-    parsed = parse_drug_name(source, local_noise, truncated_at)
+    parsed = parse_drug_name(source, local_noise)
+    status, matches = _match_parsed(index, parsed)
+    if status != "unique" and truncated_at and len(source) == truncated_at and not source[-1].isspace():
+        cut = parse_drug_name(source, local_noise, truncated_at)
+        if cut != parsed:
+            cut_status, cut_matches = _match_parsed(index, cut)
+            if cut_status == "unique":
+                return cut, cut_status, [replace(m, route=f"{m.route}_cut") for m in cut_matches]
+    return parsed, status, matches
+
+
+def _match_parsed(index: DrugIndex, parsed: ParsedDrug) -> tuple[str, list[DrugMatch]]:
     ingredient_sets: list[set[int]] = []
     ingredient_names: list[str] = []
     strengths: list[Strength | None] = []
@@ -812,7 +828,7 @@ def match_drug(index: DrugIndex, source: str, local_noise: Sequence[str] = (),
     for component in parsed.components:
         ids = index.ingredient_ids(component.ingredient_text)
         if not ids:
-            return parsed, "no_ingredient", []
+            return "no_ingredient", []
         if index.is_brand(component.ingredient_text) and len(ids) > 1:
             # A brand of a combination stands for all of its ingredients at once:
             # `PRIMAXIN` is cilastatin and imipenem, not one or the other. With no
@@ -820,7 +836,7 @@ def match_drug(index: DrugIndex, source: str, local_noise: Sequence[str] = (),
             # strength written for several ingredients, the string does not say which
             # it belongs to.
             if component.strength is not None:
-                return parsed, "no_ingredient", []
+                return "no_ingredient", []
             for ingredient in sorted(ids):
                 ingredient_sets.append({ingredient})
                 ingredient_names.append(component.ingredient_text.lower())
@@ -834,7 +850,7 @@ def match_drug(index: DrugIndex, source: str, local_noise: Sequence[str] = (),
 
     tiers = index.form_tiers(parsed.dose_form)
     if parsed.dose_form is not None and tiers is None:
-        return parsed, "no_dose_form", []
+        return "no_dose_form", []
     formless = tiers is None
     if tiers is None:
         # No form in the string: the strength alone has to identify the concept, so the
@@ -853,27 +869,28 @@ def match_drug(index: DrugIndex, source: str, local_noise: Sequence[str] = (),
     if not have_strength and parsed.had_number:
         # A number was written and not understood. Matching a concept that carries no
         # strength would silently drop it, so the term goes to a person instead.
-        return parsed, "unparsed_strength", []
+        return "unparsed_strength", []
     if any(s is not None and s.origin == "element" for s in strengths):
         # `300 MG IODINE/ML` is a strength in a unit the vocabulary does not use, and
         # comparing the number against a drug mass found `Iohexol 302 MG/ML` -- a
         # different product -- once strengths were compared within rounding.
-        return parsed, "unparsed_strength", []
+        return "unparsed_strength", []
 
     source_words = set(_WORD.findall(parsed.source.lower()))
-    ambiguous: list[DrugMatch] = []
-    for reading, signatures in _readings(strengths, formless):
-        if any(s is None for s in signatures):
-            continue
-        combinations = _combinations(ingredient_sets, signatures)
-        stop = False
-        for depth, step in enumerate(tiers):
-            if depth >= 2 and not have_strength:
-                # The third tier of an intravenous name is a syringe or cartridge, which
-                # only a strength can pin to a product; a bare ingredient reaching it
-                # would name a presentation the string never mentioned.
-                break
-            for alternative in step:
+    readings = [(reading, signatures, _combinations(ingredient_sets, signatures))
+                for reading, signatures in _readings(strengths, formless)
+                if not any(s is None for s in signatures)]
+    # The form the source states outranks how its strength is read: a bag written as
+    # `2 GRAM/100 ML INTRAVENOUS SOLUTION` is the intravenous solution the vocabulary
+    # files as `2000 MG` before it is the injectable solution it files as `20 MG/ML`.
+    for depth, step in enumerate(tiers):
+        if depth >= 2 and not have_strength:
+            # The third tier of an intravenous name is a syringe or cartridge, which
+            # only a strength can pin to a product; a bare ingredient reaching it
+            # would name a presentation the string never mentioned.
+            break
+        for alternative in step:
+            for reading, _signatures, combinations in readings:
                 found: set[int] = set()
                 for signature in combinations:
                     for form in alternative:
@@ -885,25 +902,15 @@ def match_drug(index: DrugIndex, source: str, local_noise: Sequence[str] = (),
                     # none: `HEPARIN 100 UNIT/ML` is a flush, a vial and an irrigation.
                     # Choosing between forms by the length of their names is not a
                     # reading of the string, so the term goes to a person instead.
-                    ambiguous = ambiguous or [DrugMatch(c, *index.concept(c), "formless")
-                                              for c in sorted(found)]
-                    stop = True
-                    break
+                    return "ambiguous", [DrugMatch(c, *index.concept(c), "formless")
+                                         for c in sorted(found)]
                 candidates = _preferred(index, sorted(found), ingredient_names, source_words)
                 route = reading if depth == 0 else f"{reading}_widened_form"
                 if via_brand:
                     route = f"{route}_via_brand"
                 matches = [DrugMatch(c, *index.concept(c), route) for c in candidates]
-                if len(matches) == 1:
-                    return parsed, "unique", matches
-                ambiguous = ambiguous or matches
-                stop = True
-                break
-            if stop:
-                break
-    if ambiguous:
-        return parsed, "ambiguous", ambiguous
-    return parsed, "no_match", []
+                return ("unique" if len(matches) == 1 else "ambiguous"), matches
+    return "no_match", []
 
 
 def _combinations(ingredient_sets: list[set[int]], signatures: list[tuple]) -> list[frozenset]:

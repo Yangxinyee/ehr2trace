@@ -115,6 +115,11 @@ DOSE_FORMS: dict[str, tuple[tuple[str, ...], ...]] = {
     # at that strength (a PCA syringe of hydromorphone) is still that drug and strength.
     "INTRAVENOUS": (("Intravenous Solution",), ("Injection", "Injectable Solution"),
                     ("Prefilled Syringe", "Cartridge")),
+    # Not a phrase a source writes: the form a route word or a diluent implies. The
+    # injectable spellings come first here because that is what the physician chose
+    # for `CARBOPLATIN CHEMO IVPB` and `FOSAPREPITANT IVPB 150 MG/150 ML NS`.
+    "GIVEN INTRAVENOUSLY": (("Injection", "Injectable Solution"), ("Intravenous Solution",),
+                            ("Prefilled Syringe", "Cartridge")),
     "IV": (("Intravenous Solution",), ("Injection", "Injectable Solution"),
            ("Prefilled Syringe", "Cartridge")),
     "SUBCUTANEOUS": (("Injectable Solution",), ("Injection",)),
@@ -319,7 +324,7 @@ NOISE_WORDS: tuple[str, ...] = (
     "IVPB", "IVP", "IV PUSH", "CHEMO", "INFUSION", "PREMIX", "PREPACK", "PCA",
     "BOLUS FROM BAG", "CASSETTE", "COMPOUNDED", "NS", "D5W", "D10W", "D5NS", "D50W", "LR",
     "VARIABLE DOSE", "CUSTOM DOSE", "RANGE DOSE", "DEFAULT", "TOTAL VOLUME",
-    "FOR INPATIENTS", "FOR ADULTS", "PER UNIT", "HALF-TAB", "STANDARD", "HFA", "MDI", "PF",
+    "FOR INPATIENTS", "FOR ADULTS", "PER UNIT", "STANDARD", "HFA", "MDI", "PF",
 )
 
 #: Words that say the drug went into a vein. None of them names a dose form, but each
