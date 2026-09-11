@@ -158,10 +158,14 @@ sources:
     event_kind: condition
     code_system: ICD10CM
     required: true
-    # Three strings in the code column are not diagnosis codes: two Epic-internal IMO
-    # identifiers and an `ERRONEOUS ENCOUNTER--DISREGARD` placeholder, 11,922 rows.
-    # Dropped by exact value (D3, 2026-09-11).
-    row_filter: {column: Diagnosis_Code, drop: ["IMO0001", "IMO0002", "ERRONEOUS ENCOUNTER--DISREGARD"]}
+    # Three strings are not diagnoses: two Epic-internal IMO identifiers sit in the code
+    # column, and an `ERRONEOUS ENCOUNTER--DISREGARD` placeholder sits in the name
+    # column with an empty code -- and an empty code takes the name as its code, so the
+    # placeholder has to be named where it actually is. 11,922 rows, dropped by exact
+    # value (D3, 2026-09-11).
+    row_filter:
+      - {column: Diagnosis_Code, drop: ["IMO0001", "IMO0002"]}
+      - {column: Diagnosis_Name, drop: ["ERRONEOUS ENCOUNTER--DISREGARD"]}
     # The recorded date is when the problem was first noted, not a disease onset.
     #
     # One cell can hold several codes -- `R78.81, B95.7, Z16.29` is three diagnoses --
@@ -207,6 +211,9 @@ sources:
     event_kind: measurement
     study_event_kind: procedure
     required: true
+    # One component is the name of the reading physician, not a result: a person's
+    # name in a measurement value, 1,136 rows. Dropped (2026-09-11).
+    row_filter: {column: Component_Name, drop: ["PHYSICIAN INTERPRETER"]}
     fields:
       person_id:      {from: [MRN, mrn], required: true}
       encounter_id:   {from: [CSN]}

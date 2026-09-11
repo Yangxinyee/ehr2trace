@@ -202,8 +202,18 @@ class SourceSpec(BaseModel):
     group_by: list[str] = Field(default_factory=list)
     #: extra columns kept verbatim in the source layer and carried as attributes
     keep_columns: list[str] = Field(default_factory=list)
-    #: restrict this source to a subset of its physical table's rows
-    row_filter: "RowFilterSpec | None" = None
+    #: restrict this source to a subset of its physical table's rows. A list names one
+    #: filter per column and a row must pass all of them: the JHU problem list carries
+    #: its placeholders in two columns (an Epic-internal identifier where the code goes,
+    #: `ERRONEOUS ENCOUNTER--DISREGARD` where the name goes), and one column cannot
+    #: name both.
+    row_filter: "RowFilterSpec | list[RowFilterSpec] | None" = None
+
+    @property
+    def row_filters(self) -> "list[RowFilterSpec]":
+        if self.row_filter is None:
+            return []
+        return list(self.row_filter) if isinstance(self.row_filter, list) else [self.row_filter]
     #: the kind varies by row: one table holding several kinds of action
     event_kind_from: "EventKindFromSpec | None" = None
     #: which values of the ``status`` role mean the drug actually reached the patient.

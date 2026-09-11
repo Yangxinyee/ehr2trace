@@ -196,3 +196,16 @@ def test_a_row_filter_may_name_values_to_drop_instead_of_keep():
     assert RowFilterSpec.model_validate({"column": "ndc", "drop": ["0", ""]}).drop == ["0", ""]
     with pytest.raises(ValueError):
         RowFilterSpec.model_validate({"column": "ndc"})
+
+
+def test_a_source_may_declare_one_row_filter_per_column():
+    from ehr2trace.config import RowFilterSpec, SourceSpec
+    one = SourceSpec.model_validate({"adapter": "parquet", "shape": "point_event", "event_kind": "condition",
+                                     "row_filter": {"column": "dx", "drop": ["IMO0001"]}})
+    several = SourceSpec.model_validate({"adapter": "parquet", "shape": "point_event", "event_kind": "condition",
+                                         "row_filter": [{"column": "dx", "drop": ["IMO0001"]},
+                                                        {"column": "name", "drop": ["placeholder"]}]})
+    assert [f.column for f in one.row_filters] == ["dx"]
+    assert [f.column for f in several.row_filters] == ["dx", "name"]
+    assert all(isinstance(f, RowFilterSpec) for f in several.row_filters)
+    assert SourceSpec.model_validate({"adapter": "parquet", "shape": "point_event", "event_kind": "condition"}).row_filters == []

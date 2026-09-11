@@ -147,29 +147,32 @@ def filter_rows(spec: SourceSpec, rows: Sequence["Row"], columns: Iterable[str])
     design forbids is that being invisible, and it is not: SOURCE_ROWS_ACCOUNTED reports
     every parsed row's destination, so rows removed here show up as a number that moved.
     """
-    rf = spec.row_filter
-    if rf is None:
+    filters = spec.row_filters
+    if not filters:
         return list(rows)
     available = {c[len(COL_PREFIX):].strip().lower(): c for c in columns if c.startswith(COL_PREFIX)}
-    column = available.get(rf.column.strip().lower())
-    if column is None:
-        # A filter naming a column the source does not have would silently keep
-        # everything, which is the opposite of what was asked for.
-        raise ValueError(
-            f"row_filter names column {rf.column!r}, which this source does not have; "
-            f"available: {sorted(available)[:20]}"
-        )
-    keep = {v.strip().lower() for v in rf.keep}
-    drop = {v.strip().lower() for v in rf.drop}
-    out = []
-    for row in rows:
-        value = row.data.get(column)
-        text = "" if value is None else str(value).strip().lower()
-        if keep and text not in keep:
-            continue
-        if text in drop:
-            continue
-        out.append(row)
+    out = list(rows)
+    for rf in filters:
+        column = available.get(rf.column.strip().lower())
+        if column is None:
+            # A filter naming a column the source does not have would silently keep
+            # everything, which is the opposite of what was asked for.
+            raise ValueError(
+                f"row_filter names column {rf.column!r}, which this source does not have; "
+                f"available: {sorted(available)[:20]}"
+            )
+        keep = {v.strip().lower() for v in rf.keep}
+        drop = {v.strip().lower() for v in rf.drop}
+        passed = []
+        for row in out:
+            value = row.data.get(column)
+            text = "" if value is None else str(value).strip().lower()
+            if keep and text not in keep:
+                continue
+            if text in drop:
+                continue
+            passed.append(row)
+        out = passed
     return out
 
 

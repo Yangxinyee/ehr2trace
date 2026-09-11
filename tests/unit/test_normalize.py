@@ -520,6 +520,27 @@ def test_row_filter_keeps_only_declared_values_case_insensitively():
     assert [r.text("source_code") for r in kept] == ["Medications", "medications"]
 
 
+def test_several_row_filters_each_name_their_own_column_and_a_row_must_pass_all():
+    """The JHU problem list: a placeholder identifier in the code column of some rows,
+    a placeholder name (with an empty code) in others. One column cannot name both."""
+    from ehr2trace.canonical.normalize import filter_rows
+
+    records = [
+        {"PID": "PID1", "dx": "I26.99", "name": "Pulmonary embolism", "t": "2024-01-01 08:00:00"},
+        {"PID": "PID1", "dx": "IMO0001", "name": "Epic internal", "t": "2024-01-01 09:00:00"},
+        {"PID": "PID1", "dx": None, "name": "ERRONEOUS ENCOUNTER--DISREGARD", "t": "2024-01-01 10:00:00"},
+    ]
+    spec = {**PROBLEMS_SPEC, "row_filter": [
+        {"column": "dx", "drop": ["IMO0001", "IMO0002"]},
+        {"column": "name", "drop": ["erroneous encounter--disregard"]},
+    ]}
+    ctx = make_ctx("problems", spec)
+    rows = make_rows(ctx, records)
+    columns = {f"{COL_PREFIX}{k}" for r in records for k in r}
+    kept = filter_rows(ctx.spec, rows, columns)
+    assert [r.text("source_code") for r in kept] == ["I26.99"]
+
+
 def test_no_row_filter_keeps_every_row():
     from ehr2trace.canonical.normalize import filter_rows
 
