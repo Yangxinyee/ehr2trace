@@ -526,3 +526,10 @@ def test_a_whole_name_of_the_export_width_is_read_before_it_is_cut(index):
     whole = "OXYCODONE 5 MG TABLET".ljust(21)          # exactly the width, cut between words
     _parsed, status, matches = match_drug(index, "OXYCODONE 5 MG TABLET", truncated_at=21)
     assert status == "unique" and matches[0].concept_id == 1049621 and matches[0].route == "as_written"
+
+
+def test_a_bag_volume_is_not_taken_from_inside_a_concentration():
+    """`40 MG/0.4 ML`: the `4 ML` inside `0.4 ML` is not a bag."""
+    parsed = parse_drug_name("ENOXAPARIN 40 MG/0.4 ML SUBCUTANEOUS SYRINGE")
+    assert parsed.components[0].ingredient_text == "ENOXAPARIN"
+    assert parsed.components[0].strength == Strength("ratio", 40.0, "mg", 0.4, "mL")

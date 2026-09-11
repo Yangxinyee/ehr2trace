@@ -86,7 +86,7 @@ _DOSE_RANGE_PARENS = re.compile(
 #: "100 ML" standing alone after the strength has been read: the bag or cassette it
 #: was made up in. A volume that belongs to a concentration follows a slash and is
 #: left where it is.
-_BARE_VOLUME = re.compile(rf"(?<!/)(?<!/ )\b{_NUM}\s*(?:ML|L)\b(?!\s*/)", re.I)
+_BARE_VOLUME = re.compile(rf"(?<![/\d.])(?<!/ )\b{_NUM}\s*(?:ML|L)\b(?!\s*/)", re.I)
 _IV_MARKER = re.compile(
     r"\b(?:%s)\b" % "|".join(re.escape(w) for w in sorted(IV_ROUTE_MARKERS, key=len, reverse=True)), re.I)
 #: "(2.5 MG BASE)" restates the salt-free strength. It is a gloss on the number before

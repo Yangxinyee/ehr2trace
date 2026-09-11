@@ -60,6 +60,8 @@ DOSE_FORMS: dict[str, tuple[tuple[str, ...], ...]] = {
     "CAPSULE,EXTENDED RELEASE 24 HR": (("24 Hour Extended Release Capsule",),
                                        ("Extended Release Oral Capsule",)),
     "CAPSULE,SPRINKLE": (("Oral Capsule",),),
+    "CAPSULE,DELAYED RELEASE SPRINKLE": (("Delayed Release Oral Capsule",),),
+    "CAPSULE,EXTENDED RELEASE PELLETS": (("Extended Release Oral Capsule",),),
     # a dose pack or starter pack is a count of ordinary tablets; the count is noise
     "TABLETS IN A DOSE PACK": (("Oral Tablet",),),
     "TABLET IN A DOSE PACK": (("Oral Tablet",),),

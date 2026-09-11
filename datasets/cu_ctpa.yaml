@@ -49,11 +49,6 @@ partitions:
     membership_label: null
     batch: "C4225"
 
-terminology:
-  # The export cuts a medication name at 50 characters (`DALTEPARIN (PORCINE) 5,000
-  # ANTI-XA UNIT/0.2 ML SUB`); the fragment is dropped rather than read (2026-09-11).
-  drug_name_truncated_at: 50
-
 sources:
 
   # -- person ---------------------------------------------------------------------

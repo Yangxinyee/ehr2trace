@@ -114,7 +114,20 @@ def source_readings(parsed):
     out = [("ratio", top[0], bottom[0], _round(top[1] / bottom[1]))]
     if strength.origin == "explicit":
         out.append(("amount", top[0], _round(top[1])))
+    if strength.origin == "percent":
+        # weight in weight, which RxNorm states per gram for an ointment or a gel
+        out.append(("ratio", "mass", "mass", _round(strength.value / 100)))
     return out
+
+
+#: The matcher compares strengths within RxNorm's own rounding (`2.5 MG/3 ML` is its
+#: `0.83 MG/ML`), and so must the audit, or it reports the rounding as a disagreement.
+TOLERANCE = 0.01
+
+
+def _agrees(reading, stated) -> bool:
+    return (len(reading) == len(stated) and reading[:-1] == stated[:-1]
+            and abs(reading[-1] - stated[-1]) <= TOLERANCE * max(abs(reading[-1]), abs(stated[-1])))
 
 
 def audit_names(index, pending: Path, noise: list[str], width: int | None = None) -> dict:
@@ -138,8 +151,7 @@ def audit_names(index, pending: Path, noise: list[str], width: int | None = None
         if not readings or stated is None:
             continue
         comparable += 1
-        if any(len(r) == len(stated) and r[:-1] == stated[:-1] and abs(r[-1] - stated[-1]) < 1e-6
-               for r in readings):
+        if any(_agrees(r, stated) for r in readings):
             agree += 1
         else:
             disagreements.append({

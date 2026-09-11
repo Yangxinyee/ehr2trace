@@ -118,8 +118,11 @@ def build_meds(cfg: DatasetConfig, layout: WorkLayout, vocabulary_dir: Path | No
     with analytic_connection(scratch, threads=HEAVY_THREADS) as con:
         con.execute(f"CREATE VIEW evt AS SELECT * FROM read_parquet('{layout.canonical_path('events')}')")
         con.execute(f"CREATE VIEW lnk AS SELECT * FROM read_parquet('{layout.canonical_path('event_source')}')")
+        # The same terminology settings as the OMOP stage, or the two layers resolve a
+        # name differently and MEDS_CONCEPTS_ARE_OMOPS says so.
         distinct, resolved = _build_term_map(
-            con, vocabulary, mappings, cfg.terminology.drug_name_noise
+            con, vocabulary, mappings, cfg.terminology.drug_name_noise,
+            cfg.terminology.drug_name_truncated_at,
         )
 
         rows_path = layout.meds_dir / "_rows.parquet"
@@ -211,7 +214,8 @@ def _refuse_to_unmap_what_omop_mapped(layout: WorkLayout, vocabulary) -> None:
 
 
 def _build_term_map(con, vocabulary, mappings: MappingRegistry,
-                    drug_name_noise: Sequence[str] = ()) -> tuple[int, int]:
+                    drug_name_noise: Sequence[str] = (),
+                    drug_name_truncated_at: int | None = None) -> tuple[int, int]:
     """Resolve each distinct source string once and keep its normalized form.
 
     The normalized form is what a source code looks like in the MEDS namespace, so it
@@ -229,7 +233,8 @@ def _build_term_map(con, vocabulary, mappings: MappingRegistry,
     terms = [
         TermRequest(r[0] or "SOURCE", r[1], r[2], r[3] or "", int(r[4])) for r in rows
     ]
-    resolved, _unresolved = resolve_terms_batch(terms, vocabulary, mappings, drug_name_noise)
+    resolved, _unresolved = resolve_terms_batch(
+        terms, vocabulary, mappings, drug_name_noise, drug_name_truncated_at)
     con.execute(
         "CREATE TABLE term_map (code_system VARCHAR, source_code VARCHAR, "
         "concept_id BIGINT, normalized VARCHAR)"

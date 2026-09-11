@@ -142,8 +142,8 @@ Tablet` and `Oral Capsule` have no drug in it with a millilitre denominator and
 and removed a class of silent errors, which is the right trade.
 
 A second pass over every name the matcher left unresolved on the JHU-CTPE export
-(17,554 names, 2.35 million rows, 2026-09-11) found that most of what it missed was one
-of a few habits of pharmacy English, and that some of what it settled it had guessed.
+(2026-09-11) found that most of what it missed was one of a few habits of pharmacy
+English, and that some of what it settled it had guessed.
 What changed, and why each is still a reading of the string rather than a weaker claim:
 
 - **route words and diluents say bag.** `IVPB`, `INFUSION`, `BOLUS FROM BAG`, `IN 0.9
@@ -159,10 +159,14 @@ What changed, and why each is still a reading of the string rather than a weaker
   `667 MG/ML` and `ALBUTEROL 2.5 MG/3 ML` its `0.83 MG/ML`; a tolerance of 1% is what
   that needs and no more, and the 54 JHU-CTPE names that resolve only within it were
   read one by one.
-- **an export width is declared, not discovered.** JHU-CTPE and CU-CTPA both cut names
-  at 50 characters (`SOLUTION F`, `SUBCUTAN`); `terminology.drug_name_truncated_at`
-  says so, a name of exactly that width is read whole first, and only if that settles
-  nothing is the fragment dropped.
+- **an export width is declared, not discovered.** An export that cuts names at a
+  fixed width can say so (`terminology.drug_name_truncated_at`); a name of exactly that
+  width is read whole first, and only if that settles nothing is the fragment dropped.
+  Neither private export does: the fragments this rule was written for (`SOLUTION F`,
+  `SUBCUTAN`) were read off OMOP's `drug_source_value`, which the CDM caps at 50
+  characters, while the matcher reads the canonical event's whole name. The
+  declarations were withdrawn once that was seen; the rule stays for an export that
+  needs it.
 - **the set of forms measured by volume had been empty.** RxNorm writes "per one
   millilitre" with a blank denominator *value*, and the test for a liquid required the
   value to be present, so the formless rule above had never admitted anything.
@@ -180,22 +184,24 @@ the source did not. Each of these is a rule with a test, and each ends in the re
 queue rather than in a concept.
 
 Measured against the 139 drug mappings a physician had already confirmed, holding those
-mappings out so the matcher cannot short-cut them: 126 of 139 resolve, and of those,
-94.4% are the identical concept, 4.8% are the same ingredient and strength under the
+mappings out so the matcher cannot short-cut them: 127 of 139 resolve, and of those,
+93.7% are the identical concept, 5.5% are the same ingredient and strength under the
 other spelling of one dose form, and 0.8% (one name, a biosimilar written with no
 strength) are the same ingredient under the other reading of a concentration. **None is
 a different drug and none is a different strength** — the failure that would matter is
-absent, and the 13 that do not resolve abstain rather than approximate. Before the
+absent, and the 12 that do not resolve abstain rather than approximate. Before the
 second pass the numbers were 121 of 139 and 91.7% / 5.8% / 2.5%. The eight mappings
 decided by hand on 2026-09-11 because the matcher abstains on them by design (lactated
 Ringer's, iodinated contrast stated as iodine) are held out of this set with
-`--gold-through 2026-09-10`. Over the export as a whole the pass settles 1,305 of the
-17,554 previously unresolved names, 475,777 of their 2.35 million rows.
+`--gold-through 2026-09-10`. Over the export's original queue of 26,629 medication
+names the pass settles 9,403 (8.60 million rows), where the first pass settled 6,950.
 
 A second check reads the *concept name* — a different field, written by a different
 process from the numbers in `DRUG_STRENGTH` — re-derives a strength from it, and
-compares that with the source string. Over the 6,950 names the pass settles on this
-export, 5,923 are comparable that way and **none disagrees**.
+compares that with the source string, reading a percent both ways and allowing the same
+1% the matcher allows. Over the 9,403 names the pass settles on this export's original
+queue of 26,629 (8.60 million rows), 8,246 are comparable that way and **none
+disagrees**. Before the second pass it settled 6,950, with 5,923 comparable.
 
 It found one, and the fix is worth recording because it is the same mistake twice. A
 denominator is not always a volume: an inhaler is dosed per actuation and a patch per

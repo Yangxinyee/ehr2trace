@@ -75,10 +75,6 @@ terminology:
     - BEACON
     - PANEL
     - TEMPLATE
-  # The export cuts a medication name at 50 characters: `ALBUTEROL SULFATE 2.5 MG/3 ML
-  # (0.083 %) SOLUTION F` is what a name of that width looks like, and the fragment
-  # is dropped rather than read (2026-09-11).
-  drug_name_truncated_at: 50
 
 sources:
 
