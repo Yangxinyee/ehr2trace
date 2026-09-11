@@ -77,6 +77,14 @@ CONCEPTS = "".join([
     "9999225\tlorazepam / oxycodone Injectable Solution\tDrug\tRxNorm\tClinical Drug Form\tS\t9999225\t19700101\t20991231\t\n",
     "9999226\tRoxicodone Kwikpen\tDrug\tRxNorm Extension\tBrand Name\t\t9999226\t19700101\t20991231\t\n",
     "9999227\tlorazepam 2 MG/ML Injection [Roxicodone Kwikpen]\tDrug\tRxNorm Extension\tBranded Drug\tS\t9999227\t19700101\t20991231\t\n",
+    # a second product of the Roxicodone brand under another single ingredient id, and
+    # the salt-carrying spelling of an ingredient the source writes without its salt
+    "9999228\tlorazepam 2 MG/ML Injection [Roxicodone]\tDrug\tRxNorm\tBranded Drug\tS\t9999228\t19700101\t20991231\t\n",
+    "9999230\theparin sodium, porcine\tDrug\tRxNorm\tIngredient\tS\t9999230\t19700101\t20991231\t\n",
+    "9999231\theparin\tDrug\tRxNorm\tIngredient\tS\t9999231\t19700101\t20991231\t\n",
+    "9999232\theparin sodium, porcine 100 UNT/ML Injection\tDrug\tRxNorm\tClinical Drug\tS\t9999232\t19700101\t20991231\t\n",
+    "9999233\theparin 100 UNT/ML Injection\tDrug\tRxNorm\tClinical Drug\tS\t9999233\t19700101\t20991231\t\n",
+    "8510\tunit\tUnit\tUCUM\tUnit\tS\t[U]\t19700101\t20991231\t\n",
     "9999211\thydrocortisone 25 MG/G Topical Ointment\tDrug\tRxNorm\tClinical Drug\tS\t9999211\t19700101\t20991231\t\n",
     "9999212\talbuterol 0.83 MG/ML Inhalation Solution\tDrug\tRxNorm\tClinical Drug\tS\t9999212\t19700101\t20991231\t\n",
     "9999213\tlorazepam 2 MG/ML Irrigation Solution\tDrug\tRxNorm\tClinical Drug\tS\t9999213\t19700101\t20991231\t\n",
@@ -104,6 +112,9 @@ STRENGTHS = "".join([
     "9999225\t1112807\t\t\t\t\t\t\t\t19700101\t20991231\t\n",
     "9999225\t1124957\t\t\t\t\t\t\t\t19700101\t20991231\t\n",
     "9999227\t1112807\t\t\t2\t8576\t\t8587\t\t19700101\t20991231\t\n",
+    "9999228\t1112807\t\t\t2\t8576\t\t8587\t\t19700101\t20991231\t\n",
+    "9999232\t9999230\t\t\t100\t8510\t\t8587\t\t19700101\t20991231\t\n",
+    "9999233\t9999231\t\t\t100\t8510\t\t8587\t\t19700101\t20991231\t\n",
 ])
 RELATIONSHIPS = "".join([
     "1049621\t19082573\tRxNorm has dose form\t19700101\t20991231\t\n",
@@ -128,6 +139,10 @@ RELATIONSHIPS = "".join([
     "9999225\t19082103\tRxNorm has dose form\t19700101\t20991231\t\n",
     "9999226\t9999227\tBrand name of\t19700101\t20991231\t\n",
     "9999227\t46234469\tRxNorm has dose form\t19700101\t20991231\t\n",
+    "9999100\t9999228\tBrand name of\t19700101\t20991231\t\n",
+    "9999228\t46234469\tRxNorm has dose form\t19700101\t20991231\t\n",
+    "9999232\t46234469\tRxNorm has dose form\t19700101\t20991231\t\n",
+    "9999233\t46234469\tRxNorm has dose form\t19700101\t20991231\t\n",
 ])
 
 
@@ -533,3 +548,19 @@ def test_a_bag_volume_is_not_taken_from_inside_a_concentration():
     parsed = parse_drug_name("ENOXAPARIN 40 MG/0.4 ML SUBCUTANEOUS SYRINGE")
     assert parsed.components[0].ingredient_text == "ENOXAPARIN"
     assert parsed.components[0].strength == Strength("ratio", 40.0, "mg", 0.4, "mL")
+
+
+def test_a_brand_of_single_ingredient_products_is_not_a_combination(index):
+    """Roxicodone is the brand of an oxycodone tablet and, in the fixture, of a lorazepam
+    injection: two ingredients across products, none of them a combination."""
+    assert index.combination_of("ROXICODONE") is None
+    _parsed, status, matches = match_drug(index, "ROXICODONE 5 MG TABLET")
+    assert status == "unique" and matches[0].concept_id == 1049621
+
+
+def test_an_ingredient_written_without_its_salt_reaches_the_salted_spelling(index):
+    assert index.ingredient_ids("HEPARIN, PORCINE") == {9999230}
+    _parsed, status, matches = match_drug(index, "HEPARIN (PORCINE) 25,000 UNIT/250 ML (100 UNIT/ML) IN DEXTROSE 5 % IV")
+    assert status == "unique" and matches[0].concept_id == 9999232
+    parsed = parse_drug_name("HEPARIN (PORCINE) 25,000 UNIT/250 ML (100 UNIT/ML) IN DEXTROSE 5 % IV")
+    assert parsed.components[0].ingredient_text == "HEPARIN, PORCINE" and parsed.dose_form == "IV"

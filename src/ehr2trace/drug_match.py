@@ -99,7 +99,7 @@ _DILUENT_NAMES = (
 #: "IN 0.9 % SODIUM CHLORIDE", and the same cut short to "IN 5 %": a percent after
 #: `IN` is a diluent's, whatever followed it.
 _DILUENT = re.compile(
-    rf"\bIN\s+(?:STERILE\s+)?(?:\d[\d.,]*\s*%(?:\s*{_DILUENT_NAMES})?|{_DILUENT_NAMES})(?![A-Z])", re.I)
+    rf"\bIN\s+(?:STERILE\s+)?(?:\d[\d.,]*\s*%(?:\s*{_DILUENT_NAMES})?|{_DILUENT_NAMES}(?:\s*\d[\d.,]*\s*%)?)(?![A-Z])", re.I)
 #: "0.9% SODIUM CHLORIDE" after the strength, with no `IN`: the percent in front of the
 #: name is how a bag is written, where the drug itself is written `SODIUM CHLORIDE
 #: 0.9 %`. Only the strengths diluents come in count -- `BUPIVACAINE 0.25% NS` is
@@ -392,6 +392,8 @@ class DrugIndex:
         self._ingredients: dict[str, tuple[set[int], int]] = {}
         #: brand name -> the ingredients of every product it is the brand name of
         self._brands: dict[str, set[int]] = {}
+        #: brand name -> the ingredient set of each product it is the brand name of
+        self._brand_products: dict[str, set[frozenset[int]]] = {}
         self._forms: dict[str, set[int]] = {}
         #: (ingredients with the *kind* of each strength, dose form) -> the drugs of that
         #: shape, each with its strength values. Values are compared on lookup, within
@@ -456,8 +458,10 @@ class DrugIndex:
         # apixaban 5 MG Oral Tablet, which is the clinical drug it is. This is not a
         # third spelling of an ingredient: it is only consulted when no ingredient
         # spelling fits, and a match that went through it says so in its route.
-        for name, concept_id in con.execute("""
-            SELECT DISTINCT lower(trim(b.concept_name)), CAST(d.ingredient_concept_id AS BIGINT)
+        per_product: dict[tuple[str, int], set[int]] = {}
+        for name, product, concept_id in con.execute("""
+            SELECT DISTINCT lower(trim(b.concept_name)), CAST(r.concept_id_2 AS BIGINT),
+                   CAST(d.ingredient_concept_id AS BIGINT)
             FROM CONCEPT b
             JOIN CONCEPT_RELATIONSHIP r
               ON r.concept_id_1 = b.concept_id AND r.relationship_id = 'Brand name of'
@@ -471,6 +475,9 @@ class DrugIndex:
         """).fetchall():
             if name not in self._ingredients:
                 self._brands.setdefault(name, set()).add(int(concept_id))
+                per_product.setdefault((name, int(product)), set()).add(int(concept_id))
+        for (name, _product), ingredients in per_product.items():
+            self._brand_products.setdefault(name, set()).add(frozenset(ingredients))
         for name in self._ingredients:
             first = name.split()[0].rstrip(",") if name.split() else ""
             self._by_first_word.setdefault(first, []).append(name)
@@ -577,6 +584,20 @@ class DrugIndex:
                 return None
         return set(found)
 
+    def combination_of(self, text: str) -> set[int] | None:
+        """The ingredients of a brand of a combination product, or None.
+
+        `PRIMAXIN` is the brand of products that each list cilastatin and imipenem;
+        `PRADAXA` is the brand of products that list one ingredient apiece, under two
+        ids the vocabulary files it as. Only the first is a combination. A brand whose
+        combination products disagree about their ingredients is not read.
+        """
+        name = " ".join(text.strip().lower().split())
+        combinations = {s for s in self._brand_products.get(name, ()) if len(s) > 1}
+        if not combinations:
+            return None
+        return set(next(iter(combinations))) if len(combinations) == 1 else set()
+
     def ingredient_ids(self, text: str) -> set[int] | None:
         """Resolve an ingredient name, most specific spelling first.
 
@@ -597,10 +618,22 @@ class DrugIndex:
                 # Falling back this far would drop a word the source wrote while the
                 # vocabulary has a concept that keeps it: `HEPARIN (PORCINE)` would
                 # become plain `heparin` even though `heparin sodium, porcine` exists.
-                # Losing that is not a match, so the term goes to a person instead.
-                return None
+                # Losing that is not a match -- but when exactly one such concept
+                # differs from the source by nothing but a salt word, it is the concept
+                # the source named, spelled without its salt.
+                with_salt = self._with_salt(candidate, name)
+                return set(self._ingredients[with_salt][0]) if with_salt else None
             return found[0]
         return self.brand_ingredients(name)
+
+    def _with_salt(self, base: str, full: str) -> str | None:
+        source = set(re.split(r"[,\s]+", full)) - {""}
+        keys = []
+        for key in self._by_first_word.get(base.split()[0], ()):
+            tokens = set(re.split(r"[,\s]+", key)) - {""}
+            if source <= tokens and (tokens - source) and (tokens - source) <= _SALT_WORDS:
+                keys.append(key)
+        return keys[0] if len(keys) == 1 else None
 
     def _more_specific_exists(self, base: str, full: str) -> bool:
         dropped = [w for w in re.split(r"[,\s]+", full) if w and w not in base.split()]
@@ -747,6 +780,9 @@ def _readings(strengths: Sequence[Strength | None], formless: bool) -> list[tupl
 
 
 _WORD = re.compile(r"[a-z]{3,}")
+#: The words a vocabulary name may carry that a source name leaves out and still name
+#: the same ingredient: `heparin sodium, porcine` for `HEPARIN (PORCINE)`.
+_SALT_WORDS = {w.lower() for w in SALT_SUFFIXES} | {"sodium", "potassium", "calcium", "magnesium"}
 
 
 def _names_plainly(concept_name: str, ingredient: str) -> bool:
@@ -829,15 +865,16 @@ def _match_parsed(index: DrugIndex, parsed: ParsedDrug) -> tuple[str, list[DrugM
         ids = index.ingredient_ids(component.ingredient_text)
         if not ids:
             return "no_ingredient", []
-        if index.is_brand(component.ingredient_text) and len(ids) > 1:
+        combination = index.combination_of(component.ingredient_text) if index.is_brand(component.ingredient_text) else None
+        if combination is not None:
             # A brand of a combination stands for all of its ingredients at once:
             # `PRIMAXIN` is cilastatin and imipenem, not one or the other. With no
             # strength written, that is one component per ingredient; with one
             # strength written for several ingredients, the string does not say which
             # it belongs to.
-            if component.strength is not None:
+            if component.strength is not None or not combination:
                 return "no_ingredient", []
-            for ingredient in sorted(ids):
+            for ingredient in sorted(combination):
                 ingredient_sets.append({ingredient})
                 ingredient_names.append(component.ingredient_text.lower())
                 strengths.append(None)

@@ -167,6 +167,11 @@ What changed, and why each is still a reading of the string rather than a weaker
   characters, while the matcher reads the canonical event's whole name. The
   declarations were withdrawn once that was seen; the rule stays for an export that
   needs it.
+- **a salt the source left out.** `HEPARIN (PORCINE)` is RxNorm's `heparin sodium,
+  porcine`; the rule that refused plain `heparin` while that concept existed now takes
+  the concept instead, when exactly one differs from the source by salt words alone.
+- **a brand is a combination only if one of its products is.** `PRIMAXIN` expands to
+  cilastatin and imipenem; `PRADAXA`, filed under two ids for one ingredient, does not.
 - **the set of forms measured by volume had been empty.** RxNorm writes "per one
   millilitre" with a blank denominator *value*, and the test for a liquid required the
   value to be present, so the formless rule above had never admitted anything.
@@ -194,13 +199,13 @@ second pass the numbers were 121 of 139 and 91.7% / 5.8% / 2.5%. The eight mappi
 decided by hand on 2026-09-11 because the matcher abstains on them by design (lactated
 Ringer's, iodinated contrast stated as iodine) are held out of this set with
 `--gold-through 2026-09-10`. Over the export's original queue of 26,629 medication
-names the pass settles 9,403 (8.60 million rows), where the first pass settled 6,950.
+names the pass settles 9,574 (8.62 million rows), where the first pass settled 6,950.
 
 A second check reads the *concept name* — a different field, written by a different
 process from the numbers in `DRUG_STRENGTH` — re-derives a strength from it, and
 compares that with the source string, reading a percent both ways and allowing the same
-1% the matcher allows. Over the 9,403 names the pass settles on this export's original
-queue of 26,629 (8.60 million rows), 8,246 are comparable that way and **none
+1% the matcher allows. Over the 9,574 names the pass settles on this export's original
+queue of 26,629 (8.62 million rows), 8,403 are comparable that way and **none
 disagrees**. Before the second pass it settled 6,950, with 5,923 comparable.
 
 It found one, and the fix is worth recording because it is the same mistake twice. A
