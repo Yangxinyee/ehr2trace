@@ -361,6 +361,10 @@ class OmopSpec(BaseModel):
     #: declared by whoever publishes rather than invented at build time.
     cdm_holder: str | None = None
     source_release_date: str | None = None
+    #: CDM_SOURCE.cdm_release_date. Left null it is the day the build ran, which is the
+    #: one wall-clock value in the published tables and the one table two builds of the
+    #: same inputs disagree on. Declared, the build is reproducible to the byte.
+    cdm_release_date: str | None = None
 
 
 class TerminologySpec(BaseModel):

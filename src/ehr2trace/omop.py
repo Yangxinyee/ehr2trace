@@ -999,7 +999,9 @@ def _publish_cdm_source(con, cfg: DatasetConfig, vocabulary) -> int:
             datetime.strptime(cfg.omop.source_release_date, "%Y-%m-%d").date()
             if cfg.omop.source_release_date
             else date.today(),
-            date.today(),
+            datetime.strptime(cfg.omop.cdm_release_date, "%Y-%m-%d").date()
+            if cfg.omop.cdm_release_date
+            else date.today(),
             cfg.omop.cdm_version,
             0,
             (vocabulary.version or "none")[:20],
