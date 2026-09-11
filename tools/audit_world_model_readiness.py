@@ -34,7 +34,7 @@ def main():
            'repository_head':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
            'implementation_sha256':{str(p.relative_to(ROOT)):sha(p) for p in [ROOT/'src/ehr2trace/schema.py',ROOT/'src/ehr2trace/meds.py',ROOT/'src/ehr2trace/canonical/normalize.py',ROOT/'tools/prepare_mimiciv.py',Path(__file__)]},
            'datasets':{}}
-    for name in ('ctpe','mimiciv'):
+    for name in ('ctpe','mimiciv','cu_ctpa'):
         root = args.work_root/name
         canonical = root/'canonical/events.parquet'
         schema = pq.read_schema(canonical)
