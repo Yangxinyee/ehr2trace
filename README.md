@@ -245,8 +245,8 @@ A hospital writes `OXYCODONE 5 MG TABLET`, and the vocabulary says the same thre
 about `oxycodone hydrochloride 5 MG Oral Tablet` -- with the strength as a *number* in
 `DRUG_STRENGTH`. So `ehr2trace.drug_match` matches by ingredient, strength and dose form
 rather than by text similarity, deterministically and only when exactly one standard
-concept fits all three. On this export that settles 9,403 of 26,629 medication names and
-takes drug coverage from 23.7% to 86.1%; measured against 139 mappings a physician had
+concept fits all three. On this export that settles 9,574 of 26,629 medication names and
+takes drug coverage from 23.7% to 86.3%; measured against 139 mappings a physician had
 already confirmed, it reproduces 93.7% of them exactly and the rest as the same drug at
 the same strength under another spelling, with no case of a different drug. The names it
 cannot settle -- compounded infusions, multi-ingredient solutions the vocabulary has under
