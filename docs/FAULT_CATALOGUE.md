@@ -38,7 +38,7 @@ the anchors, the identities, or the MEDS shards, above or beside the target sche
 
 Detection is also not the same as being able to act on it. Comparing each mutated clone
 against the tree it was cloned from establishes which artifacts a fault actually damaged;
-a firing check localises the fault if it names one of them. Sixteen of nineteen do.
+a firing check localises the fault if it names one of them. Fifteen of nineteen do.
 
 Both numbers come from the identical harness; the "before" figure is measured by
 ignoring the four new check ids, not by checking out an older revision, so nothing else
