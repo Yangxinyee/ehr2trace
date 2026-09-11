@@ -233,9 +233,34 @@ def build(mimic: Path, ed: Path | None, note: Path | None, out: Path) -> dict:
 
     # omr carries a date but no time -- the untimed-measurement path, on public data.
     if p.view("omr", hosp / "omr.csv.gz"):
+        # A blood pressure arrives as one cell, `120/80`, and OMOP records systolic and
+        # diastolic as two measurements. As with the CU export, only rows whose name
+        # says blood pressure and whose value is exactly `N/N` are divided; anything
+        # else is carried through untouched. The unit is the one the result name
+        # states, and a bare `Weight` or `Height` states none.
         p.emit(
             "omr",
-            "SELECT subject_id, chartdate, seq_num, result_name, result_value FROM omr",
+            """
+            WITH o AS (
+              SELECT subject_id, chartdate, seq_num, result_name, result_value FROM omr
+            ), bp AS (
+              SELECT *, result_name LIKE 'Blood Pressure%'
+                        AND regexp_matches(result_value, '^[0-9]+/[0-9]+$') AS splittable
+              FROM o
+            )
+            SELECT subject_id, chartdate, seq_num, result_name, result_value,
+                   CASE result_name WHEN 'Weight (Lbs)' THEN 'lb' WHEN 'Height (Inches)' THEN 'in'
+                                    WHEN 'BMI (kg/m2)' THEN 'kg/m2' END AS unit
+              FROM bp WHERE NOT splittable
+            UNION ALL
+            SELECT subject_id, chartdate, seq_num, result_name || ' systolic',
+                   split_part(result_value, '/', 1), 'mmHg'
+              FROM bp WHERE splittable
+            UNION ALL
+            SELECT subject_id, chartdate, seq_num, result_name || ' diastolic',
+                   split_part(result_value, '/', 2), 'mmHg'
+              FROM bp WHERE splittable
+            """,
             "omr",
         )
 

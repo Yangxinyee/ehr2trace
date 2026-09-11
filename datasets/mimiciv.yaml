@@ -168,13 +168,32 @@ sources:
       source_name:     {from: [long_title]}
       sequence_number: {from: [seq_num]}
 
-  ed_diagnosis:
+  # One physical table, two code systems: `icd_version` says which. Declared as SOURCE,
+  # 899,050 ED diagnoses resolved to nothing, because a code system is what a lookup is
+  # keyed on and SOURCE names none. Same split the hospital diagnoses already have.
+  ed_diagnosis_icd9:
     adapter: parquet
     file_glob: "ed_diagnosis.parquet"
     shape: point_event
     event_kind: condition
-    code_system: SOURCE
+    code_system: ICD9CM
     required: false
+    row_filter: {column: icd_version, keep: ["9"]}
+    fields:
+      person_id:       {from: [subject_id], required: true}
+      event_time:      {from: [stay_outtime], required: true}
+      source_code:     {from: [icd_code], required: true}
+      source_name:     {from: [icd_title]}
+      sequence_number: {from: [seq_num]}
+
+  ed_diagnosis_icd10:
+    adapter: parquet
+    file_glob: "ed_diagnosis.parquet"
+    shape: point_event
+    event_kind: condition
+    code_system: ICD10CM
+    required: false
+    row_filter: {column: icd_version, keep: ["10"]}
     fields:
       person_id:       {from: [subject_id], required: true}
       event_time:      {from: [stay_outtime], required: true}
@@ -222,6 +241,10 @@ sources:
     code_system: SOURCE
     value_expect: auto
     required: true
+    # Three items -- labelled only H, L and I, 2.66 million rows each -- carry `___`
+    # or `-` in every row: the value was masked in the source. A masked value is not a
+    # measurement, and the rows would otherwise be the largest unmapped block here.
+    row_filter: {column: itemid, drop: ["50934", "51678", "50947"]}
     # charttime is when the specimen was taken; storetime is when the result became
     # visible. Keeping them apart is the whole point of available_time: without it a
     # model reads a potassium result hours before the lab reported it.
@@ -276,6 +299,10 @@ sources:
 
   # omr carries a date and no time; triage carries neither. Both go down the untimed
   # path -- quarantined with a reason rather than dated by guesswork.
+  # Outpatient vitals and anthropometrics. `Blood Pressure` arrives as one `120/80`
+  # cell and is divided into the two measurements OMOP records by prepare_mimiciv.py,
+  # the same way and for the same reason as the CU export; the unit the result name
+  # states (`Weight (Lbs)`, `Height (Inches)`) is projected into a column there too.
   omr:
     adapter: parquet
     file_glob: "omr.parquet"
@@ -289,6 +316,7 @@ sources:
       source_code:     {from: [result_name], required: true}
       source_name:     {from: [result_name]}
       value:           {from: [result_value]}
+      unit:            {from: [unit]}
       sequence_number: {from: [seq_num]}
 
   ed_triage:
@@ -314,30 +342,46 @@ sources:
   # -- medications ----------------------------------------------------------------
   # Orders and administrations stay separate, as in the reference export: a prescribed
   # drug and a given drug are different facts about a patient.
+  # One table, two ways of naming a drug. 17,740,530 rows carry an 11-digit NDC in
+  # exactly the form OMOP stores it; 2,552,081 carry `0` or nothing. A fallback of
+  # `source_code: [ndc, drug]` filed those rows' drug *names* under the NDC code system,
+  # where 3,760 of them resolved to nothing, because a name is not an NDC and the code
+  # system is a property of the source. The rows without a code are their own source
+  # now, named in the SOURCE system, where the structured drug reading gets to see them.
   prescriptions:
     adapter: parquet
     file_glob: "prescriptions.parquet"
     shape: point_event
     event_kind: drug_order
-    # NDC, not the free-text drug name. The name maps to nothing: the batch resolver
-    # looks a term up by code and by code-ignoring-punctuation, never by concept name,
-    # so `sodium chloride 0.9% flush` was never going to meet RxNorm. 17,740,530 of
-    # 20,292,611 rows (87.4%) carry an 11-digit NDC in exactly the form OMOP stores it,
-    # and 11,962,831 of them reach a Drug-domain standard concept -- measured against
-    # the installed vocabulary before this line was changed, not assumed.
-    #
-    # The 12.6% with no NDC fall back to the drug name. Those rows are then labelled
-    # NDC and will not resolve, which is the honest cost of a code system being a
-    # property of the source rather than of the row: they mapped to nothing before this
-    # change too, so nothing is lost, and their source string is preserved for review.
     code_system: NDC
     required: false
+    row_filter: {column: ndc, drop: ["0", ""]}
     fields:
       person_id:    {from: [subject_id], required: true}
       encounter_id: {from: [hadm_id]}
       event_time:   {from: [starttime], required: true}
       end_time:     {from: [stoptime]}
-      source_code:  {from: [ndc, drug], required: true}
+      source_code:  {from: [ndc], required: true}
+      source_name:  {from: [drug, prod_strength]}
+      dose:         {from: [dose_val_rx]}
+      unit:         {from: [dose_unit_rx]}
+      route:        {from: [route]}
+      caused_by:    {from: [poe_id]}
+
+  prescriptions_named:
+    adapter: parquet
+    file_glob: "prescriptions.parquet"
+    shape: point_event
+    event_kind: drug_order
+    code_system: SOURCE
+    required: false
+    row_filter: {column: ndc, keep: ["0", ""]}
+    fields:
+      person_id:    {from: [subject_id], required: true}
+      encounter_id: {from: [hadm_id]}
+      event_time:   {from: [starttime], required: true}
+      end_time:     {from: [stoptime]}
+      source_code:  {from: [drug], required: true}
       source_name:  {from: [drug, prod_strength]}
       dose:         {from: [dose_val_rx]}
       unit:         {from: [dose_unit_rx]}
@@ -434,22 +478,17 @@ sources:
     # Provider order entry covers every order type, not only drugs, and declaring the
     # whole table as drug_order made 28,915,531 of its 52,211,309 rows (55.4%) assert
     # something untrue: a radiology order, a consult and an ADT order are not drugs.
-    # Harmless only while nothing in the drug domain mapped; the moment RxNorm or NDC
-    # lookup works, a chest CT becomes a DRUG_EXPOSURE row.
+    # Filtering to medications would discard those rows, and for a model of a
+    # clinician's decisions ordering a chest CT or requesting a consult is exactly the
+    # kind of action such a model has to produce.
     #
-    # Filtering to medications answered that by discarding the other 28,916,331 rows.
-    # For a model of a clinician's decisions those are not metadata: ordering a chest CT
-    # or requesting a consult is exactly the kind of action such a model has to produce,
-    # and the result arriving later from its own table is not the same fact as the
-    # decision to ask for it.
-    #
-    # So the kind is read per row instead. Anything the map does not name becomes a
-    # generic service order rather than disappearing, which is what makes a new order
-    # type in a future release show up as an unmapped kind instead of a smaller count.
-    event_kind_from:
-      column: order_type
-      map: {Medications: drug_order}
-      default: service_order
+    # The `Medications` rows are not drug orders either. A row names no drug --
+    # 23,295,778 of them, none with a name -- and 14,830,046 are the same decision as a
+    # prescriptions row that does name it, joined by `caused_by`. Reading them as
+    # drug_order published a drug exposure with nothing in it beside one with a drug in
+    # it. So every order type is what it is: the decision to order, with the type kept
+    # as the source code, and what was ordered lives in the table that says.
+    event_kind: service_order
     fields:
       person_id:       {from: [subject_id], required: true}
       encounter_id:    {from: [hadm_id]}
