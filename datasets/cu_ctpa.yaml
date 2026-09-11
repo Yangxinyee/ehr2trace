@@ -49,6 +49,14 @@ partitions:
     membership_label: null
     batch: "C4225"
 
+terminology:
+  # Site markers this export writes inside a medication name: `(SUPER MED)` and
+  # `(PVHS)` name the site that dispensed, not the drug. Left in the string they
+  # stop the ingredient from being recognised (2026-09-11).
+  drug_name_noise:
+    - SUPER MED
+    - PVHS
+
 sources:
 
   # -- person ---------------------------------------------------------------------
