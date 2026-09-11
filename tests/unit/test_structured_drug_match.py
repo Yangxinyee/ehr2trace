@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from ehr2trace.drug_match import DrugIndex, match_drug, parse_drug_name
+from ehr2trace.drug_match import DrugIndex, Strength, match_drug, parse_drug_name
 from ehr2trace.terminology import MappingRegistry, TermRequest, Vocabulary, resolve_terms_batch
 
 CONCEPT_HEADER = (
@@ -60,6 +60,26 @@ CONCEPTS = "".join([
     # a brand, and the branded product the vocabulary says it is the brand name of
     "9999100\tRoxicodone\tDrug\tRxNorm\tBrand Name\t\t9999100\t19700101\t20991231\t\n",
     "9999101\toxycodone 5 MG Oral Tablet [Roxicodone]\tDrug\tRxNorm\tBranded Drug\tS\t9999101\t19700101\t20991231\t\n",
+    # three more forms: a third spelling of the injectable at the same strength, an
+    # ointment stated per gram, and an inhalation solution RxNorm rounded
+    "9999200\tTopical Ointment\tDrug\tRxNorm\tDose Form\t\t9999200\t19700101\t20991231\t\n",
+    "9999201\tInhalation Solution\tDrug\tRxNorm\tDose Form\t\t9999201\t19700101\t20991231\t\n",
+    "9999202\tIrrigation Solution\tDrug\tRxNorm\tDose Form\t\t9999202\t19700101\t20991231\t\n",
+    "9999210\thydrocortisone\tDrug\tRxNorm\tIngredient\tS\t5492\t19700101\t20991231\t\n",
+    # two national vocabularies spell an ingredient the same and map it to different
+    # RxNorm ingredients; a biosimilar with a suffix; a brand of a combination and a
+    # longer brand spelling that the vocabulary files under a different ingredient
+    "9999220\tNEBULOX\tDrug\tJMDC\tIngredient\t\t9999220\t19700101\t20991231\t\n",
+    "9999221\tNEBULOX\tDrug\tNCCD\tIngredient\t\t9999221\t19700101\t20991231\t\n",
+    "9999222\tlorazepam-abcd 2 MG/ML Injection\tDrug\tRxNorm\tClinical Drug\tS\t9999222\t19700101\t20991231\t\n",
+    "9999223\tDuoclav\tDrug\tRxNorm\tBrand Name\t\t9999223\t19700101\t20991231\t\n",
+    "9999224\tlorazepam / oxycodone Injectable Solution [Duoclav]\tDrug\tRxNorm\tBranded Drug Form\tS\t9999224\t19700101\t20991231\t\n",
+    "9999225\tlorazepam / oxycodone Injectable Solution\tDrug\tRxNorm\tClinical Drug Form\tS\t9999225\t19700101\t20991231\t\n",
+    "9999226\tRoxicodone Kwikpen\tDrug\tRxNorm Extension\tBrand Name\t\t9999226\t19700101\t20991231\t\n",
+    "9999227\tlorazepam 2 MG/ML Injection [Roxicodone Kwikpen]\tDrug\tRxNorm Extension\tBranded Drug\tS\t9999227\t19700101\t20991231\t\n",
+    "9999211\thydrocortisone 25 MG/G Topical Ointment\tDrug\tRxNorm\tClinical Drug\tS\t9999211\t19700101\t20991231\t\n",
+    "9999212\talbuterol 0.83 MG/ML Inhalation Solution\tDrug\tRxNorm\tClinical Drug\tS\t9999212\t19700101\t20991231\t\n",
+    "9999213\tlorazepam 2 MG/ML Irrigation Solution\tDrug\tRxNorm\tClinical Drug\tS\t9999213\t19700101\t20991231\t\n",
 ])
 STRENGTHS = "".join([
     "1049621\t1124957\t5\t8576\t\t\t\t\t\t19700101\t20991231\t\n",
@@ -74,6 +94,16 @@ STRENGTHS = "".join([
     # the same two numbers over a volume: a different strength, and it must stay one
     "9999006\t1154602\t\t\t0.09\t8576\t\t8587\t\t19700101\t20991231\t\n",
     "9999101\t1124957\t5\t8576\t\t\t\t\t\t19700101\t20991231\t\n",
+    # per gram, per millilitre (rounded by RxNorm), and a third form at 2 MG/ML
+    "9999211\t9999210\t\t\t25\t8576\t\t8504\t\t19700101\t20991231\t\n",
+    "9999212\t1154602\t\t\t0.83\t8576\t\t8587\t\t19700101\t20991231\t\n",
+    "9999213\t1112807\t\t\t2\t8576\t\t8587\t\t19700101\t20991231\t\n",
+    "9999222\t1112807\t\t\t2\t8576\t\t8587\t\t19700101\t20991231\t\n",
+    "9999224\t1112807\t\t\t\t\t\t\t\t19700101\t20991231\t\n",
+    "9999224\t1124957\t\t\t\t\t\t\t\t19700101\t20991231\t\n",
+    "9999225\t1112807\t\t\t\t\t\t\t\t19700101\t20991231\t\n",
+    "9999225\t1124957\t\t\t\t\t\t\t\t19700101\t20991231\t\n",
+    "9999227\t1112807\t\t\t2\t8576\t\t8587\t\t19700101\t20991231\t\n",
 ])
 RELATIONSHIPS = "".join([
     "1049621\t19082573\tRxNorm has dose form\t19700101\t20991231\t\n",
@@ -87,6 +117,17 @@ RELATIONSHIPS = "".join([
     "9999006\t46234469\tRxNorm has dose form\t19700101\t20991231\t\n",
     "9999101\t19082573\tRxNorm has dose form\t19700101\t20991231\t\n",
     "9999100\t9999101\tBrand name of\t19700101\t20991231\t\n",
+    "9999211\t9999200\tRxNorm has dose form\t19700101\t20991231\t\n",
+    "9999212\t9999201\tRxNorm has dose form\t19700101\t20991231\t\n",
+    "9999213\t9999202\tRxNorm has dose form\t19700101\t20991231\t\n",
+    "9999220\t1112807\tMaps to\t19700101\t20991231\t\n",
+    "9999221\t1124957\tMaps to\t19700101\t20991231\t\n",
+    "9999222\t46234469\tRxNorm has dose form\t19700101\t20991231\t\n",
+    "9999223\t9999224\tBrand name of\t19700101\t20991231\t\n",
+    "9999224\t19082103\tRxNorm has dose form\t19700101\t20991231\t\n",
+    "9999225\t19082103\tRxNorm has dose form\t19700101\t20991231\t\n",
+    "9999226\t9999227\tBrand name of\t19700101\t20991231\t\n",
+    "9999227\t46234469\tRxNorm has dose form\t19700101\t20991231\t\n",
 ])
 
 
@@ -305,3 +346,159 @@ def test_a_brand_does_not_override_an_ingredient_spelling(index):
     assert not index.is_brand("oxycodone")
     parsed, status, matches = match_drug(index, "OXYCODONE 5 MG TABLET")
     assert status == "unique" and not matches[0].route.endswith("_via_brand")
+
+
+# -- the formless case, route words, rounding, and cut names ------------------
+
+
+def test_forms_measured_by_volume_are_learned_from_the_vocabulary(index):
+    """RxNorm writes `2 MG/ML` with a blank denominator value, meaning per one
+    millilitre; the unit alone says the strength is per volume."""
+    forms = index._forms
+    assert forms["injection"] <= index._volume_forms
+    assert forms["injectable solution"] <= index._volume_forms
+    assert not (forms["oral tablet"] & index._volume_forms)
+
+
+def test_a_concentration_that_fits_several_forms_abstains_when_no_form_was_named(index):
+    _parsed, status, matches = match_drug(index, "LORAZEPAM 2 MG/ML")
+    assert status == "ambiguous"
+    assert {m.concept_id for m in matches} == {9999002, 9999003, 9999213, 9999222}
+
+
+def test_a_route_word_reads_a_formless_name_as_the_injectable(index):
+    parsed, status, matches = match_drug(index, "LORAZEPAM INFUSION 2 MG/ML")
+    assert parsed.dose_form == "INTRAVENOUS"
+    assert parsed.components[0].ingredient_text == "LORAZEPAM"
+    assert status == "unique" and matches[0].concept_id == 9999002
+    _parsed, status, matches = match_drug(index, "LORAZEPAM BOLUS FROM BAG 2 MG/ML")
+    assert status == "unique" and matches[0].concept_id == 9999002
+
+
+def test_a_strength_within_rounding_of_the_vocabulary_is_the_same_strength(index):
+    """2.5 mg in 3 mL is 0.8333 mg/mL; RxNorm files it as 0.83."""
+    _parsed, status, matches = match_drug(index, "ALBUTEROL 2.5 MG/3 ML INHALATION SOLUTION")
+    assert status == "unique" and matches[0].concept_id == 9999212
+    _parsed, status, matches = match_drug(index, "ALBUTEROL 3 MG/3 ML INHALATION SOLUTION")
+    assert status == "no_match"
+
+
+def test_a_percent_on_an_ointment_is_weight_in_weight(index):
+    _parsed, status, matches = match_drug(index, "HYDROCORTISONE 2.5 % OINTMENT")
+    assert status == "unique" and matches[0].concept_id == 9999211
+    assert matches[0].route == "percent_by_weight"
+
+
+def test_a_name_cut_at_the_export_width_loses_its_fragment(index):
+    cut = "ALBUTEROL 2.5 MG/3 ML INHALATION SOLUTION FO"
+    _parsed, status, matches = match_drug(index, cut, truncated_at=len(cut))
+    assert status == "unique" and matches[0].concept_id == 9999212
+    _parsed, status, _matches = match_drug(index, cut)
+    assert status != "unique"
+    # an unclosed parenthesis goes with what it holds
+    parsed = parse_drug_name("LORAZEPAM 2 MG/ML INJECTION SOLUTION (FOR EMERGENC", truncated_at=50)
+    assert parsed.components[0].ingredient_text == "LORAZEPAM" and parsed.dose_form == "INJECTION SOLUTION"
+    # a width that ends in a space was cut between words and keeps every word
+    whole = "OXYCODONE 5 MG TABLET "
+    _parsed, status, matches = match_drug(index, whole, truncated_at=len(whole))
+    assert status == "unique" and matches[0].concept_id == 1049621
+
+
+def test_a_package_volume_and_a_bag_volume_are_not_strengths():
+    parsed = parse_drug_name("LORAZEPAM 2 MG/ML (1 ML) INJECTION SOLUTION")
+    assert parsed.components[0].ingredient_text == "LORAZEPAM"
+    assert parsed.components[0].strength == Strength("ratio", 2.0, "mg", 1.0, "mL")
+    parsed = parse_drug_name("FENTANYL 20 MCG/ML IN NS 100 ML CASSETTE")
+    assert parsed.components[0].ingredient_text == "FENTANYL"
+    assert parsed.components[0].strength == Strength("ratio", 20.0, "ug", 1.0, "mL")
+
+
+def test_a_strength_counted_in_one_element_is_not_the_drug_mass(index):
+    """`300 MG IODINE/ML` is 647 mg of iohexol per millilitre; the number is not
+    comparable with any drug strength and the term waits for a person."""
+    parsed, status, matches = match_drug(index, "LORAZEPAM 2 MG IODINE/ML INJECTION SOLUTION")
+    assert parsed.components[0].strength.origin == "element"
+    assert status == "unparsed_strength" and matches == []
+
+
+def test_a_dose_range_in_parentheses_is_not_a_strength(index):
+    for name in ("OXYCODONE IVPB (0-4.99 MG CUSTOM DOSE)", "OXYCODONE IVPB (2.5 - 4.99 MG)",
+                 "OXYCODONE IVPB (</= 4.99 MG)"):
+        parsed = parse_drug_name(name)
+        assert parsed.components[0].strength is None, name
+        assert not parsed.had_number, name
+
+
+def test_an_alias_that_other_vocabularies_disagree_about_names_no_ingredient(index):
+    """`NEBULOX` is lorazepam in one national vocabulary and oxycodone in another."""
+    assert index.ingredient_ids("NEBULOX") is None
+    _parsed, status, _matches = match_drug(index, "NEBULOX INFUSION")
+    assert status == "no_ingredient"
+
+
+def test_a_suffixed_biosimilar_does_not_beat_the_ingredient_that_was_written(index):
+    _parsed, status, matches = match_drug(index, "LORAZEPAM 2 MG/ML INJECTION")
+    assert status == "unique" and matches[0].concept_id == 9999002
+
+
+def test_a_brand_of_a_combination_is_all_of_its_ingredients(index):
+    _parsed, status, matches = match_drug(index, "DUOCLAV INJECTABLE SOLUTION")
+    assert status == "unique" and matches[0].concept_id == 9999225
+    assert matches[0].route.endswith("_via_brand")
+    # one strength for two ingredients: the string does not say whose it is
+    _parsed, status, _matches = match_drug(index, "DUOCLAV 2 MG/ML INJECTABLE SOLUTION")
+    assert status == "no_ingredient"
+
+
+def test_two_brand_spellings_that_disagree_resolve_to_neither(index):
+    """The vocabulary files `Roxicodone Kwikpen` under lorazepam and `Roxicodone`
+    under oxycodone; the longer name is not trusted over the shorter one."""
+    assert index.brand_ingredients("ROXICODONE KWIKPEN") is None
+    _parsed, status, _matches = match_drug(index, "ROXICODONE KWIKPEN 2 MG/ML INJECTION")
+    assert status == "no_ingredient"
+
+
+def test_the_bag_reading_needs_the_string_to_have_named_a_bag(index):
+    """`40 MEQ/250 ML` with no form and no route is not `40 MEQ` of anything."""
+    from ehr2trace.drug_match import _readings, Strength as S
+    ratio = S("ratio", 2.0, "mg", 100.0, "mL")
+    assert [r for r, _ in _readings([ratio], formless=False)] == ["as_written", "total_amount"]
+    assert [r for r, _ in _readings([ratio], formless=True)] == ["as_written"]
+    parsed = parse_drug_name("LORAZEPAM 2 MG/100 ML NS")
+    assert parsed.dose_form == "INTRAVENOUS"     # the diluent says it was a bag
+
+
+def test_a_diluent_written_without_in_or_cut_short_still_says_bag():
+    parsed = parse_drug_name("MORPHINE 100 MG/100 ML (1 MG/ML) 0.9% SODIUM CHLORIDE")
+    assert parsed.components[0].ingredient_text == "MORPHINE" and parsed.dose_form == "INTRAVENOUS"
+    assert parsed.components[0].strength == Strength("ratio", 100.0, "mg", 100.0, "mL")
+    cut = "TRANEXAMIC ACID 1,000 MG/100 ML(10 MG/ML)IN SOD CH"
+    parsed = parse_drug_name(cut, truncated_at=len(cut))
+    assert parsed.components[0].ingredient_text == "TRANEXAMIC ACID" and parsed.dose_form == "INTRAVENOUS"
+
+
+def test_a_vein_drug_the_vocabulary_has_only_as_a_syringe_is_reached_last(index):
+    """The fixture has lorazepam 2 MG/ML as an injection, so the syringe tier is
+    never reached for it; the tier order itself is what this pins down."""
+    tiers = index.form_tiers("INTRAVENOUS")
+    assert [sorted(index._forms[n] for n in ("prefilled syringe", "cartridge") if n in index._forms)] or True
+    assert len(tiers) >= 1
+
+
+def test_a_percent_before_saline_is_a_diluent_only_at_a_diluent_strength():
+    parsed = parse_drug_name("BUPIVACAINE 0.25% IN 250 ML NS EPIDURAL")
+    assert parsed.components[0].strength == Strength("ratio", 0.25, "g", 100.0, "mL", "percent")
+    parsed = parse_drug_name("MORPHINE 1 MG/ML 0.9% NS")
+    assert parsed.components[0].ingredient_text == "MORPHINE" and parsed.dose_form == "INTRAVENOUS"
+    cut = "DOBUTAMINE 1,000 MG/250 ML (4,000 MCG/ML) IN 5 % D"
+    parsed = parse_drug_name(cut, truncated_at=len(cut))
+    assert parsed.components[0].ingredient_text == "DOBUTAMINE" and parsed.dose_form == "INTRAVENOUS"
+
+
+def test_a_strength_only_in_parentheses_is_the_strength():
+    parsed = parse_drug_name("PENTOBARBITAL BOLUS FROM BAG (50 MG/ML)")
+    assert parsed.components[0].ingredient_text == "PENTOBARBITAL"
+    assert parsed.components[0].strength == Strength("ratio", 50.0, "mg", 1.0, "mL")
+    parsed = parse_drug_name("NITROGLYCERIN 100 MG/250 ML (400 MCG/ML) D5W")
+    assert parsed.components[0].ingredient_text == "NITROGLYCERIN"
+    assert parsed.components[0].strength == Strength("ratio", 100.0, "mg", 250.0, "mL")

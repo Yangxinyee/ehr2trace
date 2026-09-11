@@ -39,7 +39,10 @@ a wrong one, on 35,408 rows. A strength written per millilitre describes somethi
 poured. So a source concentration restricts the formless case to dose forms the
 vocabulary itself measures by volume, which it is asked rather than told: `Oral Tablet`
 and `Oral Capsule` have no drug in `DRUG_STRENGTH` with a millilitre denominator, and
-`Injection` has 73% of them.
+`Injection` has 73% of them. And when the strength fits the drug in more than one of
+those forms, the formless case abstains: a route word (`INFUSION`, `IVPB`, `BOLUS FROM
+BAG`) is what lets a name with no form phrase be read as an injectable, and without one
+nothing in the string says which form it was.
 """
 
 from __future__ import annotations
@@ -51,6 +54,7 @@ from typing import Sequence
 from .drug_lexicon import (
     DOSE_FORMS,
     INGREDIENT_ABBREVIATIONS,
+    IV_ROUTE_MARKERS,
     NOISE_WORDS,
     RELEASE_ABBREVIATIONS,
     STRENGTH_ELEMENTS,
@@ -70,29 +74,51 @@ _UNIT_ALT = "|".join(sorted((re.escape(u) for u in UNITS), key=len, reverse=True
 #: what it is. `(PF)` is preservative-free; `(FOR ADULTS)` is a dosing note. Site-local
 #: parentheticals are handled by the dataset's own noise list, not here.
 _NOISE_PARENS = re.compile(
-    r"\((?:PF|TOTAL VOLUME|PER DROP|ADULTS|PEDS|DEFAULT[^)]*|"
-    r"FOR [^)]*|ISO-OSMOTIC|ISO-OSMOT|PRESERVATIVE FREE|FLUSH|\d+\s*MIN|"
-    r"U-\d+|PART/CRYST)\)", re.I)
+    r"\((?:PF|TOTAL VOLUME|PER DROP|ADULTS|PEDS|DEFAULT[^)]*|DOSE[^)]*|QS[^)]*|"
+    r"NO DOSE ROUNDING|FOR [^)]*|ISO-OSMOTIC|ISO-OSMOT|PRESERVATIVE FREE|FLUSH|\d+\s*MIN|"
+    r"U-\d+|PART/CRYST|\d+\s*(?:TABS?|TABLETS?|CAPS?|CAPSULES?|COUNT|EA|EACH)?)\)", re.I)
+#: "(1 ML)", "(3 ML)": the container, not a strength.
+_PACKAGE_VOLUME = re.compile(rf"\(\s*{_NUM}\s*(?:ML|L)\s*\)", re.I)
+#: "(0-499 MG CUSTOM DOSE)", "(250 - 499 MG)", "(</= 1000 MG)": the range an order set
+#: allows, not a strength. Read as one, `499 MG` matched the 500 mg product.
+_DOSE_RANGE_PARENS = re.compile(
+    rf"\(\s*(?:{_NUM}\s*(?:{_UNIT_ALT})?\s*-\s*{_NUM}|[<>=/]+\s*{_NUM})[^)]*\)", re.I)
+#: "100 ML" standing alone after the strength has been read: the bag or cassette it
+#: was made up in. A volume that belongs to a concentration follows a slash and is
+#: left where it is.
+_BARE_VOLUME = re.compile(rf"(?<!/)(?<!/ )\b{_NUM}\s*(?:ML|L)\b(?!\s*/)", re.I)
+_IV_MARKER = re.compile(
+    r"\b(?:%s)\b" % "|".join(re.escape(w) for w in sorted(IV_ROUTE_MARKERS, key=len, reverse=True)), re.I)
 #: "(2.5 MG BASE)" restates the salt-free strength. It is a gloss on the number before
 #: it, not a second component, and reading it as one invents an ingredient.
 _BASE_GLOSS = re.compile(r"\([^()]*\bBASE\b[^()]*\)", re.I)
 #: What the drug is dissolved in. RxNorm names the drug, not the bag it arrived in.
+_DILUENT_NAMES = (
+    r"(?:SODIUM CHLORIDE|SOD\.?\s*(?:CHLORIDE|CHLOR|CHL|CH|C)?|NORMAL SALINE|SALINE|"
+    r"STERILE WATER|WATER|DEXTROSE|NACL|D5 1/2 NS|D5NS|D5W|D50W|D10W|NS|LR)")
+#: "IN 0.9 % SODIUM CHLORIDE", and the same cut short to "IN 5 %": a percent after
+#: `IN` is a diluent's, whatever followed it.
 _DILUENT = re.compile(
-    r"\bIN\s+(?:STERILE\s+)?(?:\d[\d.,]*\s*%\s*)?"
-    r"(?:SODIUM CHLORIDE|NORMAL SALINE|SALINE|STERILE WATER|WATER|DEXTROSE|NACL|D5W|D50W)\b", re.I)
+    rf"\bIN\s+(?:STERILE\s+)?(?:\d[\d.,]*\s*%(?:\s*{_DILUENT_NAMES})?|{_DILUENT_NAMES})(?![A-Z])", re.I)
+#: "0.9% SODIUM CHLORIDE" after the strength, with no `IN`: the percent in front of the
+#: name is how a bag is written, where the drug itself is written `SODIUM CHLORIDE
+#: 0.9 %`. Only the strengths diluents come in count -- `BUPIVACAINE 0.25% NS` is
+#: bupivacaine at 0.25%, in saline.
+_DILUENT_PREFIXED = re.compile(
+    rf"\b(?:0\.9|0\.45|0\.225|5|10)\s*%\s*{_DILUENT_NAMES}(?![A-Z])", re.I)
 #: "IN 50 ML" -- the volume it was diluted into, not a strength.
 _DILUENT_VOLUME = re.compile(rf"\bIN\s+{_NUM}\s*(?:ML|L)\b", re.I)
 _NOISE_WORDS = re.compile(r"\b(?:%s)\b" % "|".join(re.escape(w) for w in NOISE_WORDS), re.I)
 
 _ELEMENT = "|".join(sorted((re.escape(e) for e in STRENGTH_ELEMENTS), key=len, reverse=True))
 _RATIO = re.compile(
-    rf"({_NUM})\s*({_UNIT_ALT})\b(?:\s+(?:{_ELEMENT}))?\s*/\s*({_NUM})?\s*({_UNIT_ALT})\b", re.I)
-_AMOUNT = re.compile(rf"({_NUM})\s*({_UNIT_ALT})\b(?:\s+(?:{_ELEMENT}))?", re.I)
+    rf"({_NUM})\s*({_UNIT_ALT})\b(?:\s+(?P<element>{_ELEMENT}))?\s*/\s*({_NUM})?\s*({_UNIT_ALT})\b", re.I)
+_AMOUNT = re.compile(rf"({_NUM})\s*({_UNIT_ALT})\b(?:\s+(?P<element>{_ELEMENT}))?", re.I)
 #: "(0.083 %)", "(10 MG/ML)", "(500 MG)" -- the strength said a second way. Kept in the
 #: string it becomes part of the ingredient name and nothing resolves.
 _RESTATED_STRENGTH = re.compile(
-    rf"\(\s*{_NUM}\s*(?:{_UNIT_ALT})(?:\s*/\s*{_NUM}?\s*(?:{_UNIT_ALT}))?\s*"
-    rf"(?:{_ELEMENT})?\s*\)", re.I)
+    rf"\(\s*{_NUM}\s*(?:{_UNIT_ALT})(?:\s*/\s*(?:{_NUM})?\s*(?:{_UNIT_ALT}))?\s*"
+    rf"(?:{_ELEMENT})?\s*\)|\(\s*1\s*:\s*{_NUM}\s*\)", re.I)
 _PERCENT = re.compile(rf"({_NUM})\s*%")
 #: "1:1,000" on an epinephrine ampoule means one gram in a thousand millilitres.
 _COLON = re.compile(rf"1\s*:\s*({_NUM})")
@@ -115,7 +141,10 @@ class Strength:
     #: How the source wrote it. A percent and a `1:1,000` are concentrations by
     #: definition -- there is no container volume in them to reinterpret as a total
     #: dose, and reading `0.9 %` as "900 MG" is how a saline flush became a 900 mg
-    #: sodium chloride product.
+    #: sodium chloride product. `element` means the number counts one element of the
+    #: molecule (`320 MG IODINE/ML`), which is not the mass the vocabulary states:
+    #: iodixanol at 320 mg of iodine per millilitre is 652 mg of iodixanol, and the
+    #: two are related by a fraction this module does not know.
     origin: str = "explicit"
 
 
@@ -149,14 +178,27 @@ def _strip_noise(text: str, local: re.Pattern | None = None) -> str:
     text = _BASE_GLOSS.sub(" ", text)
     if local is not None:
         text = local.sub(" ", text)
-    text = _RESTATED_STRENGTH.sub(" ", text)
+    if _has_strength(re.sub(r"\([^)]*\)", " ", text)):
+        text = _RESTATED_STRENGTH.sub(" ", text)
+    else:
+        # `PENTOBARBITAL BOLUS FROM BAG (50 MG/ML)`: the only strength is the one in
+        # parentheses, so it is the strength, not a restatement of one.
+        text = _RESTATED_STRENGTH.sub(lambda m: " " + m.group(0).strip("() ") + " ", text)
+    text = _PACKAGE_VOLUME.sub(" ", text)
+    text = _DOSE_RANGE_PARENS.sub(" ", text)
     text = _NOISE_PARENS.sub(" ", text)
     text = _DILUENT_VOLUME.sub(" ", text)
     text = _DILUENT.sub(" ", text)
+    text = _DILUENT_PREFIXED.sub(" ", text)
+    text = _BARE_VOLUME.sub(" ", text)
     text = _NOISE_WORDS.sub(" ", text)
     # "TABLET, EXTENDED RELEASE" and "TABLET,EXTENDED RELEASE" are one phrase.
     text = re.sub(r"\s*,\s*", ",", text)
     return re.sub(r"\s+", " ", text).strip(" ,-")
+
+
+def _has_strength(text: str) -> bool:
+    return bool(_RATIO.search(text) or _PERCENT.search(text) or _COLON.search(text) or _AMOUNT.search(text))
 
 
 def _take_dose_form(text: str) -> tuple[str, str | None]:
@@ -171,10 +213,12 @@ def _take_dose_form(text: str) -> tuple[str, str | None]:
 def _take_strength(text: str) -> tuple[str, Strength | None]:
     match = _RATIO.search(text)
     if match:
-        denominator = _number(match.group(3)) if match.group(3) else 1.0
+        # groups: 1 number, 2 unit, 3 element (named), 4 denominator number, 5 its unit
+        denominator = _number(match.group(4)) if match.group(4) else 1.0
         rest = text[: match.start()] + " " + text[match.end():]
         return rest, Strength("ratio", _number(match.group(1)), UNITS[match.group(2).upper()],
-                              denominator, UNITS[match.group(4).upper()])
+                              denominator, UNITS[match.group(5).upper()],
+                              "element" if match.group("element") else "explicit")
     match = _COLON.search(text)
     if match:
         rest = text[: match.start()] + " " + text[match.end():]
@@ -187,7 +231,8 @@ def _take_strength(text: str) -> tuple[str, Strength | None]:
     match = _AMOUNT.search(text)
     if match:
         rest = text[: match.start()] + " " + text[match.end():]
-        return rest, Strength("amount", _number(match.group(1)), UNITS[match.group(2).upper()])
+        return rest, Strength("amount", _number(match.group(1)), UNITS[match.group(2).upper()],
+                              origin="element" if match.group("element") else "explicit")
     return text, None
 
 
@@ -232,8 +277,22 @@ def _split_components(head: str) -> tuple[Component, ...] | None:
     return tuple(out)
 
 
-def parse_drug_name(source: str, local_noise: Sequence[str] = ()) -> ParsedDrug:
-    text = _strip_noise(source.upper(), _local_noise(local_noise))
+def parse_drug_name(source: str, local_noise: Sequence[str] = (),
+                    truncated_at: int | None = None) -> ParsedDrug:
+    text = source.upper()
+    if truncated_at and len(source) >= truncated_at and not source[-1].isspace():
+        # The export cut the name at a fixed width, and whatever the cut fell on is a
+        # fragment: `SOLUTION F`, `SUBCUTAN`, `(FOR EMERGENC`. An unclosed parenthesis
+        # goes with what it holds; otherwise the last, partial, word goes. A name whose
+        # width ends in a space was cut between words and keeps everything.
+        cut = re.sub(r"\s*\([^()]*$", "", text)
+        text = cut if cut != text else re.sub(r"\s*\S+$", "", text)
+    # A route word, or a diluent -- `IN 0.9 % SODIUM CHLORIDE`, `NS` -- says the drug
+    # was made up in a bag, which is a fact about its form the name otherwise lacks.
+    given_intravenously = (_IV_MARKER.search(text) is not None or _DILUENT.search(text) is not None
+                           or _DILUENT_PREFIXED.search(text) is not None
+                           or re.search(r"\b(?:NS|D5W|D10W|D5NS|LR)\b", text) is not None)
+    text = _strip_noise(text, _local_noise(local_noise))
     had_number = bool(re.search(r"\d", text))
     for abbreviation, phrase in RELEASE_ABBREVIATIONS.items():
         if re.search(rf"\b{abbreviation}\b", text) and phrase not in text:
@@ -243,6 +302,9 @@ def parse_drug_name(source: str, local_noise: Sequence[str] = ()) -> ParsedDrug:
                 text = re.sub(r"\bCAPSULE\b", f"CAPSULE,{phrase}", text, count=1)
             break
     head, form = _take_dose_form(text)
+    if form is None and given_intravenously:
+        form = "INTRAVENOUS"
+    head = re.sub(r"\s+", " ", _IV_MARKER.sub(" ", head)).strip(" ,-")
 
     shared: tuple[float, str] | None = None
     match = _SHARED_DENOM.search(head)
@@ -330,7 +392,13 @@ class DrugIndex:
         #: brand name -> the ingredients of every product it is the brand name of
         self._brands: dict[str, set[int]] = {}
         self._forms: dict[str, set[int]] = {}
-        self._by_key: dict[tuple, list[int]] = {}
+        #: (ingredients with the *kind* of each strength, dose form) -> the drugs of that
+        #: shape, each with its strength values. Values are compared on lookup, within
+        #: rounding, rather than used as dictionary keys: RxNorm writes `20 GRAM/30 ML`
+        #: as `667 MG/ML` and `2.5 MG/3 ML` as `0.83 MG/ML`.
+        self._by_shape: dict[tuple, list[tuple[int, dict]]] = {}
+        #: drug -> its dose forms, for the formless case to see what a match spans
+        self._form_of_drug: dict[int, set[int]] = {}
         self._by_first_word: dict[str, list[str]] = {}
         #: Dose forms that anything is ever measured by volume in. Derived, not listed.
         self._volume_forms: set[int] = set()
@@ -375,6 +443,12 @@ class DrugIndex:
                 self._ingredients[name] = ({int(concept_id)}, int(tier))
             elif tier == existing[1]:
                 existing[0].add(int(concept_id))
+        # `insulin` is what one national vocabulary calls regular human insulin and
+        # another calls insulin glargine. A spelling that reaches the standard
+        # ingredients only by way of other vocabularies, and reaches more than one, is
+        # not a name for any of them.
+        for name in [n for n, (ids, tier) in self._ingredients.items() if tier > 0 and len(ids) > 1]:
+            del self._ingredients[name]
         # A brand name stands for its ingredients, and the vocabulary says which: a
         # Brand Name concept is `Brand name of` the branded products, and DRUG_STRENGTH
         # names each product's ingredients. `ELIQUIS 5 MG TABLET` then reads as
@@ -452,7 +526,9 @@ class DrugIndex:
         # matching `folic acid 1 MG Oral Tablet` when the source named no form at all.
         by_volume: dict[int, list[int]] = {}
         for drug, parts in per_drug.items():
-            liquid = any(p[5] is not None and p[6] in ("mL", "L") for p in parts)
+            # A blank denominator value is "per one millilitre", so the unit alone
+            # says whether the strength is stated per volume.
+            liquid = any(p[6] in ("mL", "L") for p in parts)
             for form in form_of.get(drug, ()):
                 counts = by_volume.setdefault(form, [0, 0])
                 counts[0] += 1
@@ -461,15 +537,17 @@ class DrugIndex:
                               if total and liquid / total >= 0.01}
 
         for drug, parts in per_drug.items():
-            signature = []
+            values: dict[tuple, float | None] = {}
             for (ingredient, amount, amount_unit, numerator, numerator_unit,
                  denominator, denominator_unit) in parts:
-                signature.append((int(ingredient), _vocabulary_signature(
+                shape, value = _shape_of(_vocabulary_signature(
                     amount, amount_unit, numerator, numerator_unit,
-                    denominator, denominator_unit)))
-            key_parts = frozenset(signature)
-            for form in form_of.get(drug, {0}):
-                self._by_key.setdefault((key_parts, form), []).append(drug)
+                    denominator, denominator_unit))
+                values[(int(ingredient), shape)] = value
+            key = frozenset(values)
+            self._form_of_drug[drug] = set(form_of.get(drug, {0}))
+            for form in self._form_of_drug[drug]:
+                self._by_shape.setdefault((key, form), []).append((drug, values))
         con.execute("DROP TABLE IF EXISTS _ing_alias")
         con.execute("DROP TABLE IF EXISTS _std_ing")
 
@@ -478,6 +556,25 @@ class DrugIndex:
         """Whether this name resolves only through a brand, for the route to record."""
         name = " ".join(text.strip().lower().split())
         return name in self._brands and not any(c in self._ingredients for c in self._spellings(name))
+
+    def brand_ingredients(self, text: str) -> set[int] | None:
+        """The ingredients a brand name stands for, or None if the name is no brand.
+
+        `BASAGLAR KWIKPEN` is a brand and so is `BASAGLAR`, and the vocabulary has the
+        first as a brand of regular human insulin and the second of insulin glargine.
+        When the name and a shorter spelling of it are both brands and disagree, the
+        name resolves to neither.
+        """
+        name = " ".join(text.strip().lower().split())
+        found = self._brands.get(name)
+        if found is None:
+            return None
+        words = name.split()
+        for cut in range(len(words) - 1, 0, -1):
+            shorter = self._brands.get(" ".join(words[:cut]))
+            if shorter is not None and shorter != found:
+                return None
+        return set(found)
 
     def ingredient_ids(self, text: str) -> set[int] | None:
         """Resolve an ingredient name, most specific spelling first.
@@ -502,8 +599,7 @@ class DrugIndex:
                 # Losing that is not a match, so the term goes to a person instead.
                 return None
             return found[0]
-        brand = self._brands.get(name)
-        return set(brand) if brand else None
+        return self.brand_ingredients(name)
 
     def _more_specific_exists(self, base: str, full: str) -> bool:
         dropped = [w for w in re.split(r"[,\s]+", full) if w and w not in base.split()]
@@ -561,7 +657,35 @@ class DrugIndex:
         return self._concepts[concept_id]
 
     def lookup(self, signature: frozenset, form_id: int) -> list[int]:
-        return self._by_key.get((signature, form_id), [])
+        """The drugs of this ingredient set, strength and form, strengths within rounding."""
+        wanted: dict[tuple, float | None] = {}
+        for ingredient, strength in signature:
+            shape, value = _shape_of(strength)
+            wanted[(ingredient, shape)] = value
+        return [drug for drug, have in self._by_shape.get((frozenset(wanted), form_id), ())
+                if all(_close(have.get(key), value) for key, value in wanted.items())]
+
+
+def _shape_of(signature: tuple | None) -> tuple[tuple | None, float | None]:
+    """Split a signature into the kind of strength it is and the number it carries."""
+    if signature is None:
+        return None, None
+    if signature[0] == "none":
+        return ("none",), None
+    return signature[:-1], signature[-1]
+
+
+#: How far apart two strengths may be and still be one strength. RxNorm rounds to three
+#: significant figures (`0.83 MG/ML` for 2.5 mg in 3 mL), so the comparison must
+#: tolerate that and no more: 1% separates every pair of products that differ in
+#: strength at all, and a source strength further off than that is a different strength.
+_TOLERANCE = 0.01
+
+
+def _close(have: float | None, want: float | None) -> bool:
+    if have is None or want is None:
+        return have is None and want is None
+    return abs(have - want) <= _TOLERANCE * max(abs(have), abs(want))
 
 
 def _vocabulary_signature(amount, amount_unit, numerator, numerator_unit,
@@ -586,31 +710,51 @@ def _vocabulary_signature(amount, amount_unit, numerator, numerator_unit,
 # the match
 # --------------------------------------------------------------------------
 
-def _readings(parsed: ParsedDrug) -> list[tuple[str, list[tuple | None]]]:
+def _readings(strengths: Sequence[Strength | None], formless: bool) -> list[tuple[str, list[tuple | None]]]:
     """The strength readings to try, most literal first.
 
     A hospital writes an IV bag as `2 GRAM/100 ML`; RxNorm Extension files the same bag
     as `2000 MG`, because the bag is the unit that gets hung. Both are readings of one
     string, so both are tried -- the concentration first, since that is what the string
-    literally says.
+    literally says. The bag reading needs the string to have said it was a bag: with no
+    form and no route, `40 MEQ/250 ML` read as `40 MEQ` matched an oral powder.
     """
-    literal = [_signature(component.strength) for component in parsed.components]
+    literal = [_signature(strength) for strength in strengths]
     out = [("as_written", literal)]
     whole = []
-    for component in parsed.components:
-        strength = component.strength
-        if (strength is None or strength.kind != "ratio" or strength.origin != "explicit"
-                or strength.denominator in (None, 1.0)
+    for strength in strengths:
+        if (formless or strength is None or strength.kind != "ratio"
+                or strength.origin != "explicit" or strength.denominator in (None, 1.0)
                 or strength.denominator_unit not in ("mL", "L")):
             whole = []
             break
         whole.append(_signature(Strength("amount", strength.value, strength.unit)))
     if whole:
         out.append(("total_amount", whole))
+    if any(s is not None and s.origin == "percent" for s in strengths):
+        # A percent on a cream or ointment is weight in weight, and RxNorm states those
+        # per gram: `HYDROCORTISONE 2.5 % OINTMENT` is `hydrocortisone 25 MG/G`. The
+        # liquid reading is tried first because the string cannot say which it is; the
+        # dose form decides, since no ointment has a per-millilitre strength.
+        by_weight = [
+            _signature(Strength("ratio", s.value, "g", 100.0, "g", "percent"))
+            if s is not None and s.origin == "percent" else _signature(s)
+            for s in strengths
+        ]
+        out.append(("percent_by_weight", by_weight))
     return out
 
 
 _WORD = re.compile(r"[a-z]{3,}")
+
+
+def _names_plainly(concept_name: str, ingredient: str) -> bool:
+    """Whether the concept's name begins with the ingredient and no qualifier of it.
+
+    `insulin aspart-szjj` begins with `insulin aspart` and names a biosimilar the source
+    did not; the suffix qualifies as much as a word in front would.
+    """
+    return concept_name.startswith(ingredient) and not concept_name[len(ingredient):].startswith("-")
 
 
 def _preferred(index: DrugIndex, concept_ids: list[int], ingredient_names: list[str],
@@ -638,7 +782,7 @@ def _preferred(index: DrugIndex, concept_ids: list[int], ingredient_names: list[
     if len(concept_ids) < 2:
         return concept_ids
     plain = [c for c in concept_ids
-             if any(index._names.get(c, "").startswith(n) for n in ingredient_names)]
+             if any(_names_plainly(index._names.get(c, ""), n) for n in ingredient_names)]
     concept_ids = plain or concept_ids
     if len(concept_ids) < 2:
         return concept_ids
@@ -652,29 +796,46 @@ def _preferred(index: DrugIndex, concept_ids: list[int], ingredient_names: list[
     return [c for c in concept_ids if len(index._names.get(c, "")) == shortest]
 
 
-def match_drug(index: DrugIndex, source: str,
-               local_noise: Sequence[str] = ()) -> tuple[ParsedDrug, str, list[DrugMatch]]:
+def match_drug(index: DrugIndex, source: str, local_noise: Sequence[str] = (),
+               truncated_at: int | None = None) -> tuple[ParsedDrug, str, list[DrugMatch]]:
     """Match one source string. Returns (parse, status, matches).
 
     ``status`` is ``unique`` only when exactly one concept satisfied a whole reading.
     Everything else -- ``ambiguous``, ``no_match``, ``no_ingredient``, ``no_dose_form``,
     ``unparsed_strength`` -- means the term is not resolved and stays in review.
     """
-    parsed = parse_drug_name(source, local_noise)
+    parsed = parse_drug_name(source, local_noise, truncated_at)
     ingredient_sets: list[set[int]] = []
     ingredient_names: list[str] = []
+    strengths: list[Strength | None] = []
     via_brand = False
     for component in parsed.components:
         ids = index.ingredient_ids(component.ingredient_text)
         if not ids:
             return parsed, "no_ingredient", []
+        if index.is_brand(component.ingredient_text) and len(ids) > 1:
+            # A brand of a combination stands for all of its ingredients at once:
+            # `PRIMAXIN` is cilastatin and imipenem, not one or the other. With no
+            # strength written, that is one component per ingredient; with one
+            # strength written for several ingredients, the string does not say which
+            # it belongs to.
+            if component.strength is not None:
+                return parsed, "no_ingredient", []
+            for ingredient in sorted(ids):
+                ingredient_sets.append({ingredient})
+                ingredient_names.append(component.ingredient_text.lower())
+                strengths.append(None)
+            via_brand = True
+            continue
         via_brand = via_brand or index.is_brand(component.ingredient_text)
         ingredient_sets.append(ids)
         ingredient_names.append(component.ingredient_text.lower())
+        strengths.append(component.strength)
 
     tiers = index.form_tiers(parsed.dose_form)
     if parsed.dose_form is not None and tiers is None:
         return parsed, "no_dose_form", []
+    formless = tiers is None
     if tiers is None:
         # No form in the string: the strength alone has to identify the concept, so the
         # candidate set is every form -- except that a strength the source wrote per
@@ -688,20 +849,30 @@ def match_drug(index: DrugIndex, source: str,
             every &= index._volume_forms
         tiers = [[every]]
 
-    have_strength = all(c.strength is not None for c in parsed.components)
+    have_strength = all(s is not None for s in strengths)
     if not have_strength and parsed.had_number:
         # A number was written and not understood. Matching a concept that carries no
         # strength would silently drop it, so the term goes to a person instead.
         return parsed, "unparsed_strength", []
+    if any(s is not None and s.origin == "element" for s in strengths):
+        # `300 MG IODINE/ML` is a strength in a unit the vocabulary does not use, and
+        # comparing the number against a drug mass found `Iohexol 302 MG/ML` -- a
+        # different product -- once strengths were compared within rounding.
+        return parsed, "unparsed_strength", []
 
     source_words = set(_WORD.findall(parsed.source.lower()))
     ambiguous: list[DrugMatch] = []
-    for reading, signatures in _readings(parsed):
+    for reading, signatures in _readings(strengths, formless):
         if any(s is None for s in signatures):
             continue
         combinations = _combinations(ingredient_sets, signatures)
         stop = False
         for depth, step in enumerate(tiers):
+            if depth >= 2 and not have_strength:
+                # The third tier of an intravenous name is a syringe or cartridge, which
+                # only a strength can pin to a product; a bare ingredient reaching it
+                # would name a presentation the string never mentioned.
+                break
             for alternative in step:
                 found: set[int] = set()
                 for signature in combinations:
@@ -709,6 +880,15 @@ def match_drug(index: DrugIndex, source: str,
                         found.update(index.lookup(signature, form))
                 if not found:
                     continue
+                if formless and len({f for c in found for f in index._form_of_drug.get(c, ())}) > 1:
+                    # The strength fits the drug in several forms and the source named
+                    # none: `HEPARIN 100 UNIT/ML` is a flush, a vial and an irrigation.
+                    # Choosing between forms by the length of their names is not a
+                    # reading of the string, so the term goes to a person instead.
+                    ambiguous = ambiguous or [DrugMatch(c, *index.concept(c), "formless")
+                                              for c in sorted(found)]
+                    stop = True
+                    break
                 candidates = _preferred(index, sorted(found), ingredient_names, source_words)
                 route = reading if depth == 0 else f"{reading}_widened_form"
                 if via_brand:

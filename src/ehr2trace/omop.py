@@ -170,7 +170,8 @@ def _register_sources(con, layout: WorkLayout) -> None:
 
 
 def _build_term_map(con, vocabulary, mappings: MappingRegistry,
-                    drug_name_noise: Sequence[str] = ()) -> tuple[int, int, list[TermRequest]]:
+                    drug_name_noise: Sequence[str] = (),
+                    drug_name_truncated_at: int | None = None) -> tuple[int, int, list[TermRequest]]:
     """Resolve every distinct source string once, not once per row.
 
     Millions of medication rows collapse to a few thousand distinct names. Dispatching
@@ -196,7 +197,8 @@ def _build_term_map(con, vocabulary, mappings: MappingRegistry,
         )
         for r in rows
     ]
-    resolved, unresolved = resolve_terms_batch(terms, vocabulary, mappings, drug_name_noise)
+    resolved, unresolved = resolve_terms_batch(
+        terms, vocabulary, mappings, drug_name_noise, drug_name_truncated_at)
 
     con.execute(
         # `path` is the route the mapping took -- exact code, punctuation-insensitive
@@ -331,7 +333,8 @@ STAGE_EXTRA = "event_id"
 
 def _publish_all(con, cfg: DatasetConfig, layout: WorkLayout, vocabulary, mappings: MappingRegistry) -> BuildStats:
     distinct, resolved, unmapped = _build_term_map(
-        con, vocabulary, mappings, cfg.terminology.drug_name_noise
+        con, vocabulary, mappings, cfg.terminology.drug_name_noise,
+        cfg.terminology.drug_name_truncated_at,
     )
     _build_dose_map(con)
     _build_attribute_map(con, vocabulary, mappings)

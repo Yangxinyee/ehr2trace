@@ -403,6 +403,7 @@ def collect_terms(events: Iterable[dict]) -> dict[tuple[str, str], TermRequest]:
 def resolve_terms_batch(
     terms: Sequence[TermRequest], vocabulary, mappings: MappingRegistry,
     drug_name_noise: Sequence[str] = (),
+    drug_name_truncated_at: int | None = None,
 ) -> tuple[dict[tuple[str, str], ConceptMatch], list[TermRequest]]:
     """Resolve every term in two SQL joins rather than one query per term.
 
@@ -526,13 +527,15 @@ def resolve_terms_batch(
         second, unresolved = _resolve_unpunctuated(con, unresolved)
         resolved.update(second)
     if unresolved:
-        third, unresolved = _resolve_structured_drugs(vocabulary, unresolved, drug_name_noise)
+        third, unresolved = _resolve_structured_drugs(
+            vocabulary, unresolved, drug_name_noise, drug_name_truncated_at)
         resolved.update(third)
     return resolved, unresolved
 
 
 def _resolve_structured_drugs(vocabulary, pending: Sequence[TermRequest],
-                              drug_name_noise: Sequence[str] = ()):
+                              drug_name_noise: Sequence[str] = (),
+                              drug_name_truncated_at: int | None = None):
     """Third pass, for drug names that are strings rather than codes.
 
     A hospital's medication file names the drug rather than coding it, so the first two
@@ -568,7 +571,7 @@ def _resolve_structured_drugs(vocabulary, pending: Sequence[TermRequest],
     resolved: dict[tuple[str, str], ConceptMatch] = {}
     for term in drugs:
         name = term.source_name or term.source_code
-        _parsed, status, matches = match_drug(index, name, drug_name_noise)
+        _parsed, status, matches = match_drug(index, name, drug_name_noise, drug_name_truncated_at)
         if status != "unique":
             continue
         match = matches[0]

@@ -209,3 +209,11 @@ def test_a_source_may_declare_one_row_filter_per_column():
     assert [f.column for f in several.row_filters] == ["dx", "name"]
     assert all(isinstance(f, RowFilterSpec) for f in several.row_filters)
     assert SourceSpec.model_validate({"adapter": "parquet", "shape": "point_event", "event_kind": "condition"}).row_filters == []
+
+
+def test_a_dataset_may_declare_the_width_its_export_cuts_drug_names_at():
+    from ehr2trace.config import TerminologySpec
+    assert TerminologySpec.model_validate({}).drug_name_truncated_at is None
+    assert TerminologySpec.model_validate({"drug_name_truncated_at": 50}).drug_name_truncated_at == 50
+    with pytest.raises(ValueError):
+        TerminologySpec.model_validate({"drug_name_truncated_at": 0})

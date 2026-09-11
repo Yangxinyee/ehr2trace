@@ -60,6 +60,11 @@ DOSE_FORMS: dict[str, tuple[tuple[str, ...], ...]] = {
     "CAPSULE,EXTENDED RELEASE 24 HR": (("24 Hour Extended Release Capsule",),
                                        ("Extended Release Oral Capsule",)),
     "CAPSULE,SPRINKLE": (("Oral Capsule",),),
+    # a dose pack or starter pack is a count of ordinary tablets; the count is noise
+    "TABLETS IN A DOSE PACK": (("Oral Tablet",),),
+    "TABLET IN A DOSE PACK": (("Oral Tablet",),),
+    "TABLETS IN A STARTER PACK": (("Oral Tablet",),),
+    "CAPSULES IN A DOSE PACK": (("Oral Capsule",),),
 
     # -- injectables ------------------------------------------------------
     # RxNorm says "Injectable Solution"; RxNorm Extension says "Injection" for the
@@ -106,8 +111,13 @@ DOSE_FORMS: dict[str, tuple[tuple[str, ...], ...]] = {
     "INTRAVENOUS PIGGYBACK": (("Intravenous Solution",), ("Injection", "Injectable Solution")),
     "IV SOLUTION PREMIX": (("Intravenous Solution",), ("Injection", "Injectable Solution")),
     "INTRAVENOUS PREMIX": (("Intravenous Solution",), ("Injection", "Injectable Solution")),
-    "INTRAVENOUS": (("Intravenous Solution",), ("Injection", "Injectable Solution")),
-    "IV": (("Intravenous Solution",), ("Injection", "Injectable Solution")),
+    # A drug given into a vein that the vocabulary has only as a syringe or cartridge
+    # at that strength (a PCA syringe of hydromorphone) is still that drug and strength.
+    "INTRAVENOUS": (("Intravenous Solution",), ("Injection", "Injectable Solution"),
+                    ("Prefilled Syringe", "Cartridge")),
+    "IV": (("Intravenous Solution",), ("Injection", "Injectable Solution"),
+           ("Prefilled Syringe", "Cartridge")),
+    "SUBCUTANEOUS": (("Injectable Solution",), ("Injection",)),
 
     # -- oral liquids and powders -----------------------------------------
     "ORAL SOLUTION": (("Oral Solution",),),
@@ -143,6 +153,7 @@ DOSE_FORMS: dict[str, tuple[tuple[str, ...], ...]] = {
 
     # -- inhaled ----------------------------------------------------------
     "SOLUTION FOR NEBULIZATION": (("Inhalation Solution",),),
+    "NEBULIZER SOLUTION": (("Inhalation Solution",),),
     "NEBULIZATION SOLUTION": (("Inhalation Solution",),),
     "NEBULIZATION SOLN": (("Inhalation Solution",),),
     "SOLUTION FOR INHALATION": (("Inhalation Solution",),),
@@ -244,6 +255,9 @@ UNITS: dict[str, str] = {
     # RxNorm files insulin and heparin under UCUM `[U]` far more often than `[iU]`,
     # and treats the two as the same quantity; the families below join them.
     "UNIT": "[U]", "UNITS": "[U]", "IU": "[iU]", "UNT": "[U]",
+    # low-molecular-weight heparins are dosed in anti-factor Xa units, which RxNorm
+    # files as plain units
+    "ANTI-XA UNIT": "[U]", "ANTI-XA UNITS": "[U]", "ANTI-XA": "[U]",
     "MEQ": "10*-3.eq", "MILLIEQUIVALENT": "10*-3.eq",
     "MMOL": "mmol", "MCI": "mCi", "MILLICURIE": "mCi",
     "%": "%",
@@ -302,9 +316,21 @@ SALT_SUFFIXES: tuple[str, ...] = (
 #: the dataset contract (`terminology.drug_name_noise`) instead of accumulating in the
 #: core, which is the same rule that keeps column names out of it.
 NOISE_WORDS: tuple[str, ...] = (
-    "IVPB", "IVP", "CHEMO", "INFUSION", "PREMIX", "PCA", "BOLUS FROM BAG",
-    "VARIABLE DOSE", "CUSTOM DOSE", "DEFAULT", "TOTAL VOLUME", "FOR INPATIENTS",
-    "FOR ADULTS", "PER UNIT", "HALF-TAB", "STANDARD", "HFA", "MDI", "PF",
+    "IVPB", "IVP", "IV PUSH", "CHEMO", "INFUSION", "PREMIX", "PREPACK", "PCA",
+    "BOLUS FROM BAG", "CASSETTE", "COMPOUNDED", "NS", "D5W", "D10W", "D5NS", "D50W", "LR",
+    "VARIABLE DOSE", "CUSTOM DOSE", "RANGE DOSE", "DEFAULT", "TOTAL VOLUME",
+    "FOR INPATIENTS", "FOR ADULTS", "PER UNIT", "HALF-TAB", "STANDARD", "HFA", "MDI", "PF",
+)
+
+#: Words that say the drug went into a vein. None of them names a dose form, but each
+#: rules out every form that is not an injectable: `HEPARIN BOLUS FROM BAG 100 UNIT/ML`
+#: is not the irrigation solution of the same strength, and `PROPOFOL INFUSION 10
+#: MG/ML` is not the oral suspension. A name carrying one of these and no dose-form
+#: phrase is read as `INTRAVENOUS`, whose tiers are the injectable spellings. Without
+#: it, a concentration that fits several forms is left for a person to settle.
+IV_ROUTE_MARKERS: tuple[str, ...] = (
+    "IVPB", "IVP", "IV PUSH", "IV BOLUS", "BOLUS FROM BAG", "INFUSION", "PREMIX",
+    "PIGGYBACK", "PCA", "IV",
 )
 
 #: Abbreviations a pharmacy writes inside an ingredient name. Expanded before the name

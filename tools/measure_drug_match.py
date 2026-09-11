@@ -117,7 +117,7 @@ def source_readings(parsed):
     return out
 
 
-def audit_names(index, pending: Path, noise: list[str]) -> dict:
+def audit_names(index, pending: Path, noise: list[str], width: int | None = None) -> dict:
     """Check every match in a build's queue against the matched concept's own name."""
     terms = [(int(r["occurrences"]), r["source_string"])
              for r in csv.DictReader(open(pending, encoding="utf-8"))
@@ -127,7 +127,7 @@ def audit_names(index, pending: Path, noise: list[str]) -> dict:
     routes: collections.Counter = collections.Counter()
     disagreements = []
     for occurrences, source in terms:
-        parsed, status, matches = match_drug(index, source, noise)
+        parsed, status, matches = match_drug(index, source, noise, width)
         if status != "unique":
             continue
         settled += 1
@@ -161,15 +161,22 @@ def main() -> int:
     parser.add_argument("--audit", type=Path, default=None,
                         help="a build's review/pending.csv, to audit every match by name")
     parser.add_argument("--out", type=Path, default=ROOT / "results" / "drug_match.json")
+    parser.add_argument("--gold-through", default=None, metavar="DATE",
+                        help="count only mappings decided on or before this date as the confirmed "
+                             "set; later rows are decisions recorded because the matcher abstains "
+                             "on them by design, and measuring it against those measures nothing")
     args = parser.parse_args()
 
     gold = [r for r in csv.DictReader(open(args.mappings, encoding="utf-8"))
-            if r.get("concept_id")]
+            if r.get("concept_id")
+            and (args.gold_through is None or (r.get("decided_on") or "") <= args.gold_through)]
     if not gold:
         print("no confirmed drug mappings to measure against", file=sys.stderr)
         return 1
 
-    noise = list(load_dataset_config(args.dataset).terminology.drug_name_noise)
+    terminology = load_dataset_config(args.dataset).terminology
+    noise = list(terminology.drug_name_noise)
+    width = terminology.drug_name_truncated_at
     vocabulary = Vocabulary.open(args.vocabulary)
     if not getattr(vocabulary, "available", False):
         print(f"no vocabulary at {args.vocabulary}", file=sys.stderr)
@@ -180,7 +187,7 @@ def main() -> int:
     outcome = collections.Counter()
     examples: dict[str, list[dict]] = collections.defaultdict(list)
     for row in gold:
-        _parsed, status, matches = match_drug(index, row["source_string"], noise)
+        _parsed, status, matches = match_drug(index, row["source_string"], noise, width)
         if status != "unique":
             outcome[f"abstained_{status}"] += 1
             continue
@@ -214,7 +221,7 @@ def main() -> int:
         "examples": {k: v[:20] for k, v in examples.items()},
     }
     if args.audit:
-        report["name_audit"] = audit_names(index, args.audit, noise)
+        report["name_audit"] = audit_names(index, args.audit, noise, width)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     vocabulary.close()

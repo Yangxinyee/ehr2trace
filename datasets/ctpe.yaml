@@ -58,8 +58,7 @@ partitions:
 terminology:
   # Site-local words that appear inside a medication name and are not part of the drug.
   # `JHH`, `BMC`, `HCGH`, `SMH`, `SOM` and `JHM` are hospitals in this system; `UBER` and
-  # `IMS` are order-entry systems; `MBP`, `BEACON` and `PANEL` are order sets; `NS` is
-  # this pharmacy's shorthand for the saline the drug was hung in. Left in the string
+  # `IMS` are order-entry systems; `MBP`, `BEACON` and `PANEL` are order sets. Left in the string
   # they stop the ingredient from being recognised at all, and they are declared here
   # rather than in the converter because the next hospital's list is a different list.
   drug_name_noise:
@@ -72,11 +71,14 @@ terminology:
     - UBER
     - IMS
     - MBP
-    - NS
     - ZZ
     - BEACON
     - PANEL
     - TEMPLATE
+  # The export cuts a medication name at 50 characters: `ALBUTEROL SULFATE 2.5 MG/3 ML
+  # (0.083 %) SOLUTION F` is what a name of that width looks like, and the fragment
+  # is dropped rather than read (2026-09-11).
+  drug_name_truncated_at: 50
 
 sources:
 

@@ -399,6 +399,10 @@ class TerminologySpec(BaseModel):
     #: system abbreviations, order-set names, workflow markers. Matched whole-word and
     #: case-insensitively.
     drug_name_noise: list[str] = Field(default_factory=list)
+    #: The width at which this export cuts a medication name. A name of that width
+    #: ends in a fragment (`SOLUTION F`, `SUBCUTAN`), which the matcher then drops
+    #: rather than reading as part of the name. Unset means names are whole.
+    drug_name_truncated_at: int | None = Field(default=None, gt=0)
 
 
 class MedsSpec(BaseModel):
