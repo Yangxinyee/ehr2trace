@@ -87,6 +87,12 @@ sources:
     shape: point_event
     event_kind: drug_order
     required: true
+    # Not every row of a medication table names a medication. `ZZ IMS TEMPLATE` is an
+    # order template, `GENERIC EXTERNAL MEDICATION` a placeholder, and the rest are
+    # supplies -- test strips, lancets, a meter, pen needles -- which OMOP would file as
+    # devices. Dropped by exact name rather than published as drug exposures that can
+    # never resolve (D2, 2026-09-11); the same list applies to administrations.
+    row_filter: {column: Medication_Name, drop: ["ZZ IMS TEMPLATE", "GENERIC EXTERNAL MEDICATION", "MISCELLANEOUS MEDICAL SUPPLY MISC", "BLOOD SUGAR DIAGNOSTIC STRIPS", "BLOOD GLUCOSE TEST STRIPS", "LANCETS", "BLOOD-GLUCOSE METER KIT", "PEN NEEDLE, DIABETIC 31 GAUGE X 5/16\"", "PEN NEEDLE, DIABETIC 32 GAUGE X 5/32\""]}
     # Ordering intent. Never merged with administration: a prescribed drug and a given
     # drug are different facts about a patient.
     fields:
@@ -111,6 +117,7 @@ sources:
     shape: point_event
     event_kind: drug_admin
     required: false
+    row_filter: {column: Medication_Name, drop: ["ZZ IMS TEMPLATE", "GENERIC EXTERNAL MEDICATION", "MISCELLANEOUS MEDICAL SUPPLY MISC", "BLOOD SUGAR DIAGNOSTIC STRIPS", "BLOOD GLUCOSE TEST STRIPS", "LANCETS", "BLOOD-GLUCOSE METER KIT", "PEN NEEDLE, DIABETIC 31 GAUGE X 5/16\"", "PEN NEEDLE, DIABETIC 32 GAUGE X 5/32\""]}
     fields:
       person_id:    {from: [MRN, mrn], required: true}
       encounter_id: {from: [CSN, Encounter_CSN]}
@@ -151,6 +158,10 @@ sources:
     event_kind: condition
     code_system: ICD10CM
     required: true
+    # Three strings in the code column are not diagnosis codes: two Epic-internal IMO
+    # identifiers and an `ERRONEOUS ENCOUNTER--DISREGARD` placeholder, 11,922 rows.
+    # Dropped by exact value (D3, 2026-09-11).
+    row_filter: {column: Diagnosis_Code, drop: ["IMO0001", "IMO0002", "ERRONEOUS ENCOUNTER--DISREGARD"]}
     # The recorded date is when the problem was first noted, not a disease onset.
     #
     # One cell can hold several codes -- `R78.81, B95.7, Z16.29` is three diagnoses --

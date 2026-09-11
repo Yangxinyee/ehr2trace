@@ -82,6 +82,11 @@ sources:
     shape: point_event
     event_kind: measurement
     required: true
+    # Four flowsheet rows, 28 in all, are not vital signs this cohort can use: a
+    # maternal respiration prompt, a home pulse-oximetry questionnaire item, and two
+    # post-something pressures with no `Blood Pressure` value_type. Dropped by name
+    # (D11, 2026-09-11).
+    row_filter: {column: flowsheet_row_name, drop: ["Maternal Respirations:", "7. Personal Pulse Oximetry", "Post BP systolic", "Post BP diastolic"]}
     # Blood pressure arrives as one cell, "135/76". It is not split here: splitting one
     # recorded observation into two asserts that the source recorded two, which is a
     # declaration to make in the open, not a regex in a converter. tools/prepare_cu.py
