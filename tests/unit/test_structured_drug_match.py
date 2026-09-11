@@ -57,6 +57,9 @@ CONCEPTS = "".join([
     "19126918\tMetered Dose Inhaler\tDrug\tRxNorm\tDose Form\t\t316987\t19700101\t20991231\t\n",
     "9999005\talbuterol 0.09 MG/ACTUAT Metered Dose Inhaler\tDrug\tRxNorm\tClinical Drug\tS\t9999005\t19700101\t20991231\t\n",
     "9999006\talbuterol 0.09 MG/ML Injection\tDrug\tRxNorm\tClinical Drug\tS\t9999006\t19700101\t20991231\t\n",
+    # a brand, and the branded product the vocabulary says it is the brand name of
+    "9999100\tRoxicodone\tDrug\tRxNorm\tBrand Name\t\t9999100\t19700101\t20991231\t\n",
+    "9999101\toxycodone 5 MG Oral Tablet [Roxicodone]\tDrug\tRxNorm\tBranded Drug\tS\t9999101\t19700101\t20991231\t\n",
 ])
 STRENGTHS = "".join([
     "1049621\t1124957\t5\t8576\t\t\t\t\t\t19700101\t20991231\t\n",
@@ -70,6 +73,7 @@ STRENGTHS = "".join([
     "9999005\t1154602\t\t\t0.09\t8576\t\t45744809\t\t19700101\t20991231\t\n",
     # the same two numbers over a volume: a different strength, and it must stay one
     "9999006\t1154602\t\t\t0.09\t8576\t\t8587\t\t19700101\t20991231\t\n",
+    "9999101\t1124957\t5\t8576\t\t\t\t\t\t19700101\t20991231\t\n",
 ])
 RELATIONSHIPS = "".join([
     "1049621\t19082573\tRxNorm has dose form\t19700101\t20991231\t\n",
@@ -81,6 +85,8 @@ RELATIONSHIPS = "".join([
     "963353\t1124957\tForm of\t19700101\t20991231\t\n",
     "9999005\t19126918\tRxNorm has dose form\t19700101\t20991231\t\n",
     "9999006\t46234469\tRxNorm has dose form\t19700101\t20991231\t\n",
+    "9999101\t19082573\tRxNorm has dose form\t19700101\t20991231\t\n",
+    "9999100\t9999101\tBrand name of\t19700101\t20991231\t\n",
 ])
 
 
@@ -282,3 +288,20 @@ def test_per_actuation_and_per_millilitre_are_not_the_same_strength(index):
     _parsed, status, matches = match_drug(index, "ALBUTEROL 0.09 MG/ML INJECTION SOLUTION")
     assert status == "unique"
     assert matches[0].concept_id == 9999006
+
+
+def test_a_brand_name_is_read_as_its_ingredient_and_the_route_says_so(index):
+    # `ELIQUIS 5 MG TABLET` is apixaban 5 MG Oral Tablet; the vocabulary says so through
+    # `Brand name of` and DRUG_STRENGTH, and 185 of a second site's anticoagulant names
+    # were written that way. The brand is dropped, which the route records.
+    parsed, status, matches = match_drug(index, "ROXICODONE 5 MG TABLET")
+    assert status == "unique", (status, matches)
+    assert matches[0].concept_id == 1049621
+    assert matches[0].route.endswith("_via_brand")
+
+
+def test_a_brand_does_not_override_an_ingredient_spelling(index):
+    # An ingredient name that also happens to be a brand somewhere stays an ingredient.
+    assert not index.is_brand("oxycodone")
+    parsed, status, matches = match_drug(index, "OXYCODONE 5 MG TABLET")
+    assert status == "unique" and not matches[0].route.endswith("_via_brand")

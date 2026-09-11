@@ -327,6 +327,8 @@ class DrugIndex:
     def __init__(self, connection):
         self.con = connection
         self._ingredients: dict[str, tuple[set[int], int]] = {}
+        #: brand name -> the ingredients of every product it is the brand name of
+        self._brands: dict[str, set[int]] = {}
         self._forms: dict[str, set[int]] = {}
         self._by_key: dict[tuple, list[int]] = {}
         self._by_first_word: dict[str, list[str]] = {}
@@ -373,6 +375,27 @@ class DrugIndex:
                 self._ingredients[name] = ({int(concept_id)}, int(tier))
             elif tier == existing[1]:
                 existing[0].add(int(concept_id))
+        # A brand name stands for its ingredients, and the vocabulary says which: a
+        # Brand Name concept is `Brand name of` the branded products, and DRUG_STRENGTH
+        # names each product's ingredients. `ELIQUIS 5 MG TABLET` then reads as
+        # apixaban 5 MG Oral Tablet, which is the clinical drug it is. This is not a
+        # third spelling of an ingredient: it is only consulted when no ingredient
+        # spelling fits, and a match that went through it says so in its route.
+        for name, concept_id in con.execute("""
+            SELECT DISTINCT lower(trim(b.concept_name)), CAST(d.ingredient_concept_id AS BIGINT)
+            FROM CONCEPT b
+            JOIN CONCEPT_RELATIONSHIP r
+              ON r.concept_id_1 = b.concept_id AND r.relationship_id = 'Brand name of'
+             AND (r.invalid_reason IS NULL OR r.invalid_reason = '')
+            JOIN DRUG_STRENGTH d ON d.drug_concept_id = r.concept_id_2
+             AND (d.invalid_reason IS NULL OR d.invalid_reason = '')
+            JOIN _std_ing s ON s.concept_id = CAST(d.ingredient_concept_id AS BIGINT)
+            WHERE b.concept_class_id = 'Brand Name'
+              AND b.vocabulary_id IN ('RxNorm', 'RxNorm Extension')
+              AND (b.invalid_reason IS NULL OR b.invalid_reason = '')
+        """).fetchall():
+            if name not in self._ingredients:
+                self._brands.setdefault(name, set()).add(int(concept_id))
         for name in self._ingredients:
             first = name.split()[0].rstrip(",") if name.split() else ""
             self._by_first_word.setdefault(first, []).append(name)
@@ -451,6 +474,11 @@ class DrugIndex:
         con.execute("DROP TABLE IF EXISTS _std_ing")
 
     # -- lookups ----------------------------------------------------------
+    def is_brand(self, text: str) -> bool:
+        """Whether this name resolves only through a brand, for the route to record."""
+        name = " ".join(text.strip().lower().split())
+        return name in self._brands and not any(c in self._ingredients for c in self._spellings(name))
+
     def ingredient_ids(self, text: str) -> set[int] | None:
         """Resolve an ingredient name, most specific spelling first.
 
@@ -474,7 +502,8 @@ class DrugIndex:
                 # Losing that is not a match, so the term goes to a person instead.
                 return None
             return found[0]
-        return None
+        brand = self._brands.get(name)
+        return set(brand) if brand else None
 
     def _more_specific_exists(self, base: str, full: str) -> bool:
         dropped = [w for w in re.split(r"[,\s]+", full) if w and w not in base.split()]
@@ -634,10 +663,12 @@ def match_drug(index: DrugIndex, source: str,
     parsed = parse_drug_name(source, local_noise)
     ingredient_sets: list[set[int]] = []
     ingredient_names: list[str] = []
+    via_brand = False
     for component in parsed.components:
         ids = index.ingredient_ids(component.ingredient_text)
         if not ids:
             return parsed, "no_ingredient", []
+        via_brand = via_brand or index.is_brand(component.ingredient_text)
         ingredient_sets.append(ids)
         ingredient_names.append(component.ingredient_text.lower())
 
@@ -680,6 +711,8 @@ def match_drug(index: DrugIndex, source: str,
                     continue
                 candidates = _preferred(index, sorted(found), ingredient_names, source_words)
                 route = reading if depth == 0 else f"{reading}_widened_form"
+                if via_brand:
+                    route = f"{route}_via_brand"
                 matches = [DrugMatch(c, *index.concept(c), route) for c in candidates]
                 if len(matches) == 1:
                     return parsed, "unique", matches
