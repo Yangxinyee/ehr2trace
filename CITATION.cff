@@ -7,14 +7,17 @@ type: software
 authors:
   - given-names: Xinye
     family-names: Yang
-    affiliation: University of Colorado Anschutz School of Medicine
+    affiliation: Department of Radiology, University of Colorado Anschutz School of Medicine
   - given-names: Yuli
     family-names: Wang
-    affiliation: University of Colorado Anschutz School of Medicine
+    affiliation: Department of Radiology, Johns Hopkins University School of Medicine
+  - given-names: Cheng Ting
+    family-names: Lin
+    affiliation: Department of Radiology, Johns Hopkins University School of Medicine
   - given-names: Harrison
     family-names: Bai
     email: harrison.bai@cuanschutz.edu
-    affiliation: University of Colorado Anschutz School of Medicine
+    affiliation: Department of Radiology, University of Colorado Anschutz School of Medicine
 repository-code: https://github.com/Yangxinyee/ehr2trace
 license: Apache-2.0
 version: 0.6.0
