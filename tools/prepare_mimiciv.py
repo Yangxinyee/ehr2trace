@@ -68,23 +68,32 @@ class Prep:
             self.inputs[str(path)] = sha256_file(path)
         return True
 
-    def emit(self, source_id: str, sql: str, driving: str) -> None:
-        """Materialize one prepared source, asserting the join did not change cardinality."""
+    def emit(self, source_id: str, sql: str, driving: str, adds: str | None = None) -> None:
+        """Materialize one prepared source, asserting the join did not change cardinality.
+
+        ``adds`` is the one exception, stated rather than buried: a query counting the
+        rows the preparation deliberately writes beyond what it read, because a cell
+        held two facts. Only the blood-pressure split uses it, and the manifest records
+        the count so the excess is a declared number rather than a surprise.
+        """
         target = self.out_dir / f"{source_id}.parquet"
         expected = self.con.execute(f"SELECT count(*) FROM {driving}").fetchone()[0]
+        added = self.con.execute(adds).fetchone()[0] if adds else 0
         self.con.execute(f"COPY ({sql}) TO '{target}' (FORMAT PARQUET, COMPRESSION ZSTD)")
         actual = self.con.execute(f"SELECT count(*) FROM read_parquet('{target}')").fetchone()[0]
-        if actual != expected:
+        if actual != expected + added:
             raise SystemExit(
-                f"{source_id}: {actual:,} rows written from {expected:,} in {driving}. "
+                f"{source_id}: {actual:,} rows written from {expected:,} in {driving}"
+                f"{f' plus {added:,} declared' if added else ''}. "
                 "A lookup join changed cardinality -- that is a duplicated or dropped fact, "
                 "not a formatting difference."
             )
-        print(f"  {source_id:24} {actual:>12,} rows")
+        print(f"  {source_id:24} {actual:>12,} rows" + (f"  ({added:,} added by a declared split)" if added else ""))
         self.records.append(
             {
                 "source_id": source_id,
                 "rows": actual,
+                "rows_added_by_split": added,
                 "driving_table": driving,
                 "output_path": str(target),
                 "output_sha256": sha256_file(target),
@@ -262,6 +271,8 @@ def build(mimic: Path, ed: Path | None, note: Path | None, out: Path) -> dict:
               FROM bp WHERE splittable
             """,
             "omr",
+            adds="SELECT count(*) FROM omr WHERE result_name LIKE 'Blood Pressure%' "
+                 "AND regexp_matches(result_value, '^[0-9]+/[0-9]+$')",
         )
 
     # ---- medications -------------------------------------------------------------
