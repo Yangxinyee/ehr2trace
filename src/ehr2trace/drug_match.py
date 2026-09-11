@@ -29,6 +29,10 @@ claim:
   product from `gabapentin 600 MG Oral Tablet` and its name says so. A candidate whose
   name begins with words before the first ingredient is set aside, so the unqualified
   concept wins instead of the pair being called ambiguous.
+* **the ingredient alone** -- `Acetaminophen`, with no strength, no form and no number,
+  states an ingredient and nothing else, and RxNorm's Ingredient concept is the
+  standard concept that states exactly that. This is not dropping a strength to reach
+  an ingredient; there was none to drop.
 
 Anything that survives none of that, or survives twice, abstains.
 
@@ -406,6 +410,9 @@ class DrugIndex:
         #: Dose forms that anything is ever measured by volume in. Derived, not listed.
         self._volume_forms: set[int] = set()
         self._concepts: dict[int, tuple[str, str]] = {}
+        #: standard ingredient id -> (name, vocabulary), for the name that states an
+        #: ingredient and nothing else
+        self._ingredient_concepts: dict[int, tuple[str, str]] = {}
         self._names: dict[int, str] = {}
         self._build()
 
@@ -438,6 +445,11 @@ class DrugIndex:
             JOIN _std_ing s ON s.concept_id = CAST(r.concept_id_2 AS BIGINT)
             WHERE c.concept_class_id IN ('Ingredient', 'Precise Ingredient')
         """)
+        for concept_id, name, vocabulary in con.execute("""
+            SELECT CAST(s.concept_id AS BIGINT), c.concept_name, c.vocabulary_id
+            FROM _std_ing s JOIN CONCEPT c ON CAST(c.concept_id AS BIGINT) = s.concept_id
+        """).fetchall():
+            self._ingredient_concepts[int(concept_id)] = (name, vocabulary)
         for name, concept_id, tier in con.execute(
             "SELECT name, concept_id, min(tier) FROM _ing_alias GROUP BY 1, 2"
         ).fetchall():
@@ -907,6 +919,19 @@ def _match_parsed(index: DrugIndex, parsed: ParsedDrug) -> tuple[str, list[DrugM
         # A number was written and not understood. Matching a concept that carries no
         # strength would silently drop it, so the term goes to a person instead.
         return "unparsed_strength", []
+    if parsed.dose_form is None and not have_strength and not parsed.had_number and len(ingredient_sets) == 1:
+        # `Acetaminophen`, `HYDROmorphone (Dilaudid)`, `MORPHINE VARIABLE DOSE`: the
+        # string states an ingredient and nothing else, and RxNorm's Ingredient concept
+        # is the standard concept that states exactly that. Reaching for a clinical
+        # drug form here would assert a form the string never named -- and did, until
+        # this reading existed. The physician mapped these names the same way.
+        ids = sorted(ingredient_sets[0])
+        route = "ingredient_via_brand" if via_brand else "ingredient"
+        matches = [DrugMatch(c, *index._ingredient_concepts[c], route) for c in ids
+                   if c in index._ingredient_concepts]
+        if len(matches) == 1:
+            return "unique", matches
+        return ("ambiguous", matches) if matches else ("no_match", [])
     if any(s is not None and s.origin == "element" for s in strengths):
         # `300 MG IODINE/ML` is a strength in a unit the vocabulary does not use, and
         # comparing the number against a drug mass found `Iohexol 302 MG/ML` -- a

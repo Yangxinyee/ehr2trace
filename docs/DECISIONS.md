@@ -172,6 +172,12 @@ What changed, and why each is still a reading of the string rather than a weaker
   the concept instead, when exactly one differs from the source by salt words alone.
 - **a brand is a combination only if one of its products is.** `PRIMAXIN` expands to
   cilastatin and imipenem; `PRADAXA`, filed under two ids for one ingredient, does not.
+- **the ingredient alone.** `Acetaminophen`, `HYDROmorphone (Dilaudid)`, `MORPHINE
+  VARIABLE DOSE` state an ingredient and nothing else, and RxNorm's Ingredient concept
+  is the standard concept that states exactly that; the physician mapped the last two
+  the same way. Until this reading existed, such names reached a clinical drug *form*
+  by the length of its name -- 17 million MIMIC-IV administration rows carried a dose
+  form the string never named -- and, once that guess was withdrawn, nothing at all.
 - **the set of forms measured by volume had been empty.** RxNorm writes "per one
   millilitre" with a blank denominator *value*, and the test for a liquid required the
   value to be present, so the formless rule above had never admitted anything.
@@ -189,23 +195,23 @@ the source did not. Each of these is a rule with a test, and each ends in the re
 queue rather than in a concept.
 
 Measured against the 139 drug mappings a physician had already confirmed, holding those
-mappings out so the matcher cannot short-cut them: 127 of 139 resolve, and of those,
-93.7% are the identical concept, 5.5% are the same ingredient and strength under the
+mappings out so the matcher cannot short-cut them: 129 of 139 resolve, and of those,
+93.8% are the identical concept, 5.4% are the same ingredient and strength under the
 other spelling of one dose form, and 0.8% (one name, a biosimilar written with no
 strength) are the same ingredient under the other reading of a concentration. **None is
 a different drug and none is a different strength** — the failure that would matter is
-absent, and the 12 that do not resolve abstain rather than approximate. Before the
+absent, and the 10 that do not resolve abstain rather than approximate. Before the
 second pass the numbers were 121 of 139 and 91.7% / 5.8% / 2.5%. The eight mappings
 decided by hand on 2026-09-11 because the matcher abstains on them by design (lactated
 Ringer's, iodinated contrast stated as iodine) are held out of this set with
 `--gold-through 2026-09-10`. Over the export's original queue of 26,629 medication
-names the pass settles 9,574 (8.62 million rows), where the first pass settled 6,950.
+names the pass settles 9,850 (8.66 million rows), where the first pass settled 6,950.
 
 A second check reads the *concept name* — a different field, written by a different
 process from the numbers in `DRUG_STRENGTH` — re-derives a strength from it, and
 compares that with the source string, reading a percent both ways and allowing the same
-1% the matcher allows. Over the 9,574 names the pass settles on this export's original
-queue of 26,629 (8.62 million rows), 8,403 are comparable that way and **none
+1% the matcher allows. Over the 9,850 names the pass settles on this export's original
+queue of 26,629 (8.66 million rows), 8,403 are comparable that way and **none
 disagrees**. Before the second pass it settled 6,950, with 5,923 comparable.
 
 It found one, and the fix is worth recording because it is the same mistake twice. A
@@ -236,6 +242,6 @@ recorded in a file a reviewer can read and change, not something derived from th
 
 What this does not do is replace review. Multi-ingredient solutions the vocabulary has
 under no name the source uses (`LACTATED RINGERS`), strengths stated as an element
-(`320 MG IODINE/ML`), names with no strength whose drug comes in several forms, parenteral
-nutrition, and non-drugs (`BLOOD SUGAR DIAGNOSTIC STRIPS`) all still abstain and still go
-to a person. The queue is smaller, not gone.
+(`320 MG IODINE/ML`), a number the parser did not read, parenteral nutrition, and
+non-drugs (`BLOOD SUGAR DIAGNOSTIC STRIPS`) all still abstain and still go to a person.
+The queue is smaller, not gone.

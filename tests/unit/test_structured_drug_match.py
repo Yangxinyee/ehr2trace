@@ -564,3 +564,18 @@ def test_an_ingredient_written_without_its_salt_reaches_the_salted_spelling(inde
     assert status == "unique" and matches[0].concept_id == 9999232
     parsed = parse_drug_name("HEPARIN (PORCINE) 25,000 UNIT/250 ML (100 UNIT/ML) IN DEXTROSE 5 % IV")
     assert parsed.components[0].ingredient_text == "HEPARIN, PORCINE" and parsed.dose_form == "IV"
+
+
+def test_a_name_that_states_only_an_ingredient_is_the_ingredient(index):
+    _parsed, status, matches = match_drug(index, "OXYCODONE")
+    assert status == "unique" and matches[0].concept_id == 1124957 and matches[0].route == "ingredient"
+    _parsed, status, matches = match_drug(index, "OXYCODONE VARIABLE DOSE")
+    assert status == "unique" and matches[0].concept_id == 1124957
+    # a brand alone is its ingredient, unless the brand stands for several
+    _parsed, status, matches = match_drug(index, "ROXICODONE")
+    assert status == "ambiguous" and {m.concept_id for m in matches} == {1124957, 1112807}
+    # a number the parser did not read still abstains, and a form still names a product
+    _parsed, status, _m = match_drug(index, "OXYCODONE 0-4")
+    assert status in ("unparsed_strength", "no_ingredient")
+    _parsed, status, matches = match_drug(index, "LORAZEPAM INFUSION")
+    assert not (status == "unique" and matches[0].route.startswith("ingredient"))
