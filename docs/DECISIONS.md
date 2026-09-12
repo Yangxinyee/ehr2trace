@@ -363,3 +363,23 @@ unaffected: it builds a single-pick map on purpose, one code per event.
 This was not the goal of the change, and it is kept rather than reverted for the reason
 the rule exists: a cohort query for either half of a combination code should not miss
 patients because of a punctuation convention.
+
+## Every published row says where the record came from
+
+OMOP puts a `*_type_concept_id` on every clinical row to record the provenance of the
+record itself: a prescription, an administration record, a problem list, an encounter.
+`mappings/type_concepts.csv` existed for those eleven keys and was empty, so every
+published row carried 0 -- legal, and less than this converter knows.
+
+Comparing the export against the conversion OHDSI publishes for the MIMIC-IV demo made
+the gap concrete: that conversion marks all of its drug rows `32838` (EHR prescription),
+which is one fact about provenance, and ours marked none. The registry is now filled
+from the vocabulary's own type concepts, so a drug row published from an order carries
+`32838` and one published from an administration record carries `32818`. The distinction
+between ordering and giving a drug is the one this system exists to keep, and it now
+survives into the field OMOP provides for it rather than living only in the canonical
+layer.
+
+The ids are decisions in the git-tracked registry, checked against the loaded vocabulary
+like every other mapping, because an id typed into code has no provenance and nobody
+revalidates it when the vocabulary is updated.

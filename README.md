@@ -240,6 +240,12 @@ itself stays, so ids remain stable and an earlier decision is still traceable. O
 `omop` may retire items, because it is the one caller that sees the complete unmapped
 set; `propose --limit` looks at a subset and must leave the rest alone.
 
+OMOP asks every clinical row for a `*_type_concept_id` saying what kind of record it
+came from. `mappings/type_concepts.csv` carries those decisions, so a drug row published
+from an order is marked `EHR prescription` and one published from an administration
+record is marked `EHR administration record` -- the order/administration distinction
+survives into the CDM field meant for it, not only into the canonical layer.
+
 A code whose concept the vocabulary has since retired still resolves, through the
 `Maps to` the vocabulary keeps for exactly that purpose: an NDC leaves the market and an
 ICD-10-CM code is split at a fiscal-year boundary, but the record was written with the
