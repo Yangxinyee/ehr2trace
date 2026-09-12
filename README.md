@@ -240,6 +240,17 @@ itself stays, so ids remain stable and an earlier decision is still traceable. O
 `omop` may retire items, because it is the one caller that sees the complete unmapped
 set; `propose --limit` looks at a subset and must leave the rest alone.
 
+A code whose concept the vocabulary has since retired still resolves, through the
+`Maps to` the vocabulary keeps for exactly that purpose: an NDC leaves the market and an
+ICD-10-CM code is split at a fiscal-year boundary, but the record was written with the
+code it was written with. Nothing withdrawn is published -- only the relationship to a
+current standard concept is followed -- and `term_map.path` says `..._retired` so the
+set is reviewable. Requiring the source concept to be current had left 3,036,972
+MIMIC-IV prescriptions and 7,588 diagnoses across two datasets with no concept at all.
+Where a code maps to several standard concepts the event's domain picks the one that
+goes in its column, and the others are published as the additional rows OMOP expects of
+a combination code.
+
 Drug names are the exception to needing a person at all, because they are not free text.
 A hospital writes `OXYCODONE 5 MG TABLET`, and the vocabulary says the same three things
 about `oxycodone hydrochloride 5 MG Oral Tablet` -- with the strength as a *number* in
@@ -303,14 +314,14 @@ MIMIC-IV v3.1 (hosp + ed) and v2.2 notes with no MIMIC-specific conversion code:
 
 | | |
 |---|---:|
-| Source rows | 321,971,380 |
-| Canonical events | 311,633,030 |
-| Event ↔ source-row links | 317,480,691 |
+| Source rows | 346,007,482 |
+| Canonical events | 304,811,180 |
+| Event ↔ source-row links | 309,972,630 |
 | Subjects | 364,673 |
 | Persons published to OMOP | 364,627 |
 | MEDS shards | 364,673 |
-| Rows quarantined rather than guessed at | 8,021,059 |
-| Validation | 34 passed, 5 skipped, 0 failed |
+| Rows quarantined rather than guessed at | 8,021,058 |
+| Validation | 35 passed, 5 skipped, 0 failed |
 
 The five skips are honest ones: MIMIC has no extraction anchors and no cohort
 partitions, so four checks have nothing to examine, and its birth years come from the

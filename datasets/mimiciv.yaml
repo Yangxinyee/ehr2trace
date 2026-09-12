@@ -244,7 +244,18 @@ sources:
     # Three items -- labelled only H, L and I, 2.66 million rows each -- carry `___`
     # or `-` in every row: the value was masked in the source. A masked value is not a
     # measurement, and the rows would otherwise be the largest unmapped block here.
-    row_filter: {column: itemid, drop: ["50934", "51678", "50947"]}
+    # Ten more are specimen handling, not results, measured 2026-09-11 over every row
+    # (B2): the hold tubes 50933 Green Top Hold (391,517 rows, all "HOLD. DISCARD ..."),
+    # 50887 Blue Top Hold (339,117), 50955 Light Green Top Hold (306,290, all masked),
+    # 50979 Red Top Hold (224,992, one number in all), 51103 Uhold (193,403, "HOLD."),
+    # 51107 Urine tube, held (142,289), 50919 EDTA Hold (100,362, one text in all);
+    # 51706 Problem Specimen (33,059, six values); 52023 Assist/Control (24,531, no
+    # value at all); 52425 XUCU (23,223, all "DONE"). Items whose rows do carry numbers
+    # but whose labels name no analyte (STX, UTX, HPE, ARCH-1) are kept and stay
+    # unmapped: a value is a measurement even when its name is opaque.
+    row_filter: {column: itemid, drop: ["50934", "51678", "50947",
+                                         "50933", "50887", "50955", "50979", "51103",
+                                         "51107", "50919", "51706", "52023", "52425"]}
     # charttime is when the specimen was taken; storetime is when the result became
     # visible. Keeping them apart is the whole point of available_time: without it a
     # model reads a potassium result hours before the lab reported it.
@@ -375,7 +386,16 @@ sources:
     event_kind: drug_order
     code_system: SOURCE
     required: false
-    row_filter: {column: ndc, keep: ["0", ""]}
+    # Three "drugs" are containers: `Bag`, `Vial` and `Soln` are the drug_type=BASE row of
+    # a compounded order whose product is the empty bag or vial, with no substance named
+    # (Bag 100 mL Bag, Vial Send Vial, Soln 50 mL Vial); the drug is the MAIN row of the
+    # same pharmacy_id, which is kept. A bag is not a drug exposure. Base rows that do
+    # name their fluid (Iso-Osmotic Dextrose, 0.9% Sodium Chloride, Sterile Water ...)
+    # stay, mapped to that fluid in mappings/drug.csv (B1, 2026-09-11). Only this named
+    # source drops them: a base row carrying an NDC names a product through the NDC.
+    row_filter:
+      - {column: ndc, keep: ["0", ""]}
+      - {column: drug, drop: ["Bag", "Vial", "Soln"]}
     fields:
       person_id:    {from: [subject_id], required: true}
       encounter_id: {from: [hadm_id]}

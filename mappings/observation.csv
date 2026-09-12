@@ -1,5 +1,5 @@
 source_string,code_system,concept_id,concept_name,domain_id,vocabulary_id,mapping_version,decided_by,decided_on,note
 AGE,SOURCE,3022304,Age,Observation,LOINC,1,yxx,2026-09-07,extends the CTPE decision of 2026-09-02 to MIMIC-IV; same content-addressed SOURCE/AGE term
-ETHNICITY,SOURCE,44803968,Ethnicity,Observation,SNOMED,1,yxx,2026-09-02,
+ETHNICITY,SOURCE,4271761,Ethnic group,Observation,SNOMED,1,yxx,2026-09-11,"Was 44803968 Ethnicity, which this vocabulary has deleted (invalid_reason D), so the mapping confirmed against nothing and every ethnicity row stayed unmapped. 364699009 Ethnic group is the standard concept the bundle carries, 2026-09-11."
 GENDER,SOURCE,3046965,Sex,Observation,LOINC,1,yxx,2026-09-07,extends the CTPE decision of 2026-09-02 to MIMIC-IV; same content-addressed SOURCE/GENDER term
 RACE,SOURCE,4013886,Race,Observation,SNOMED,1,yxx,2026-09-02,

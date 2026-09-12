@@ -275,3 +275,91 @@ Both answers live in the YAML under `open_questions` as `answer` text that names
 decider, the date and the evidence. The alternative of waiting kept three patients out
 of OMOP and a label unusable for reasons the data could settle; the alternative of
 answering silently in code is the quiet guess this design exists to prevent.
+
+## A code the vocabulary has retired is still the code the record carries
+
+The resolver required the *source* concept to be current: `CONCEPT.invalid_reason IS
+NULL` sat in the join that finds a source code, in the batch pass, in the unpunctuated
+pass and in the per-term lookup. That is a statement about today's code set rather than
+about the record. Athena keeps a withdrawn concept and its `Maps to` for exactly the
+opposite reason -- an NDC leaves the market, an ICD-10-CM code is split at a fiscal-year
+boundary, and the history coded with it does not change.
+
+Measured on 2026-09-11 before the change: 1,496 discontinued NDCs carrying 3,036,972
+MIMIC-IV prescription rows, 129 superseded ICD codes carrying 5,046 MIMIC-IV diagnoses
+and 116 carrying 2,542 JHU-CTPE diagnoses resolved to nothing, while the same drugs
+prescribed a year later resolved. The retired source concept is now admitted and only
+its relationship to a *current* standard concept is followed, so nothing withdrawn is
+published; the path records it (`mapped_relationship_retired`), which is what makes the
+set reviewable rather than invisible.
+
+A human mapping in `mappings/` is held to the stricter rule, unchanged: `_confirm`
+still requires a current standard concept, because a person's decision that points at a
+withdrawn concept is a decision to remake. Five did, and were remade the same day -- four
+community LOINC codes for polymorphonuclear cells, superseded by granulocyte codes, and
+`ETHNICITY`, which pointed at a concept this bundle deletes and so had silently mapped
+nothing at all.
+
+## Which of a code's several targets is published is a question about the row
+
+`C92.01`, acute myeloid leukaemia in remission, maps to two standard concepts: the
+condition and an Episode concept for the remission. The resolver published the lowest
+concept id, which is deterministic and nothing else -- it is the Episode, and 2,892
+MIMIC-IV diagnosis rows were published carrying a concept the condition table cannot
+hold. 70 ICD-10-CM codes in that export behave this way.
+
+The event kind already says which domain the row is headed for, so it now chooses: the
+first target in that domain wins, the lowest id remains the tie-break where the kind
+expects no particular domain, and every other target is still carried as an alternate
+with `_ambiguous` in the path. This is not a domain *gate* -- the 2026-09-04 decision
+that a code's domain is the vocabulary's to state and the publisher's to route still
+holds, and a code with one target still resolves to it whatever its domain.
+
+## A bag is not a drug exposure, and a hold tube is not a measurement
+
+MIMIC-IV's `prescriptions` table carries 3,471,112 rows with `drug_type = 'BASE'`: the
+diluent half of a compounded order, whose partner `MAIN` row names the drug. Most of
+them say what the fluid is and are kept, now mapped to it -- `Iso-Osmotic Dextrose`,
+`5% Dextrose` and `D5W` to glucose 50 MG/ML, `0.9% Sodium Chloride`, `NS` and
+`Iso-Osmotic Sodium Chloride` to sodium chloride 9 MG/ML, `Sterile Water` and `SW` to
+the water ingredient, RxNorm having no product concept for water for injection. A
+patient given a litre of saline was given saline, and the same rows arriving with an
+NDC already resolved that way, so leaving the named ones at concept 0 was an
+inconsistency rather than a caution.
+
+Three of those names are not fluids at all. `Bag`, `Vial` and `Soln` describe the
+container -- the product strengths read `Bag 100 mL Bag`, `Vial Send Vial`, `Soln 50 mL
+Vial` -- and name no substance; the drug is on the `MAIN` row of the same
+`pharmacy_id`, which for `Bag` is magnesium sulfate in 87% of cases. 439,999 rows of
+"the patient was exposed to a bag" were published as drug exposures. They are dropped by
+a declared row filter, where `SOURCE_ROWS_ACCOUNTED` reports them as rows that moved.
+
+Ten laboratory items are specimen handling rather than results, and were checked value
+by value over every row before being dropped: the hold tubes (`Green Top Hold`,
+`Blue Top Hold`, `Light Green Top Hold`, `Red Top Hold`, `Uhold`, `Urine tube, held`,
+`EDTA Hold`) carry "HOLD. DISCARD ..." or a masking marker in every row, `Problem
+Specimen` six values in 33,059 rows, `Assist/Control` no value at all, `XUCU` the word
+DONE. Items whose labels name no analyte but whose rows do carry numbers (`STX1-6`,
+`UTX1-7`, `HPE1-7`, `ARCH-1`) are kept and stay unmapped: a value is a measurement even
+when its name is opaque, and that is MIMIC-IV's ceiling, not this converter's decision.
+
+## The punctuated and unpunctuated passes now agree about a code's other targets
+
+Unifying the two resolution passes exposed a third inconsistency between them. The first
+pass records every standard concept a source code maps to -- the primary in the event's
+column, the rest as alternates, which the OMOP writer publishes as one row per concept
+because a combination code asserts all of them. The unpunctuated pass, which is how a
+code written `Y929` rather than `Y92.9` is found, kept only one and dropped the others,
+while still writing `_ambiguous` in the path to say there had been a choice.
+
+The effect was that the same code fanned out or did not depending on how the hospital
+wrote its decimal point: JHU-CTPE writes them, so `T43.292A` published both the poisoning
+and the intentional self-harm; MIMIC-IV does not, so 7,519 of its 20,517 ICD-10-CM codes
+asserted only their first target. Making the passes agree adds 433,666 condition rows,
+30,564 observation rows and 362 procedure rows to the MIMIC-IV export -- rows that were
+always implied by the codes and by the rule the first pass already followed. MEDS is
+unaffected: it builds a single-pick map on purpose, one code per event.
+
+This was not the goal of the change, and it is kept rather than reverted for the reason
+the rule exists: a cohort query for either half of a combination code should not miss
+patients because of a punctuation convention.

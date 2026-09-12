@@ -241,12 +241,21 @@ class Vocabulary:
 
     def lookup_code(self, code_system: str, code: str) -> ConceptMatch | None:
         """Source code -> source concept -> its standard concept via "Maps to"."""
+        # A code the vocabulary has since retired is still the code the record was made
+        # with, and Athena keeps its `Maps to` for exactly that reason: an NDC leaves
+        # the market, an ICD-10-CM code is split at a fiscal-year boundary, and the
+        # history coded with them does not change. Rejecting the retired concept here
+        # unmapped 3.04 million MIMIC-IV prescriptions carrying discontinued NDCs and
+        # 7,600 diagnoses on superseded ICD codes (measured 2026-09-11). The retirement
+        # is carried into the path, so a reviewer can list every mapping that relied on
+        # it; only a valid relationship to a current standard concept is followed.
         row = self.con.execute(
             """
-            SELECT c.concept_id, c.concept_name, c.domain_id, c.vocabulary_id, c.standard_concept
+            SELECT c.concept_id, c.concept_name, c.domain_id, c.vocabulary_id, c.standard_concept,
+                   coalesce(c.invalid_reason, '') <> '' AS retired
             FROM CONCEPT c
             WHERE c.vocabulary_id = ? AND c.concept_code = ?
-              AND (c.invalid_reason IS NULL OR c.invalid_reason = '')
+            ORDER BY retired, c.concept_id
             LIMIT 1
             """,
             [code_system, code],
@@ -254,7 +263,8 @@ class Vocabulary:
         if not row:
             return None
         source = ConceptMatch(int(row[0]), row[1], row[2], row[3], row[4])
-        if source.standard_concept == "S":
+        retired = bool(row[5])
+        if source.standard_concept == "S" and not retired:
             return source
         mapped = self.con.execute(
             """
@@ -277,7 +287,7 @@ class Vocabulary:
             mapped[3],
             mapped[4],
             source_concept_id=source.concept_id,
-            path="mapped_relationship",
+            path="mapped_relationship_retired" if retired else "mapped_relationship",
         )
 
     def lookup_name(self, domain: str, name: str) -> ConceptMatch | None:
@@ -353,6 +363,7 @@ class Vocabulary:
 DOMAIN_FOR_KIND = {
     "condition": "Condition",
     "drug_order": "Drug",
+    "drug_dispense": "Drug",
     "drug_admin": "Drug",
     "procedure": "Procedure",
     "measurement": "Measurement",
@@ -445,14 +456,17 @@ def resolve_terms_batch(
     rows = con.execute(
         """
         WITH src AS (
+            -- A retired source concept (invalid_reason set) is admitted: the record was
+            -- coded with it, and the vocabulary keeps its `Maps to` so that history
+            -- still maps. See Vocabulary.lookup_code for the measurement behind this.
             SELECT t.code_system, t.source_code, t.event_kind,
                    CAST(c.concept_id AS BIGINT) AS source_concept_id,
-                   c.standard_concept, c.concept_name, c.domain_id, c.vocabulary_id
+                   c.standard_concept, c.concept_name, c.domain_id, c.vocabulary_id,
+                   coalesce(c.invalid_reason, '') <> '' AS retired
             FROM _terms t
             JOIN CONCEPT c
               ON c.vocabulary_id = t.code_system
              AND c.concept_code = t.source_code
-             AND (c.invalid_reason IS NULL OR c.invalid_reason = '')
         )
         SELECT s.code_system, s.source_code, s.event_kind,
                CASE WHEN s.standard_concept = 'S' THEN s.source_concept_id
@@ -467,7 +481,8 @@ def resolve_terms_batch(
                -- which of them a run picks must not depend on the query plan.
                count(DISTINCT CASE WHEN s.standard_concept = 'S' THEN s.source_concept_id
                                    ELSE CAST(m.concept_id AS BIGINT) END)
-                 OVER (PARTITION BY s.code_system, s.source_code) AS competing
+                 OVER (PARTITION BY s.code_system, s.source_code) AS competing,
+               s.retired
         FROM src s
         LEFT JOIN CONCEPT_RELATIONSHIP r
                ON r.concept_id_1 = CAST(s.source_concept_id AS VARCHAR)
@@ -484,33 +499,29 @@ def resolve_terms_batch(
     ).fetchall()
     con.execute("DROP TABLE IF EXISTS _terms")
 
+    # The domain is carried, not gated on. It used to be a rejection: a code whose
+    # standard concept was not the domain the source column implied was dropped and
+    # queued for review, on the reasoning that forcing it into the wrong column was
+    # worse than publishing nothing. That reasoning was right about the column and
+    # wrong about the conclusion -- OMOP decides a fact's table by its concept's
+    # domain, not by the column it arrived in, and it has an OBSERVATION table for
+    # exactly the codes that are not conditions. Gating here withheld 5,737 terms
+    # carrying 1,944,952 rows, nearly all of them Z codes: family history, screening
+    # encounters, socioeconomic factors. The routing now happens where the row is
+    # written, which is the only place that can see which tables exist.
+    grouped: dict[tuple[str, str], list] = {}
+    for row in rows:
+        if row[3] is None:
+            continue
+        grouped.setdefault((row[0], normalize_term(row[1])), []).append(row)
     hits: dict[tuple[str, str], ConceptMatch] = {}
-    for (code_system, source_code, event_kind, concept_id, name, domain, vocab, source_id,
-         direct, competing) in rows:
-        if concept_id is None:
-            continue
-        # The domain is carried, not gated on. It used to be a rejection: a code whose
-        # standard concept was not the domain the source column implied was dropped and
-        # queued for review, on the reasoning that forcing it into the wrong column was
-        # worse than publishing nothing. That reasoning was right about the column and
-        # wrong about the conclusion -- OMOP decides a fact's table by its concept's
-        # domain, not by the column it arrived in, and it has an OBSERVATION table for
-        # exactly the codes that are not conditions. Gating here withheld 5,737 terms
-        # carrying 1,944,952 rows, nearly all of them Z codes: family history, screening
-        # encounters, socioeconomic factors. The routing now happens where the row is
-        # written, which is the only place that can see which tables exist.
-        key = (code_system, normalize_term(source_code))
-        if key in hits:
-            # Same source code, another standard concept. The first is the primary pick
-            # (the query orders by concept id, so the choice is deterministic); the rest
-            # are recorded so a caller with room for them can publish them.
-            existing = hits[key]
-            if int(concept_id) != existing.concept_id:
-                hits[key] = replace(
-                    existing,
-                    alternates=existing.alternates + ((int(concept_id), domain or ""),),
-                )
-            continue
+    for key, group in grouped.items():
+        primary, others = _primary_target(
+            group, _expected_domain(r[2] for r in group), concept_at=3, domain_at=5)
+        (_cs, _code, _kind, concept_id, name, domain, vocab, source_id,
+         direct, competing, retired) = primary
+        base = "exact_code" if direct else (
+            "mapped_relationship_retired" if retired else "mapped_relationship")
         hits[key] = ConceptMatch(
             concept_id=int(concept_id),
             concept_name=name or "",
@@ -518,7 +529,8 @@ def resolve_terms_batch(
             vocabulary_id=vocab or "",
             standard_concept="S",
             source_concept_id=None if direct else int(source_id),
-            path=_path("exact_code" if direct else "mapped_relationship", competing),
+            path=_path(base, competing),
+            alternates=tuple((int(r[3]), r[5] or "") for r in others),
         )
 
     resolved.update(hits)
@@ -612,6 +624,51 @@ def _confirm(con, approved: ConceptMatch) -> ConceptMatch | None:
                    standard_concept=row[3])
 
 
+def _expected_domain(kinds: Iterable[str]) -> str | None:
+    """The one domain these event kinds agree on, or None if they do not name one.
+
+    A term map holds one concept per source code, so a code written for two kinds of
+    event gets one answer. Where the kinds expect the same domain that answer is clear;
+    where they disagree -- or where a kind expects no domain at all, as `note` does --
+    there is nothing to prefer, and the tie-break decides. Taking a *set* rather than
+    the first kind seen is what keeps this independent of the order rows come back in:
+    the query does not sort by event kind, so reading one kind off the first row made
+    the published concept depend on the thread count.
+    """
+    domains = {DOMAIN_FOR_KIND.get(k or "") for k in kinds}
+    domains.discard(None)
+    return next(iter(domains)) if len(domains) == 1 else None
+
+
+def _primary_target(group: list, expected: str | None, concept_at: int, domain_at: int):
+    """Which of a code's standard targets is published as the concept, and which ride along.
+
+    A source code with several `Maps to` rows maps to all of them; one concept goes in
+    the event's column and the rest are recorded as alternates. The pick used to be the
+    lowest concept id, which is deterministic and nothing else: `C92.01` (acute myeloid
+    leukaemia in remission) maps to a Condition and to an Episode, the Episode has the
+    lower id, and 2,892 MIMIC-IV diagnoses were published with an Episode concept the
+    condition table cannot hold. The domain the row is headed for decides where it can:
+    the first target in that domain is the primary, the lowest id remains the tie-break,
+    and the rest are still carried.
+    """
+    targets: list = []
+    seen: set[int] = set()
+    for row in group:  # already in concept-id order from the query
+        concept_id = int(row[concept_at])
+        if concept_id in seen:
+            continue
+        seen.add(concept_id)
+        targets.append(row)
+    primary = targets[0]
+    if expected:
+        for row in targets:
+            if (row[domain_at] or "") == expected:
+                primary = row
+                break
+    return primary, [r for r in targets if r is not primary]
+
+
 def _path(path: str, competing: int | None) -> str:
     """Name the route a mapping took, and say when the route had a fork in it.
 
@@ -662,12 +719,12 @@ def _resolve_unpunctuated(con, pending: Sequence[TermRequest]):
         WITH candidates AS (
             SELECT s.code_system, s.stripped, c.concept_code,
                    CAST(c.concept_id AS BIGINT) AS source_concept_id,
-                   c.standard_concept, c.concept_name, c.domain_id, c.vocabulary_id
+                   c.standard_concept, c.concept_name, c.domain_id, c.vocabulary_id,
+                   coalesce(c.invalid_reason, '') <> '' AS retired
             FROM _stripped s
             JOIN CONCEPT c
               ON c.vocabulary_id = s.code_system
              AND upper(replace(replace(replace(replace(c.concept_code, '.', ''), '-', ''), '/', ''), ' ', '')) = s.stripped
-             AND (c.invalid_reason IS NULL OR c.invalid_reason = '')
         ),
         unambiguous AS (
             SELECT code_system, stripped FROM candidates
@@ -682,7 +739,8 @@ def _resolve_unpunctuated(con, pending: Sequence[TermRequest]):
                c.standard_concept = 'S' AS was_already_standard,
                count(DISTINCT CASE WHEN c.standard_concept = 'S' THEN c.source_concept_id
                                    ELSE CAST(m.concept_id AS BIGINT) END)
-                 OVER (PARTITION BY c.code_system, c.stripped) AS competing
+                 OVER (PARTITION BY c.code_system, c.stripped) AS competing,
+               c.retired
         FROM candidates c
         JOIN unambiguous u USING (code_system, stripped)
         LEFT JOIN CONCEPT_RELATIONSHIP r
@@ -698,19 +756,30 @@ def _resolve_unpunctuated(con, pending: Sequence[TermRequest]):
     ).fetchall()
     con.execute("DROP TABLE IF EXISTS _stripped")
 
-    for (code_system, stripped, concept_id, name, domain, vocab, source_id,
-         direct, competing) in rows:
-        if concept_id is None:
+    # No domain test here, and none in the first pass either: the vocabulary decides the
+    # domain and the publisher routes by it. This pass used to refuse a match whose
+    # concept sat outside the event kind's domain, which left every Z and V code
+    # MIMIC-IV writes without its decimal point -- a million rows whose standard concept
+    # is an Observation -- unresolved, while the same codes written with the point
+    # resolved a line above. The event kind is used only to choose among several targets
+    # of one code, the same way the first pass does.
+    grouped: dict[tuple[str, str], list] = {}
+    for row in rows:
+        if row[2] is None:
             continue
-        for term in by_stripped.get((code_system, stripped), ()):
-            # No domain test here, and none in the first pass either: the vocabulary
-            # decides the domain and the publisher routes by it. This pass used to
-            # refuse a match whose concept sat outside the event kind's domain, which
-            # left every Z and V code MIMIC-IV writes without its decimal point -- a
-            # million rows whose standard concept is an Observation -- unresolved,
-            # while the same codes written with the point resolved a line above.
+        grouped.setdefault((row[0], row[1]), []).append(row)
+    for (code_system, stripped), group in grouped.items():
+        terms = by_stripped.get((code_system, stripped), ())
+        expected = _expected_domain(t.event_kind for t in terms)
+        for term in terms:
             if term.key in resolved:
                 continue
+            primary, others = _primary_target(group, expected, concept_at=2, domain_at=4)
+            (_cs, _stripped, concept_id, name, domain, vocab, source_id,
+             direct, competing, retired) = primary
+            base = "unpunctuated_code" if direct else (
+                "unpunctuated_mapped_relationship_retired" if retired
+                else "unpunctuated_mapped_relationship")
             resolved[term.key] = ConceptMatch(
                 concept_id=int(concept_id),
                 concept_name=name or "",
@@ -720,10 +789,8 @@ def _resolve_unpunctuated(con, pending: Sequence[TermRequest]):
                 source_concept_id=None if direct else int(source_id),
                 # Recorded distinctly, so a reviewer can see which mappings depended on
                 # ignoring punctuation rather than on the code as written.
-                path=_path(
-                    "unpunctuated_code" if direct else "unpunctuated_mapped_relationship",
-                    competing,
-                ),
+                path=_path(base, competing),
+                alternates=tuple((int(r[2]), r[4] or "") for r in others),
             )
     still = [t for t in pending if t.key not in resolved]
     return resolved, still
@@ -749,12 +816,10 @@ def resolve_terms(
             continue
         match = vocabulary.lookup_code(term.code_system, term.source_code)
         if match is not None:
-            expected = DOMAIN_FOR_KIND.get(term.event_kind)
-            if expected and match.domain_id != expected:
-                # Right code, wrong domain for the field it would land in. That is a
-                # mapping question for a human, not something to force into a column.
-                unresolved.append(term)
-                continue
+            # The domain is carried, not gated on, exactly as in the batch path: OMOP
+            # decides a fact's table by its concept's domain, and the publisher routes
+            # by that. This fallback runs only without a joinable vocabulary, and the
+            # two paths have to agree or a small run and a large one map differently.
             resolved[term.key] = match
             continue
         unresolved.append(term)
