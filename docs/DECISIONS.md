@@ -383,3 +383,43 @@ layer.
 The ids are decisions in the git-tracked registry, checked against the loaded vocabulary
 like every other mapping, because an id typed into code has no provenance and nobody
 revalidates it when the vocabulary is updated.
+
+## The dose someone else will set, and the tablet that was split
+
+Two groups of CU-CTPA anticoagulant names never reached a concept, and both are about a
+name that states less than a product.
+
+A warfarin order handed to the pharmacist is written `WARFARIN PHARMACY TO DOSE`, `PER
+PHARMACY` or `PER PHYSICIAN` -- 11,077 rows. Those phrases say who sets the dose, not
+what the drug is, so they join the site markers in `drug_name_noise` and the matcher's
+ingredient reading publishes warfarin. The dose was never in the name: it is in the
+event's own field, where an order that delegates it leaves it empty.
+
+A split tablet is written `WARFARIN 1.25 MG TAB (HALF-TAB)`. The strength names the dose
+after splitting, not a product -- RxNorm has no warfarin tablet at 1.25, 1.5 or 3.75 mg,
+and the tablet dispensed is twice each. `HALF-TAB` is deliberately *not* a noise word:
+stripping it would let `WARFARIN 500 MCG TAB (HALF-TAB)` match the 0.5 mg tablet, which
+does exist and was not what was dispensed. Doubling a number to choose a concept is an
+inference this converter does not make, so those five names are mapped by hand to their
+ingredient and the strength stays where the source put it.
+
+The three anticoagulation starter packs need none of this: RxNorm carries the pack with
+its own tablet counts, and 42 plus 9 rivaroxaban tablets and 74 apixaban tablets match
+the source names exactly, so the pack concept states what was dispensed.
+
+## The UTC suffix on one CU-CTPA column is a label
+
+`CTA_timestamp` is the only column in that export naming a zone and it says UTC, while
+every other date arrives bare. Either reading was defensible from the schema, so it went
+to the data owner as an open question and `America/Denver` was declared meanwhile.
+
+The delivery settles it. Pairing each scan with the same patient's vital signs, across
+914,951 rows within a day of a scan, puts the offset between them at -1 to +1 hours with
+a median of -32 minutes: a scan and its workup on one clock. A column in true UTC beside
+Denver-local vitals would peak at -6 or -7 hours, and those bins hold about a tenth of
+the peak with no second mode. Both hour-of-day distributions peak in the afternoon and
+trough before dawn.
+
+So the suffix labels the column rather than converting it, the declared zone was already
+right, and nothing changes but the record of why. The question stays in the YAML with
+that reading as its answer, marked as the study team's and put to the owner to confirm.

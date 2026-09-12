@@ -25,12 +25,13 @@ identity:
   subject_salt_env: EHR_SUBJECT_SALT
 
 time:
-  # OPEN QUESTION for the data owner. `CTA_timestamp` is the only column in the export
-  # that names a zone, and it says UTC; every other date arrives bare. Either the whole
-  # extract is UTC and this should be UTC, or the CTA column was converted on export and
-  # the rest is Denver local. America/Denver is declared here because it is the
-  # hospital's zone and because it is the assumption that makes the *clinical* dates
-  # right; if the owner answers "all UTC" this line changes and nothing else does.
+  # `CTA_timestamp` is the only column in the export that names a zone, and it says UTC;
+  # every other date arrives bare. Measured 2026-09-12 (D15): pairing each scan with the
+  # same patient's vital signs puts the offset between them at -1 to +1 hours, median
+  # -32 minutes, and the -6 and -7 hour bins a mountain-time conversion would produce
+  # hold about a tenth of the peak. The two columns are on one clock, so the suffix
+  # labels that column rather than converting it, and America/Denver -- the hospital's
+  # zone -- is what both carry. See owner_answers.utc_suffix_on_the_cta_timestamp.
   timezone_assumption: America/Denver
   naive_time_policy: block
   formats:
@@ -54,8 +55,22 @@ terminology:
   # `(PVHS)` name the site that dispensed, not the drug. Left in the string they
   # stop the ingredient from being recognised (2026-09-11).
   drug_name_noise:
+    # Site markers this hospital writes into the product name.
     - SUPER MED
     - PVHS
+    - MHS
+    - CHCO
+    # Who sets the dose, not what the drug is: a warfarin order handed to the pharmacist
+    # names warfarin, and the dose stays in the event's own field, so reading these as
+    # the ingredient loses nothing (D14, 2026-09-12).
+    - PHARMACY TO DOSE
+    - PER PHARMACY
+    - PER PHYSICIAN
+    # The route, written where a product name goes. `HALF-TAB` is deliberately absent:
+    # it marks a dose obtained by splitting a tablet, and stripping it would let
+    # `WARFARIN 500 MCG TAB (HALF-TAB)` match the 0.5 mg product that was never
+    # dispensed. Those names are mapped to their ingredient by hand instead.
+    - PO
 
 sources:
 
@@ -360,6 +375,24 @@ owner_answers:
         scans' dates were not delivered (T1a carries accession numbers without dates).
         Inferred by the study team on 2026-09-11, not answered by the data owner.
       blocks: "readmission as a downstream label"
+    utc_suffix_on_the_cta_timestamp:
+      question: >-
+        CTA_timestamp is the only column that names a zone and it says UTC, while every
+        other date arrives bare. Is the suffix a label on a local clock time, or was that
+        one column converted on export?
+      # The study team's reading (D15, 2026-09-12) from the delivery itself; the owner
+      # has not answered. Pairing 914,951 scan-and-vital-sign rows puts the offset at -1
+      # to +1 hours with a median of -32 minutes, which is a scan and its workup on one
+      # clock. A true UTC column beside Denver-local vitals would peak at -6 or -7 hours;
+      # those bins hold about a tenth of the peak and there is no second mode. Both
+      # hour-of-day distributions peak in the afternoon and trough before dawn.
+      answer: >-
+        The suffix labels the column and does not convert it: CTA_timestamp carries local
+        clock time like every other date in this delivery, so America/Denver covers the
+        whole extract. Read from the delivery by the study team on 2026-09-12 and put to
+        the data owner for confirmation.
+      blocks: "nothing; the declared timezone already matches this reading"
+
     age_reference_date_missing:
       # Measured 2026-09-10 on the full extract: 3 of 127,955 demographics rows carry an
       # age and an empty cta_time. An age says when someone was born only together with
