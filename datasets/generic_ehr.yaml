@@ -46,6 +46,13 @@ sources:
       death_time: {from: [deceased_on]}
     untimed_values:
       - {column: body_mass_index, code: BMI, unit: "kg/m2"}
+    expected_quarantine:
+      UNTIMED_CLINICAL_VALUE:
+        max_share: 1.0
+        reason: >-
+          A patient table has one row per patient and no measurement time, so a body
+          mass index on it is untimed by construction. It is quarantined rather than
+          dated from anything, and the share is however many patients carry one.
 
   encounters:
     adapter: delimited
@@ -92,6 +99,13 @@ sources:
       dose:         {from: [amount]}
       event_time:   {from: [ordered_at], required: true}
       status:       {from: [order_state]}
+    expected_quarantine:
+      MISSING_EVENT_TIME:
+        max_share: 0.25
+        reason: >-
+          One order in the fixture was written with no ordering time, the way a real
+          order entered on paper and keyed in later arrives. It is a property of the
+          delivery, and an order with no time is quarantined rather than dated.
 
   administrations:
     adapter: delimited

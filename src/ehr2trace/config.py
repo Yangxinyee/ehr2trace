@@ -247,6 +247,24 @@ class ExpectedLinkRateSpec(BaseModel):
     reason: str
 
 
+class ExpectedRepeatSpec(BaseModel):
+    """A share of same-day note repeats this source is known to carry, and why.
+
+    NOTE_TEXT_UNIQUE fails a source whose notes repeat one full text for one patient on
+    one day under one code. Where that is the delivery rather than the converter -- two
+    reports of one examination written separately and worded identically, each with its
+    own sequence number and time -- the share is declared here, and the check reports it
+    and fails only above it.
+    """
+
+    model_config = Strict
+
+    #: upper bound on the share of this source's notes with text that repeat another
+    #: note's full text for the same patient, day and code (the copies beyond the first)
+    max_share: float = Field(gt=0.0, le=1.0)
+    reason: str
+
+
 class OutOfScopeSpec(BaseModel):
     """A delivered table this conversion deliberately does not read, and why.
 
@@ -392,6 +410,8 @@ class SourceSpec(BaseModel):
     expected_empty: str | None = None
     #: how many of this source's encounter ids are expected to resolve to a visit
     expected_encounter_link_rate: ExpectedLinkRateSpec | None = None
+    #: the share of this source's notes expected to repeat a same-day note's full text
+    expected_note_repeats: ExpectedRepeatSpec | None = None
     #: column -> reason it is neither mapped nor kept. Every delivered column is either
     #: mapped, kept, used by a filter, or listed here; anything else is undeclared.
     ignored_columns: dict[str, str] = Field(default_factory=dict)
@@ -690,8 +710,17 @@ class ValidationSpec(BaseModel):
     #: share of numeric measurements with a source or declared unit that must carry a
     #: non-zero unit concept
     unit_concept_coverage_min: float = Field(default=0.95, ge=0.0, le=1.0)
-    #: share of visits (and, separately, visit details) that must carry a concept
+    #: share of visits that must carry a visit concept
     visit_concept_coverage_min: float = Field(default=0.95, ge=0.0, le=1.0)
+    #: share of visit details that must carry a concept. A detail names a place of care
+    #: -- a ward, an intensive-care unit, a service -- rather than a type of visit, and
+    #: places are mapped by review one department at a time, so the visit threshold would
+    #: fail every export whose ward review is still under way (one export maps 14 of its
+    #: 22 intensive-care wards and leaves 227 department names to review). The default
+    #: asks for a majority instead: a publisher that writes concept 0 on every row, or a
+    #: ward mapping that was never compiled, sits near zero and still fails, while a
+    #: dataset whose wards are a known review queue lowers it and says why in ``note``.
+    visit_detail_concept_coverage_min: float = Field(default=0.5, ge=0.0, le=1.0)
     #: share of events with an encounter id that must resolve to a visit of the same
     #: subject, where the source declares no rate of its own
     encounter_link_rate_min: float = Field(default=0.95, ge=0.0, le=1.0)
@@ -804,7 +833,8 @@ class DatasetConfig(BaseModel):
     #: delivered columns are deliberately unread. Hashing them would make every such
     #: declaration cost a full re-ingest, which is how declarations stop being written.
     DECLARATION_ONLY_SOURCE_FIELDS: ClassVar[tuple[str, ...]] = (
-        "expected_quarantine", "expected_empty", "expected_encounter_link_rate", "ignored_columns",
+        "expected_quarantine", "expected_empty", "expected_encounter_link_rate", "expected_note_repeats",
+        "ignored_columns",
     )
 
     def canonical_json(self) -> str:

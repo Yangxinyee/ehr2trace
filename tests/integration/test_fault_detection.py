@@ -100,3 +100,153 @@ def test_injection_does_not_reach_the_build_it_was_cloned_from(clean_build, tmp_
 
     after = {r.check_id: r.passed for r in run_checks(cfg, source_layout, include_slow=True)}
     assert after == baseline, "injecting into the clone changed the original build"
+
+
+def test_the_audit_tool_reads_the_build_and_reports_only_aggregates(clean_build):
+    """`tools/audit_conversion.py` is the audit's queries; it must run and stay aggregate.
+
+    The tool exists so the numbers the remediation is judged by can be recomputed rather
+    than quoted. That makes two things testable: it reads a build of any dataset without
+    being told anything about it, and nothing patient-level reaches its output -- no
+    subject id, no note text -- because the document it writes is meant to be read,
+    shared and diffed.
+    """
+    import json
+
+    import polars as pl
+
+    from tools.audit_conversion import audit
+
+    cfg, layout, _baseline = clean_build
+    report = audit(cfg.dataset_id, layout.root.parent)
+
+    assert report["layers"] == {"manifest": True, "canonical": True, "omop": True, "meds": True}
+    assert report["events"] > 0 and report["sources"]
+    for section in ("merge_disagreements", "units", "visits", "doses", "death", "notes",
+                    "encounter_link_rate", "raw_coverage"):
+        assert section in report, f"{section} missing from the audit"
+    # The clean build is clean: nothing merged rows that disagree, every column declared.
+    assert not [s for s, e in report["merge_disagreements"].items() if e.get("disagreements")]
+    assert not [c for c in report["raw_coverage"]["columns"].values() if c["undeclared"]]
+
+    written = json.dumps(report, default=str)
+    events = pl.read_parquet(layout.canonical_path("events"))
+    for subject_id in events["subject_id"].unique().to_list():
+        assert str(subject_id) not in written, "a subject id reached the audit document"
+    for text in events["value_text"].drop_nulls().unique().to_list():
+        assert str(text)[:40] not in written, "text from a value column reached the audit document"
+
+
+def test_a_unit_column_the_build_never_read_is_seen_in_the_source(clean_build):
+    """DOSE_UNIT_CARRIED reads the source parquet as well as the canonical layer.
+
+    The audit's worst dose finding was invisible from inside the build: one export kept
+    its dose unit in a column of its own that the configuration never mapped, so no
+    event carried a unit, every check reading the canonical layer saw nothing missing,
+    and 1,897,802 bare numbers reached MEDS. Here the build is the clean one, read with a
+    configuration that says the order table's dose column states a unit: that is a
+    column the build did not read as one, and the check must say so from the source.
+    """
+    from ehr2trace.validate import run_checks
+
+    cfg, layout, baseline = clean_build
+    assert baseline["DOSE_UNIT_CARRIED"]
+    sid, spec = next((sid, spec) for sid, spec in cfg.sources.items()
+                     if spec.event_kind == "drug_order" and "dose" in spec.fields)
+    fields = dict(spec.fields)
+    fields["unit"] = spec.fields["dose"]
+    claimed = cfg.model_copy(update={"sources": {**cfg.sources, sid: spec.model_copy(update={"fields": fields})}})
+
+    (result,) = [r for r in run_checks(claimed, layout, include_slow=True) if r.check_id == "DOSE_UNIT_CARRIED"]
+    assert not result.passed
+    assert f"{sid} states a dose unit" in result.detail
+    assert result.metrics["source_unit_statements"][sid]["events_carrying_a_unit"] == 0
+
+
+def test_an_unset_prepared_root_skips_only_the_files_under_it(clean_build, monkeypatch):
+    """One source's root being unset must not stop the walk of every other root.
+
+    A dataset that gains a prepared source living under a root of its own gains a
+    variable its old environments do not set; reading that as "examine no file at all"
+    turned a coverage check into a pass that had looked at nothing.
+    """
+    import json
+
+    from ehr2trace.validate import raw_coverage
+
+    cfg, layout, _baseline = clean_build
+    sid, spec = next(iter(cfg.sources.items()))
+    variable = "EHR2TRACE_TEST_UNSET_PREPARED_ROOT"
+    monkeypatch.delenv(variable, raising=False)
+    moved = cfg.model_copy(update={"sources": {**cfg.sources, sid: spec.model_copy(update={"root_env": variable})}})
+    manifest = json.loads((layout.manifest_dir / "inputs.json").read_text(encoding="utf-8"))
+
+    report = raw_coverage(moved, manifest)
+    assert variable in report["files"]["not_examined"]
+    assert report["files"]["partitions_examined"], "the dataset's own root is still walked"
+
+
+def test_a_declared_merge_rule_the_build_never_applied_fails(clean_build, tmp_path):
+    """A rule written after a build was made must not make that build look settled.
+
+    The clean build's outcome sheet merges two extracts of one admission under declared
+    rules, and the flag those rules write is on the event. Take the flag away -- the state
+    of a build made before the rules existed -- and the same rows must fail.
+    """
+    import polars as pl
+
+    from ehr2trace.faults import clone_work_tree
+    from ehr2trace.paths import WorkLayout
+    from ehr2trace.validate import run_checks
+
+    cfg, source_layout, baseline = clean_build
+    assert baseline["DUPLICATES_AGREE"]
+    clone_work_tree(source_layout.root, tmp_path / "unapplied")
+    layout = WorkLayout(root=tmp_path / "unapplied", dataset_id=cfg.dataset_id)
+    path = layout.canonical_path("events")
+    events = pl.read_parquet(path)
+    ruled_flags = {rule.flag_name for spec in cfg.sources.values() for rule in spec.merge_rules.values()}
+    stripped = events.with_columns(
+        pl.col("quality_flags").list.eval(pl.element().filter(~pl.element().is_in(sorted(ruled_flags))))
+    )
+    mutating = path.with_suffix(".parquet.mutating")
+    stripped.write_parquet(mutating)
+    mutating.replace(path)
+
+    (result,) = [r for r in run_checks(cfg, layout, include_slow=True) if r.check_id == "DUPLICATES_AGREE"]
+    assert not result.passed
+    assert "declared merge rules the build did not apply" in result.detail
+    assert result.metrics["sources_with_rules_not_applied"]
+
+
+def test_a_source_that_maps_an_encounter_and_carries_none_fails(clean_build, tmp_path):
+    """A configuration corrected after a build was made maps an encounter the build never carried.
+
+    The rate ENCOUNTER_RESOLVES measures counts only events that carry an encounter id, so
+    a source whose events carry none contributed nothing to it and passed.
+    """
+    import polars as pl
+
+    from ehr2trace.faults import clone_work_tree
+    from ehr2trace.paths import WorkLayout
+    from ehr2trace.validate import run_checks
+
+    cfg, source_layout, baseline = clean_build
+    assert baseline["ENCOUNTER_RESOLVES"]
+    clone_work_tree(source_layout.root, tmp_path / "uncarried")
+    layout = WorkLayout(root=tmp_path / "uncarried", dataset_id=cfg.dataset_id)
+    path = layout.canonical_path("events")
+    events = pl.read_parquet(path)
+    sid = next(sid for sid, spec in sorted(cfg.sources.items())
+               if "encounter_id" in spec.fields and spec.shape != "visit"
+               and events.filter(pl.col("source_id") == sid).height)
+    blanked = events.with_columns(
+        pl.when(pl.col("source_id") == sid).then(None).otherwise(pl.col("encounter_id")).alias("encounter_id")
+    )
+    mutating = path.with_suffix(".parquet.mutating")
+    blanked.write_parquet(mutating)
+    mutating.replace(path)
+
+    (result,) = [r for r in run_checks(cfg, layout) if r.check_id == "ENCOUNTER_RESOLVES"]
+    assert not result.passed
+    assert f"{sid} maps an encounter id and none of its" in result.detail

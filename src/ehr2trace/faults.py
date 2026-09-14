@@ -32,6 +32,10 @@ import polars as pl
 
 from ehr2trace.config import DatasetConfig
 from ehr2trace.paths import WorkLayout
+from ehr2trace.schema import EventKind
+
+#: The kinds a dose belongs to, for the faults that need a drug record.
+DRUG_KINDS = (EventKind.drug_order, EventKind.drug_admin, EventKind.drug_dispense)
 
 #: Whether a corruption survives the checks a conversion normally gets: a schema
 #: validation, a row count, an eyeball on a few patients.
@@ -615,6 +619,386 @@ def _note_text_dropped(layout: WorkLayout, cfg: DatasetConfig) -> str:
         ).select(events.columns),
     )
     return f"{changed:,} note events keep their code, time and lineage and lose their text"
+
+
+# --------------------------------------------------------------------------------
+# faults from the conversion audit of 2026-09-13
+# --------------------------------------------------------------------------------
+#
+# The audit read three finished conversions and found nine kinds of damage that every
+# check then in the suite reported as a clean build. They are grouped here rather than
+# by layer because that is their common origin: each was a real published defect, and
+# each is injected the way the audit found it -- in the artifact, not in the code that
+# wrote it. `docs/CONVERSION_REMEDIATION_PLAN.md` records the incident behind each.
+
+
+def _manifest(layout: WorkLayout) -> dict | None:
+    import json
+
+    path = layout.manifest_dir / "inputs.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _write_manifest(layout: WorkLayout, manifest: dict) -> None:
+    import json
+
+    path = layout.manifest_dir / "inputs.json"
+    tmp = path.with_suffix(".mutating")
+    tmp.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _unit_parquet(layout: WorkLayout, unit: dict) -> Path | None:
+    """This tree's copy of one ingest unit's parquet.
+
+    The manifest records an absolute path, and a clone carries the path of the tree it
+    was cloned from; mutating that one would reach through the clone.
+    """
+    from ehr2trace.validate import artifact_in_this_tree
+
+    path = artifact_in_this_tree(layout, unit.get("output_path"))
+    return path if path is not None and layout.root in path.parents else None
+
+
+def _role_column(spec, columns: list[str], role: str) -> str | None:
+    """The parquet column one field role reads, matched the way the loader matches it."""
+    declared = spec.fields.get(role)
+    if declared is None:
+        return None
+    for alias in declared.from_:
+        for column in columns:
+            if column.startswith("col__") and column[len("col__"):].strip().lower() == alias.strip().lower():
+                return column
+    return None
+
+
+def _another_value(text: str) -> str:
+    """A different value of the same kind: the leading number doubled where there is one."""
+    import re
+
+    match = re.match(r"\s*(\d+(?:\.\d+)?)(.*)", text)
+    if match:
+        number = float(match.group(1))
+        doubled = int(number * 2) if number.is_integer() else number * 2
+        return f"{doubled}{match.group(2)}"
+    return f"{text} (second strength)"
+
+
+@fault(
+    "ORDERS_WITH_DIFFERENT_DOSES_MERGED",
+    "canonical",
+    "An event identity that omits the dose makes two orders of different strengths one "
+    "event, and the merge keeps whichever row it met first. The audit counted 726,710 "
+    "dose disagreements inside merged groups in one export, 1,118,171 collapsed drug "
+    "rows in another, and 1,327,147 prescriptions in a third.",
+    SILENT,
+    "Give one row of an already merged drug event a different dose.",
+    expect=("DUPLICATES_AGREE",),
+)
+def _merge_two_doses(layout: WorkLayout, cfg: DatasetConfig) -> str:
+    import pyarrow.parquet as pq
+
+    manifest = _manifest(layout)
+    if manifest is None:
+        return "skipped: no ingest manifest"
+    _lpath, links = _canonical(layout, "event_source")
+    _epath, events = _canonical(layout, "events")
+    drugs = events.filter(pl.col("event_kind").is_in([str(k) for k in DRUG_KINDS]))
+    if drugs.is_empty():
+        return "skipped: this dataset publishes no drug events"
+    merged = (
+        links.join(drugs.select("event_id", "source_id"), on="event_id", how="inner")
+        .group_by("event_id", "source_id")
+        .agg(pl.col("source_row_id").alias("rows"), pl.len().alias("n"))
+        .filter(pl.col("n") > 1)
+    )
+    for row in merged.iter_rows(named=True):
+        spec = cfg.sources.get(row["source_id"])
+        if spec is None:
+            continue
+        for unit in manifest.get("inputs", []):
+            if unit["source_id"] != row["source_id"]:
+                continue
+            path = _unit_parquet(layout, unit)
+            if path is None:
+                continue
+            frame = pl.read_parquet(path)
+            column = _role_column(spec, list(frame.columns), "dose")
+            if column is None:
+                continue
+            target = [r for r in row["rows"] if r in set(frame["source_row_id"].to_list())]
+            if not target:
+                continue
+            before = frame.filter(pl.col("source_row_id") == target[0])[column][0]
+            if before is None:
+                continue
+            after = _another_value(str(before))
+            _replace(path, frame.with_columns(
+                pl.when(pl.col("source_row_id") == target[0])
+                .then(pl.lit(after)).otherwise(pl.col(column)).alias(column)
+            ).select(frame.columns))
+            # The manifest must name this tree's copy, or the check reads the original.
+            for entry in manifest["inputs"]:
+                if entry.get("output_path") == unit.get("output_path"):
+                    entry["output_path"] = str(path)
+            _write_manifest(layout, manifest)
+            del pq
+            return (f"one of the {row['n']} rows behind a merged drug event now carries a "
+                    f"different dose; the event kept the other")
+    return "skipped: no merged drug event whose source maps a dose"
+
+
+@fault(
+    "SOURCE_PARSED_ROWS_AND_YIELDED_NOTHING",
+    "canonical",
+    "A wide table declared with a shape that cannot read it quarantines every row it "
+    "parses and still counts as delivered: 1,564,610 emergency-department vital signs "
+    "were reported present and published nothing, because presence was judged by the "
+    "manifest and events by nobody.",
+    SILENT,
+    "Delete every event of one source, and its lineage, leaving the manifest saying the "
+    "source parsed its rows.",
+    expect=("SOURCE_YIELDS_EVENTS",),
+)
+def _source_yields_nothing(layout: WorkLayout, cfg: DatasetConfig) -> str:
+    epath, events = _canonical(layout, "events")
+    lpath, links = _canonical(layout, "event_source")
+    counts = events.group_by("source_id").len().sort("len")
+    if counts.is_empty():
+        return "skipped: no events to remove"
+    source_id = counts["source_id"][0]
+    doomed = set(events.filter(pl.col("source_id") == source_id)["event_id"].to_list())
+    _replace(epath, events.filter(pl.col("source_id") != source_id))
+    _replace(lpath, links.filter(~pl.col("event_id").is_in(list(doomed))))
+    return f"{len(doomed):,} events of one source deleted with their lineage"
+
+
+@fault(
+    "VALUE_IN_A_DIFFERENT_UNIT_THAN_ITS_LABEL",
+    "canonical",
+    "Values arrive in a unit their label contradicts: body temperatures with a median "
+    "of 98 under a Celsius label, a respiratory rate of 196, a white cell count a "
+    "thousand times its own unit. Nothing compared a value against what its unit makes "
+    "possible, so all of them published as measurements.",
+    SILENT,
+    "Multiply measured values carrying a unit by a thousand, leaving the unit alone.",
+    expect=("UNIT_VALUE_PLAUSIBLE",),
+)
+def _value_contradicts_unit(layout: WorkLayout, cfg: DatasetConfig) -> str:
+    epath, events = _canonical(layout, "events")
+    measured = (pl.col("event_kind") == str(EventKind.measurement)) & pl.col("unit_source").is_not_null()
+    changed = events.filter(measured & pl.col("value_number").is_not_null()).height
+    if not changed:
+        return "skipped: no measured value carries a unit"
+    columns = [c for c in ("value_number", "value_number_normalized") if c in events.columns]
+    _replace(epath, events.with_columns([
+        pl.when(measured & pl.col(c).is_not_null()).then(pl.col(c) * 1000).otherwise(pl.col(c)).alias(c)
+        for c in columns
+    ]).select(events.columns))
+    return f"{changed:,} measured values are now a thousand times what their unit says"
+
+
+@fault(
+    "DOSE_UNIT_DROPPED_FROM_DRUG_ROWS",
+    "omop",
+    "A publisher that reads the dose unit only out of the dose text loses it wherever "
+    "the source keeps it in its own column: 3,088,590 drug rows with an empty dose unit "
+    "in one export, 18,567,232 in another, while every one of their sources stated it.",
+    SILENT,
+    "Empty dose_unit_source_value on every drug exposure.",
+    expect=("DOSE_UNIT_CARRIED",),
+)
+def _drop_dose_unit(layout: WorkLayout, cfg: DatasetConfig) -> str:
+    con = _omop_con(layout)
+    try:
+        before = con.execute(
+            "SELECT count(*) FROM drug_exposure WHERE dose_unit_source_value IS NOT NULL"
+        ).fetchone()[0]
+        if not before:
+            return "skipped: no drug exposure carries a dose unit"
+        con.execute("UPDATE drug_exposure SET dose_unit_source_value = NULL")
+    finally:
+        con.close()
+    return f"{int(before):,} drug exposures lost the dose unit their source stated"
+
+
+@fault(
+    "DEATH_DATE_AND_TIME_TREATED_AS_A_CONFLICT",
+    "omop",
+    "Two records of one death -- one with a date, one with a time -- were compared as "
+    "timestamps, so they disagreed by construction and the publisher refused to choose. "
+    "11,402 subjects lost their DEATH row that way; read as local dates, all but one of "
+    "them died on the same day in both records.",
+    SILENT,
+    "Add a date-only death beside a timed one and withhold the person's DEATH row.",
+    expect=("DEATH_PUBLISHED",),
+)
+def _death_date_beside_time(layout: WorkLayout, cfg: DatasetConfig) -> str:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    epath, events = _canonical(layout, "events")
+    lpath, links = _canonical(layout, "event_source")
+    deaths = events.filter((pl.col("event_kind") == str(EventKind.death)) & pl.col("event_time").is_not_null())
+    if deaths.is_empty():
+        return "skipped: no death events in this dataset"
+    con = _omop_con(layout)
+    try:
+        try:
+            published = {r[0] for r in con.execute("SELECT person_id FROM death").fetchall()}
+        except Exception:
+            published = set()
+        if not published:
+            return "skipped: no DEATH row to withhold"
+        rows = con.execute(
+            "SELECT event_id FROM etl_audit.lineage WHERE target_table = 'death'"
+        ).fetchall()
+        withheld = {r[0] for r in rows}
+        chosen = deaths.filter(pl.col("event_id").is_in(list(withheld)))
+        if chosen.is_empty():
+            chosen = deaths
+        original = chosen.row(0, named=True)
+        con.execute("DELETE FROM death")
+        con.execute("DELETE FROM etl_audit.lineage WHERE target_table = 'death'")
+    finally:
+        con.close()
+    zone = cfg.time.timezone_assumption or "UTC"
+    utc = original["event_time"].replace(tzinfo=ZoneInfo("UTC"))
+    local = utc.astimezone(ZoneInfo(zone))
+    midnight = datetime(local.year, local.month, local.day, tzinfo=ZoneInfo(zone))
+    naive_utc = midnight.astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+    same_utc_day = naive_utc.date() == original["event_time"].date()
+    fabricated = "dateonly" + str(original["event_id"])[: 64 - len("dateonly")]
+    addition = (
+        pl.DataFrame([original])
+        .with_columns(
+            pl.lit(fabricated).alias("event_id"),
+            pl.lit(naive_utc).cast(events.schema["event_time"]).alias("event_time"),
+        )
+        .select(events.columns)
+    )
+    _replace(epath, pl.concat([events, addition], how="vertical_relaxed"))
+    copied = links.filter(pl.col("event_id") == original["event_id"]).with_columns(
+        pl.lit(fabricated).alias("event_id")
+    )
+    _replace(lpath, pl.concat([links, copied], how="vertical_relaxed"))
+    return (
+        f"a death recorded as a date ({naive_utc:%Y-%m-%d %H:%M} UTC, "
+        f"{'the same' if same_utc_day else 'another'} UTC day as the timed record, the same "
+        f"day in {zone}) sits beside the timed one, and every DEATH row was withheld"
+    )
+
+
+@fault(
+    "ONE_NOTE_UNDER_TWO_ENCOUNTERS",
+    "canonical",
+    "A note table whose encounter id matched no other table put the same text under "
+    "several of them: 491,192 groups of notes identical in patient, day, type and full "
+    "text, about 936,403 surplus events, each a copy of one report.",
+    SILENT,
+    "Copy a note event under a second encounter id.",
+    expect=("NOTE_TEXT_UNIQUE",),
+)
+def _note_under_two_encounters(layout: WorkLayout, cfg: DatasetConfig) -> str:
+    epath, events = _canonical(layout, "events")
+    lpath, links = _canonical(layout, "event_source")
+    notes = events.filter((pl.col("event_kind") == str(EventKind.note)) & pl.col("value_text").is_not_null())
+    if notes.is_empty():
+        return "skipped: this dataset publishes no note text"
+    original = notes.row(0, named=True)
+    fabricated = "secondencounter" + str(original["event_id"])[: 64 - len("secondencounter")]
+    other_encounter = (str(original["encounter_id"]) + "-2") if original["encounter_id"] is not None else "2"
+    addition = (
+        pl.DataFrame([original])
+        .with_columns(pl.lit(fabricated).alias("event_id"), pl.lit(other_encounter).alias("encounter_id"))
+        .select(events.columns)
+    )
+    _replace(epath, pl.concat([events, addition], how="vertical_relaxed"))
+    copied = links.filter(pl.col("event_id") == original["event_id"]).with_columns(
+        pl.lit(fabricated).alias("event_id")
+    )
+    _replace(lpath, pl.concat([links, copied], how="vertical_relaxed"))
+    return "one note's text is now published twice under two encounter ids"
+
+
+@fault(
+    "RAW_COLUMN_NEVER_DECLARED",
+    "ingest",
+    "A delivered column nothing reads is invisible: three medication columns, a whole "
+    "imaging table, an entire intensive-care module and eight other tables were never "
+    "read by any conversion, and no check said so.",
+    SILENT,
+    "Record an extra delivered column in the manifest that no role reads.",
+    expect=("RAW_COVERAGE_DECLARED",),
+)
+def _undeclared_raw_column(layout: WorkLayout, cfg: DatasetConfig) -> str:
+    manifest = _manifest(layout)
+    if manifest is None or not manifest.get("inputs"):
+        return "skipped: no ingest manifest"
+    extra = "an_unmapped_delivered_column"
+    for unit in manifest["inputs"]:
+        if unit.get("rows_parsed") and unit.get("columns"):
+            unit["columns"] = list(unit["columns"]) + [extra]
+            _write_manifest(layout, manifest)
+            return f"one source is recorded as delivering a column nothing reads ({extra})"
+    return "skipped: no parsed source to add a column to"
+
+
+@fault(
+    "DIAGNOSIS_TEXT_READ_AS_A_UNIT",
+    "canonical",
+    "A value parser that takes any text after a number as its unit turned 26 "
+    "electrocardiogram diagnoses into a number with a diagnosis for a unit. The reading "
+    "is not wrong about the number; it is wrong that the rest was a unit at all.",
+    SILENT,
+    "Store measured free text as a number whose unit is the text.",
+    expect=("UNIT_KNOWN",),
+)
+def _text_read_as_a_unit(layout: WorkLayout, cfg: DatasetConfig) -> str:
+    epath, events = _canonical(layout, "events")
+    textual = (
+        (pl.col("event_kind") == str(EventKind.measurement))
+        & pl.col("value_text").is_not_null()
+        & pl.col("value_number").is_null()
+    )
+    changed = events.filter(textual).height
+    if not changed:
+        return "skipped: no measured value is free text"
+    _replace(epath, events.with_columns(
+        pl.when(textual).then(pl.lit(1.0)).otherwise(pl.col("value_number")).alias("value_number"),
+        pl.when(textual).then(pl.col("value_text").str.slice(0, 32)).otherwise(pl.col("unit_source")).alias("unit_source"),
+        pl.when(textual).then(None).otherwise(pl.col("value_text")).alias("value_text"),
+    ).select(events.columns))
+    return f"{changed:,} free-text results are now a number with the text for a unit"
+
+
+@fault(
+    "EXCLUDED_STATUS_PUBLISHED",
+    "canonical",
+    "A problem list records what was entered and what was taken back. 30,069 rows whose "
+    "status says the entry was deleted were published as diagnoses, because the status "
+    "reached the event and nothing acted on it.",
+    SILENT,
+    "Give published events the status their source declares excluded.",
+    expect=("EXCLUDED_STATUS_NOT_PUBLISHED",),
+)
+def _excluded_status_published(layout: WorkLayout, cfg: DatasetConfig) -> str:
+    declaring = [(sid, spec.excluded_status[0]) for sid, spec in cfg.sources.items() if spec.excluded_status]
+    if not declaring:
+        return "skipped: no source declares an excluded status"
+    epath, events = _canonical(layout, "events")
+    for source_id, status in declaring:
+        subset = pl.col("source_id") == source_id
+        changed = events.filter(subset).height
+        if not changed:
+            continue
+        _replace(epath, events.with_columns(
+            pl.when(subset).then(pl.lit(status)).otherwise(pl.col("status_source")).alias("status_source")
+        ).select(events.columns))
+        return f"{changed:,} published events now carry a status their source excludes"
+    return "skipped: the sources declaring an excluded status published no events"
 
 
 def clone_work_tree(src: Path, dst: Path) -> None:
