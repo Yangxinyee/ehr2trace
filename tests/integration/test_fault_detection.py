@@ -135,3 +135,29 @@ def test_the_audit_tool_reads_the_build_and_reports_only_aggregates(clean_build)
         assert str(subject_id) not in written, "a subject id reached the audit document"
     for text in events["value_text"].drop_nulls().unique().to_list():
         assert str(text)[:40] not in written, "text from a value column reached the audit document"
+
+
+def test_a_unit_column_the_build_never_read_is_seen_in_the_source(clean_build):
+    """DOSE_UNIT_CARRIED reads the source parquet as well as the canonical layer.
+
+    The audit's worst dose finding was invisible from inside the build: one export kept
+    its dose unit in a column of its own that the configuration never mapped, so no
+    event carried a unit, every check reading the canonical layer saw nothing missing,
+    and 1,897,802 bare numbers reached MEDS. Here the build is the clean one, read with a
+    configuration that says the order table's dose column states a unit: that is a
+    column the build did not read as one, and the check must say so from the source.
+    """
+    from ehr2trace.validate import run_checks
+
+    cfg, layout, baseline = clean_build
+    assert baseline["DOSE_UNIT_CARRIED"]
+    sid, spec = next((sid, spec) for sid, spec in cfg.sources.items()
+                     if spec.event_kind == "drug_order" and "dose" in spec.fields)
+    fields = dict(spec.fields)
+    fields["unit"] = spec.fields["dose"]
+    claimed = cfg.model_copy(update={"sources": {**cfg.sources, sid: spec.model_copy(update={"fields": fields})}})
+
+    (result,) = [r for r in run_checks(claimed, layout, include_slow=True) if r.check_id == "DOSE_UNIT_CARRIED"]
+    assert not result.passed
+    assert f"{sid} states a dose unit" in result.detail
+    assert result.metrics["source_unit_statements"][sid]["events_carrying_a_unit"] == 0

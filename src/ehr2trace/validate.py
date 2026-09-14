@@ -2198,10 +2198,10 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
     Joins each source's own parquet (the files the ingest manifest names) to the lineage
     on the source row id, groups by event, and counts the events whose rows carry more
     than one distinct value of a field. Compared: every mapped role that is neither part
-    of the identity nor allowed to vary, and every kept column. Excluded: roles under a
-    declared merge rule (the disagreement is resolved by rule and flagged), and the
-    identity extras. ``available_time`` falls under the default rule and is counted
-    apart. With ``per_partition`` the grouping also splits by the partition a row came
+    of every build's identity nor allowed to vary, and every kept column -- including a
+    dataset's identity extras, which a build predating them may have merged on. Excluded:
+    roles under a declared merge rule (the disagreement is resolved by rule and flagged).
+    ``available_time`` falls under the default rule and is counted apart. With ``per_partition`` the grouping also splits by the partition a row came
     from, which separates a merge inside one extract from the true duplicate between
     two.
     """
@@ -2237,9 +2237,11 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
         for key in spec.merge_rules:
             ruled.add(FIELD_TO_ROLE.get(key, key))
             ruled.add(key)
-        excluded = IDENTITY_ROLES | REPEATING_ROLES | set(spec.identity_extra_fields) | ruled
-        if spec.encounter_in_identity:
-            excluded = excluded | {"encounter_id"}
+        # A dataset's identity extras and its encounter id are compared, not assumed to
+        # agree: a build made with today's identity agrees on them by construction, so
+        # comparing costs nothing there, and a build made before a field joined the
+        # identity is exactly the build whose rows collapsed on it.
+        excluded = IDENTITY_ROLES | REPEATING_ROLES | ruled
         expressions: dict[str, str] = {}
         for role, cols in _role_columns(spec, columns).items():
             if role in excluded or role not in FIELD_ROLES:
@@ -2453,12 +2455,31 @@ def note_duplicate_groups(con, zone: str | None) -> dict[str, int]:
     }
 
 
-def encounter_link_rates(con) -> dict[str, dict[str, Any]]:
-    """Per source, the share of events with an encounter id that resolve to a visit or
-    visit detail of the same subject."""
+def encounter_reference(cfg: DatasetConfig) -> str:
+    """What an encounter id is resolved against in this dataset: its visits, or its other sources.
+
+    A dataset whose visits or visit details are keyed by encounter -- some visit-shaped
+    source maps an ``encounter_id`` -- promises that an event's encounter names one of
+    them. A dataset that delivered no such table cannot keep that promise: there an
+    encounter id is only ever shared between the tables that carry it, and the rate that
+    means anything is how often another source knows the same (patient, encounter).
+    """
+    for spec in cfg.sources.values():
+        if (spec.shape == "visit" or spec.event_kind in VISIT_KINDS) and "encounter_id" in spec.fields:
+            return "visits"
+    return "sources"
+
+
+def encounter_link_rates(con, against: str = "visits") -> dict[str, dict[str, Any]]:
+    """Per source, the share of events with an encounter id that resolve.
+
+    ``against="visits"``: to a visit or visit detail of the same subject carrying that
+    encounter id. ``against="sources"``: to the same (subject, encounter) carried by the
+    events of at least one other source.
+    """
     kinds = ", ".join(_sql_str(k) for k in VISIT_KINDS)
-    rows = con.execute(
-        f"""
+    if against == "visits":
+        sql = f"""
         WITH v AS (
             SELECT DISTINCT subject_id, encounter_id FROM evt
             WHERE event_kind IN ({kinds}) AND encounter_id IS NOT NULL
@@ -2468,10 +2489,22 @@ def encounter_link_rates(con) -> dict[str, dict[str, Any]]:
         WHERE e.encounter_id IS NOT NULL AND e.event_kind NOT IN ({kinds})
         GROUP BY 1
         """
-    ).fetchall()
+    else:
+        sql = f"""
+        WITH pairs AS (
+            SELECT DISTINCT source_id, subject_id, encounter_id FROM evt
+            WHERE encounter_id IS NOT NULL AND event_kind NOT IN ({kinds})
+        ), shared AS (
+            SELECT subject_id, encounter_id FROM pairs GROUP BY 1, 2 HAVING count(*) > 1
+        )
+        SELECT e.source_id, count(*), count(*) FILTER (WHERE s.encounter_id IS NOT NULL)
+        FROM evt e LEFT JOIN shared s ON s.subject_id = e.subject_id AND s.encounter_id = e.encounter_id
+        WHERE e.encounter_id IS NOT NULL AND e.event_kind NOT IN ({kinds})
+        GROUP BY 1
+        """
     return {
         str(s): {"with_encounter": int(n), "linked": int(k), "rate": round(int(k) / int(n), 4) if n else 0.0}
-        for s, n, k in rows
+        for s, n, k in con.execute(sql).fetchall()
     }
 
 
@@ -3052,6 +3085,58 @@ def _unit_homogeneous_per_code(l: Layers) -> CheckResult:
     )
 
 
+def source_unit_statements(l: Layers) -> dict[str, dict[str, int]]:
+    """Per drug source that maps a unit role: source rows stating a unit, events carrying one.
+
+    Reads the source parquet the manifest names (this tree's copy), counting rows whose
+    unit cell is neither empty nor a null literal, and the canonical drug events of the
+    same source that carry ``unit_source``. A source whose rows state units while none of
+    its events carries one lost the unit before the canonical layer -- the mapping never
+    read the column -- and no check reading only the canonical layer can see that.
+    """
+    import pyarrow.parquet as pq
+
+    if l.manifest is None or l.events_path is None:
+        return {}
+    drug_sources = {sid: spec for sid, spec in l.cfg.sources.items()
+                    if "unit" in spec.fields and spec.event_kind in DRUG_KINDS}
+    if not drug_sources:
+        return {}
+    files_by_source: dict[str, list[str]] = {}
+    for unit in l.manifest.get("inputs", []):
+        path = artifact_in_this_tree(l.layout, unit.get("output_path"))
+        if path is not None and unit.get("rows_parsed") and unit["source_id"] in drug_sources:
+            files_by_source.setdefault(unit["source_id"], []).append(str(path))
+    literals = ", ".join(_sql_str(v) for v in l.cfg.time.null_literals) or "''"
+    kinds = ", ".join(_sql_str(k) for k in DRUG_KINDS)
+    out: dict[str, dict[str, int]] = {}
+    with _engine(l) as con:
+        carried = {str(s): int(n) for s, n in con.execute(
+            f"SELECT source_id, count(*) FILTER (WHERE unit_source IS NOT NULL) FROM evt "
+            f"WHERE event_kind IN ({kinds}) GROUP BY 1"
+        ).fetchall()}
+        for sid, files in sorted(files_by_source.items()):
+            columns: list[str] = []
+            for path in files:
+                for name in pq.read_schema(path).names:
+                    if name not in columns:
+                        columns.append(name)
+            unit_columns = _role_columns(drug_sources[sid], columns).get("unit")
+            if not unit_columns:
+                continue
+            stated = " OR ".join(
+                f"(nullif(trim(CAST({_sql_ident(c)} AS VARCHAR)), '') IS NOT NULL "
+                f"AND trim(CAST({_sql_ident(c)} AS VARCHAR)) NOT IN ({literals}))"
+                for c in unit_columns
+            )
+            file_list = "[" + ", ".join(_sql_str(f) for f in files) + "]"
+            rows = con.execute(
+                f"SELECT count(*) FILTER (WHERE {stated}) FROM read_parquet({file_list}, union_by_name=true)"
+            ).fetchone()[0]
+            out[sid] = {"source_rows_stating_a_unit": int(rows or 0), "events_carrying_a_unit": carried.get(sid, 0)}
+    return out
+
+
 @check("DOSE_UNIT_CARRIED")
 def _dose_unit_carried(l: Layers) -> CheckResult:
     """A drug record whose source states a dose unit publishes it in OMOP and in MEDS.
@@ -3064,8 +3149,14 @@ def _dose_unit_carried(l: Layers) -> CheckResult:
     Reads the drug events' unit and dose text (each distinct dose parsed once, with the
     parser the publisher uses), OMOP DRUG_EXPOSURE through the lineage, and the MEDS drug
     rows by event id. Fails when such a row has a null OMOP dose unit, or a MEDS row with
-    neither a unit nor its dose text. Reports bare doses (no unit anywhere). Skips when
-    no drug event states a unit or a parseable dose unit, or nothing is published.
+    neither a unit nor its dose text. Reports bare doses (no unit anywhere).
+
+    Also reads each drug source's own parquet for the unit its rows state (see
+    ``source_unit_statements``), and fails when a source states units on its rows while
+    none of its events carries one: the unit was lost before the canonical layer, which
+    is how the unmapped unit column of the audit looks from inside the build. Skips when
+    no drug event or source row states a unit or a parseable dose unit, or nothing is
+    published.
     """
     if l.events_path is None:
         return _skip("canonical layer not built")
@@ -3077,6 +3168,8 @@ def _dose_unit_carried(l: Layers) -> CheckResult:
     meds_files = _meds_files(l)
     if not omop_built and not meds_files:
         return _skip("neither OMOP nor MEDS is built")
+    statements = source_unit_statements(l)
+    lost = {sid: s for sid, s in statements.items() if s["source_rows_stating_a_unit"] and not s["events_carrying_a_unit"]}
     with _engine(l, omop=omop_built, meds=bool(meds_files)) as con:
         doses = [r[0] for r in con.execute(
             f"SELECT DISTINCT dose_source FROM evt WHERE event_kind IN ({kinds}) AND dose_source IS NOT NULL"
@@ -3105,9 +3198,13 @@ def _dose_unit_carried(l: Layers) -> CheckResult:
         )
         candidates = int(con.execute("SELECT count(*) FROM carried").fetchone()[0])
         metrics: dict[str, Any] = {"drug_events_with_source_unit": candidates, "parseable_dose_texts": len(with_unit)}
-        if not candidates:
+        metrics["source_unit_statements"] = statements
+        if not candidates and not lost:
             return _skip_with("no drug event states a unit or a parseable dose unit", metrics)
-        problems: list[str] = []
+        problems: list[str] = [
+            f"{sid} states a dose unit on {s['source_rows_stating_a_unit']:,} source rows and none of its events carries one"
+            for sid, s in sorted(lost.items())
+        ]
         if omop_built:
             row = con.execute(
                 """
@@ -3168,9 +3265,15 @@ def _visit_concept_coverage(l: Layers) -> CheckResult:
     that reason and never counted as loss -- on one export most ICU transfers name an
     encounter that was never delivered as a visit.
 
+    Zero-length visits whose type is empty or a placeholder are counted and reported,
+    and fail nothing. A readmission the source dated and never typed is a visit that
+    source recorded, and saying "the source did not say" with concept 0 is a decision a
+    dataset may make; the discharge markers the audit found published as visits are
+    caught by the coverage threshold instead, which they drag far below any default.
+
     Reads OMOP VISIT_OCCURRENCE, VISIT_DETAIL, the publisher's lineage and quality
-    issues, and the canonical visit and visit-detail events. Zero-length visits whose
-    type is empty or a placeholder must number zero. Skips when OMOP is not built.
+    issues, and the canonical visit and visit-detail events. Skips when OMOP is not
+    built.
     """
     con = _omop_connection(l)
     if con is None:
@@ -3228,8 +3331,6 @@ def _visit_concept_coverage(l: Layers) -> CheckResult:
         if has_vocabulary and c["share"] < thresholds[table]:
             problems.append(f"{table}: {c['with_concept']:,} of {c['rows']:,} rows carry a concept "
                             f"({c['share']:.1%} < {thresholds[table]:.0%})")
-    if placeholders:
-        problems.append(f"{placeholders:,} zero-length visits whose type is empty or a placeholder were published")
     withheld = {
         "canonical_visit_details": canonical_details,
         "published_visit_details": published_details,
@@ -3243,13 +3344,15 @@ def _visit_concept_coverage(l: Layers) -> CheckResult:
     if not coverage:
         return _skip_with("no visit published", metrics)
     reported = f"; {unparented:,} visit details withheld as unparented (reported, not a loss)" if unparented else ""
+    if placeholders:
+        reported += f"; {placeholders:,} zero-length visits carry no type (reported)"
     return CheckResult(
         "",
         not problems,
         ", ".join(f"{t} {c['share']:.1%} of {c['rows']:,} rows carry a concept (threshold {c['threshold']:.0%})"
                   for t, c in coverage.items())
         + ("" if has_vocabulary else " (built without a vocabulary, so not judged)")
-        + f"; {zero_unmapped:,} zero-length visits without a concept, none typed by a placeholder" + reported
+        + f"; {zero_unmapped:,} zero-length visits without a concept" + reported
         if not problems
         else "; ".join(problems) + reported,
         metrics,
@@ -3290,43 +3393,59 @@ def _note_text_unique(l: Layers) -> CheckResult:
 
 @check("ENCOUNTER_RESOLVES")
 def _encounter_resolves(l: Layers) -> CheckResult:
-    """An event's encounter id names a visit of the same subject, at the declared rate.
+    """An event's encounter id names an encounter the dataset knows, at the declared rate.
 
     From the audit (P-CU12, P-M14, P-M15): a note table whose encounter ids matched
     other tables 2.6% of the time; emergency visits keyed on one identifier while their
     vital signs used another and their medications none, so nothing linked.
 
-    Reads the events' subject and encounter id against the visit and visit-detail
-    events. Per source, the linked share must reach the source's
-    ``expected_encounter_link_rate.min_rate`` or else ``validation.encounter_link_rate_min``.
-    Skips when the dataset has no visit events or no event carries an encounter id.
+    Where a visit-shaped source maps an encounter id, an event's encounter must name a
+    visit or visit detail of the same subject, and each source's linked share must reach
+    its ``expected_encounter_link_rate.min_rate`` or else
+    ``validation.encounter_link_rate_min``. Where no visit source maps one -- no encounter
+    table was delivered -- an encounter id can only be shared between the tables that
+    carry it: the share of each source's events whose (subject, encounter) another source
+    also carries is reported, and judged only where the source declares the rate it
+    expects, because the default was set for resolving against visits.
+
+    Reads the events' source, subject, kind and encounter id, and the configuration.
+    Skips when no event carries an encounter id, or when visits are the reference and
+    none was built.
     """
     if l.events_path is None:
         return _skip("canonical layer not built")
-    if l.events is not None and l.events.filter(pl.col("event_kind").is_in(list(VISIT_KINDS))).height == 0:
+    against = encounter_reference(l.cfg)
+    if against == "visits" and l.events is not None and l.events.filter(pl.col("event_kind").is_in(list(VISIT_KINDS))).height == 0:
         return _skip("no visit events to resolve encounters against")
     with _engine(l) as con:
-        rates = encounter_link_rates(con)
+        rates = encounter_link_rates(con, against)
     if not rates:
         return _skip("no event carries an encounter id")
     default = l.cfg.validation.encounter_link_rate_min
     failing: list[str] = []
+    judged = 0
     for sid, r in sorted(rates.items()):
         spec = l.cfg.sources.get(sid)
         expected = spec.expected_encounter_link_rate if spec is not None else None
+        r["declared"] = expected is not None
+        if expected is None and against == "sources":
+            r["min_rate"] = None
+            continue
         minimum = expected.min_rate if expected is not None else default
         r["min_rate"] = minimum
-        r["declared"] = expected is not None
+        judged += 1
         if r["rate"] < minimum:
-            failing.append(f"{sid} {r['rate']:.1%} < {minimum:.0%}")
+            failing.append(f"{sid} {r['rate']:.1%} < {minimum:.1%}")
+    where = ("a visit of the same subject" if against == "visits"
+             else "another source's events, since no visit carries an encounter id")
     return CheckResult(
         "",
         not failing,
-        f"{len(rates)} sources carry encounter ids and each resolves to a visit at its declared rate: "
-        + ", ".join(f"{sid} {r['rate']:.0%}" for sid, r in sorted(rates.items()))
+        f"{len(rates)} sources carry encounter ids, resolved against {where}; {judged} judged and none "
+        "falls short: " + ", ".join(f"{sid} {r['rate']:.1%}" for sid, r in sorted(rates.items()))
         if not failing
-        else f"encounter ids that do not resolve to a visit of the same subject: {failing[:6]}",
-        {"per_source": rates, "default_min_rate": default},
+        else f"encounter ids that do not resolve to {where}: {failing[:6]}",
+        {"resolved_against": against, "per_source": rates, "judged": judged, "default_min_rate": default},
     )
 
 

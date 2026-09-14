@@ -50,6 +50,7 @@ from ehr2trace.validate import (  # noqa: E402
     artifact_in_this_tree,
     death_local_dates,
     encounter_link_rates,
+    encounter_reference,
     merge_disagreements,
     note_duplicate_groups,
     raw_coverage,
@@ -352,7 +353,8 @@ def audit(dataset_id: str, work_root: Path) -> dict[str, Any]:
                 report["doses"] = _doses(con, omop, meds_files, has_events)
                 report["death"] = _death(con, omop, zone, has_events)
                 report["notes"] = note_duplicate_groups(con, zone)
-                report["encounter_link_rate"] = encounter_link_rates(con)
+                report["encounter_link_rate"] = {"resolved_against": encounter_reference(cfg),
+                                                 "per_source": encounter_link_rates(con, encounter_reference(cfg))}
             else:
                 report["visits"] = _visits(omop, con, False)
                 report["doses"] = _doses(con, omop, meds_files, False)
