@@ -14,13 +14,15 @@ no cross-worker coordination.
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator, Sequence
+from zoneinfo import ZoneInfo
 
 import polars as pl
 import pyarrow as pa
@@ -29,6 +31,7 @@ import pyarrow.parquet as pq
 from ehr2trace.analytics import analytic_connection
 from ehr2trace.canonical.anchors import emit_anchors
 from ehr2trace.canonical.dedup import (
+    INSTANCE_KEY,
     apply_duplicate_flags,
     dedup_records,
     merge_anchors,
@@ -42,6 +45,7 @@ from ehr2trace.canonical.normalize import (
 from ehr2trace.canonical.values import spec_from_config
 from ehr2trace.config import DatasetConfig
 from ehr2trace.paths import StreamingParquetWriter, WorkLayout, task_hash, write_table_atomic
+from ehr2trace.reference import load_reference, reference_digest
 from ehr2trace.schema import (
     ANCHOR_SCHEMA,
     CANONICAL_EVENT_SCHEMA,
@@ -232,6 +236,8 @@ class CanonicalTask:
     bucket_count: int
     #: address of the staged rows this task reads, folded in from the stage plan
     staged_digest: str = ""
+    #: address of the reference tables this task reads (see ehr2trace.reference)
+    reference_digest: str = ""
     mapping_version: str = DEFAULT_MAPPING_VERSION
 
     @property
@@ -245,6 +251,12 @@ class CanonicalTask:
         # success, and silently republished the previous answer. Re-preparing a source,
         # fixing a preparation script and receiving a corrected extract all take that
         # path, and none of them announces itself.
+        #
+        # `reference_digest` is the other input: which spelling is which unit, what an
+        # exact conversion is and what a value can plausibly be are judgements this
+        # stage applies, and editing one of those tables has to rebuild the events it
+        # changes. It sits here rather than in the config hash so that it invalidates
+        # canonical alone -- no ingest reads a reference table.
         return task_hash(
             "canonical",
             CODE_VERSION,
@@ -256,6 +268,7 @@ class CanonicalTask:
             self.bucket_count,
             self.bucket,
             self.staged_digest,
+            self.reference_digest,
         )
 
 
@@ -294,6 +307,7 @@ def plan_canonical(
     staged_digest = task_hash(
         "staged", *sorted(task.digest for task in plan_stage(cfg, layout, strict=strict))
     )
+    tables_digest = reference_digest(None)
     return [
         CanonicalTask(
             dataset_id=cfg.dataset_id,
@@ -305,6 +319,7 @@ def plan_canonical(
             timezone_assumed=tz_assumed,
             bucket_count=cfg.execution.bucket_count,
             staged_digest=staged_digest,
+            reference_digest=tables_digest,
         )
         for b in buckets
     ]
@@ -327,7 +342,10 @@ def run_canonical_task(task: CanonicalTask) -> CanonicalResult:
         timezone_name=task.timezone_name,
         timezone_assumed=task.timezone_assumed,
     )
-    value_spec = spec_from_config(None, cfg.time.null_literals)
+    # The unit table decides what a `number + unit` cell is: with it, `4.1 mmol/L` is a
+    # value and `2 SINUS TACHYCARDIA` is a diagnosis line rather than two of something.
+    reference = load_reference(None, cfg.dataset_id)
+    value_spec = spec_from_config(None, cfg.time.null_literals, reference.units.spellings)
 
     all_events: list[dict[str, Any]] = []
     all_links: list[dict[str, Any]] = []
@@ -350,6 +368,7 @@ def run_canonical_task(task: CanonicalTask) -> CanonicalResult:
             time=time_ctx,
             values=value_spec,
             mapping_version=task.mapping_version,
+            reference=reference,
         )
         shape = get_shape(spec.shape)
         df = pl.read_parquet(path)
@@ -365,7 +384,14 @@ def run_canonical_task(task: CanonicalTask) -> CanonicalResult:
             if not wrapped:
                 continue
             emission: Emission = shape(ctx, wrapped)
-            all_events.extend(e.model_dump(mode="python") for e in emission.events)
+            # The merge needs what each row said, not only what the event kept, so the
+            # row's values travel beside the event as far as the merge and no further.
+            # `strict` because a silent truncation here would attribute one row's
+            # values to another row's event.
+            for event, instance in zip(emission.events, emission.instances, strict=True):
+                row = event.model_dump(mode="python")
+                row[INSTANCE_KEY] = instance
+                all_events.append(row)
             all_links.extend(emission.links)
             all_action_keys.extend(emission.action_keys)
             all_issues.extend(_with_source(emission.issues, source_id))
@@ -374,11 +400,30 @@ def run_canonical_task(task: CanonicalTask) -> CanonicalResult:
             all_anchors.extend(anchors)
             all_memberships.extend(memberships)
 
-    events = merge_events(all_events)
+    merged = merge_events(
+        all_events,
+        {source_id: spec.merge_rules for source_id, spec in cfg.sources.items()},
+        cfg.dataset_id,
+    )
+    all_issues.extend(merged.issues)
+    all_quarantine.extend(merged.quarantine)
+
+    events, death_issues, merged_deaths = apply_cross_event_rules(
+        merged.events, task.timezone_name
+    )
+    all_issues.extend(death_issues)
+    # A death that collapsed onto a more precise one takes its source rows with it:
+    # every row that recorded the death still points at the death that survived.
+    # Rewritten in place -- a bucket's link list is the largest thing here, and a copy
+    # of it to change a handful of rows is a copy this stage cannot afford.
+    if merged_deaths:
+        for link in all_links:
+            survivor = merged_deaths.get(link["event_id"])
+            if survivor is not None:
+                link["event_id"] = survivor
+
     links, partitions = merge_links(all_links)
     events = apply_duplicate_flags(events, partitions)
-    events, death_issues = apply_cross_event_rules(events)
-    all_issues.extend(death_issues)
     events, _caused = resolve_causes(events, all_action_keys)
     events = sort_events(events)
     anchors = merge_anchors(all_anchors)
@@ -470,26 +515,63 @@ def resolve_causes(
     return out, resolved
 
 
-def apply_cross_event_rules(events: Sequence[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Rules that need a whole subject in view.
+def apply_cross_event_rules(
+    events: Sequence[dict[str, Any]], zone_name: str | None
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, str]]:
+    """Rules that need a whole subject in view (T1.8, D-R11).
+
+    Two sources rarely record a death the same way: one files the date the registrar
+    has, the other the hour the monitor stopped. On one calendar day those are one
+    death written down twice, and keeping both would publish a patient who died twice.
+    They collapse onto the more precise time -- a recorded hour beats a bare date --
+    and the dropped event's source rows are re-pointed at the survivor, so the merge
+    loses no lineage. The returned mapping says which id became which.
+
+    The day is the *local* day. ``event_time`` is a naive UTC instant, so a death at
+    21:30 in New York is stored under the next UTC date; comparing UTC dates would
+    split one death in two for every patient who died after seven in the evening, and
+    the split would look like a genuine disagreement.
+
+    Two different local days is the case a converter must not settle: which source is
+    wrong about the day someone died cannot be read off the data. Both events stay,
+    both are flagged, and the pair is reported for a human to resolve.
 
     Records dated after a patient's death are real -- back-filled problem lists are
-    routine -- so they are flagged and kept, never deleted and never re-dated. A
-    disagreement between two sources about the death date is reported rather than
-    resolved by picking one.
+    routine -- so they are flagged and kept, never deleted and never re-dated.
     """
-    deaths: dict[int, list[datetime]] = {}
+    zone = ZoneInfo(zone_name) if zone_name else None
+    by_subject: dict[int, list[dict[str, Any]]] = {}
     for e in events:
         if e.get("event_kind") == str(EventKind.death) and e.get("event_time") is not None:
-            deaths.setdefault(int(e["subject_id"]), []).append(e["event_time"])
+            by_subject.setdefault(int(e["subject_id"]), []).append(e)
 
     issues: list[dict[str, Any]] = []
-    for subject_id, times in deaths.items():
-        distinct = sorted(set(times))
-        if len(distinct) > 1:
+    merged_deaths: dict[str, str] = {}
+    added_flags: dict[str, set[str]] = {}
+    deaths: dict[int, list[datetime]] = {}
+    for subject_id in sorted(by_subject):
+        by_day: dict[date, list[dict[str, Any]]] = {}
+        for e in by_subject[subject_id]:
+            by_day.setdefault(_local(e["event_time"], zone).date(), []).append(e)
+        surviving: list[dict[str, Any]] = []
+        for day in sorted(by_day):
+            group = sorted(by_day[day], key=lambda e: _death_precision(e, zone))
+            survivor = group[0]
+            surviving.append(survivor)
+            if len(group) > 1:
+                added_flags.setdefault(survivor["event_id"], set()).add(
+                    str(QualityFlag.DEATH_TIME_MERGED)
+                )
+                for dropped in group[1:]:
+                    merged_deaths[dropped["event_id"]] = survivor["event_id"]
+        if len(by_day) > 1:
+            for e in surviving:
+                added_flags.setdefault(e["event_id"], set()).add(
+                    str(QualityFlag.DEATH_DATE_CONFLICT)
+                )
             issues.append(
                 {
-                    "issue_type": "DEATH_DATE_CONFLICT",
+                    "issue_type": str(QualityFlag.DEATH_DATE_CONFLICT),
                     "severity": "error",
                     "stage": "canonical",
                     "subject_id": subject_id,
@@ -497,13 +579,18 @@ def apply_cross_event_rules(events: Sequence[dict[str, Any]]) -> tuple[list[dict
                     "event_id": None,
                     "partition_id": None,
                     "source_id": None,
-                    "detail": "; ".join(d.isoformat() for d in distinct),
+                    "detail": "; ".join(d.isoformat() for d in sorted(by_day)),
                 }
             )
+        deaths[subject_id] = [e["event_time"] for e in surviving]
 
     out: list[dict[str, Any]] = []
     for e in events:
+        if e["event_id"] in merged_deaths:
+            continue
         row = dict(e)
+        flags = set(row.get("quality_flags") or [])
+        flags |= added_flags.get(row["event_id"], set())
         subject_deaths = deaths.get(int(row["subject_id"]))
         if (
             subject_deaths
@@ -512,11 +599,30 @@ def apply_cross_event_rules(events: Sequence[dict[str, Any]]) -> tuple[list[dict
         ):
             earliest = min(subject_deaths)
             if row["event_time"] > earliest + timedelta(days=1):
-                row["quality_flags"] = sorted(
-                    set(row.get("quality_flags") or []) | {str(QualityFlag.RECORDED_AFTER_DEATH)}
-                )
+                flags.add(str(QualityFlag.RECORDED_AFTER_DEATH))
+        if flags != set(row.get("quality_flags") or []):
+            row["quality_flags"] = sorted(flags)
         out.append(row)
-    return out, issues
+    return out, issues, merged_deaths
+
+
+def _local(instant: datetime, zone: ZoneInfo | None) -> datetime:
+    """A naive UTC instant read as the wall clock of the dataset's own zone."""
+    if zone is None:
+        return instant
+    return instant.replace(tzinfo=timezone.utc).astimezone(zone).replace(tzinfo=None)
+
+
+def _death_precision(event: dict[str, Any], zone: ZoneInfo | None) -> tuple[bool, datetime, str]:
+    """Rank of a death event within one local day: the most precise time first.
+
+    A local midnight is what a date with no time becomes, so any other local time is
+    better evidence. Among equals the earliest wins, and the id settles the rest, so
+    the choice does not depend on which worker produced which row.
+    """
+    local = _local(event["event_time"], zone)
+    midnight = (local.hour, local.minute, local.second, local.microsecond) == (0, 0, 0, 0)
+    return (midnight, event["event_time"], event["event_id"])
 
 
 def _write(path: Path, rows: Sequence[dict[str, Any]], schema: pa.Schema) -> None:
@@ -614,4 +720,35 @@ def merge_buckets(layout: WorkLayout, digests: dict[int, str]) -> dict[str, int]
             counts[name] = int(
                 con.execute(f"SELECT count(*) FROM read_parquet('{target}')").fetchone()[0]
             )
+    write_death_conflicts(layout)
     return counts
+
+
+#: ``review/death_conflicts.csv``: one row per subject whose death dates disagree
+DEATH_CONFLICT_FIELDS: tuple[str, ...] = ("subject_id", "dates")
+
+
+def write_death_conflicts(layout: WorkLayout) -> None:
+    """List the deaths a person has to look at, one row per subject.
+
+    Written even when it is empty. "No subject has two death dates" is a result, and a
+    file that only appears when something is wrong cannot be told from a step that did
+    not run.
+    """
+    rows: list[tuple[Any, ...]] = []
+    source = layout.canonical_path("quality_issue")
+    if source.exists():
+        frame = (
+            pl.read_parquet(source)
+            .filter(pl.col("issue_type") == str(QualityFlag.DEATH_DATE_CONFLICT))
+            .select(["subject_id", "detail"])
+            .unique()
+            .sort(["subject_id", "detail"])
+        )
+        rows = list(frame.iter_rows())
+    path = layout.review_dir / "death_conflicts.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(DEATH_CONFLICT_FIELDS)
+        writer.writerows(rows)
