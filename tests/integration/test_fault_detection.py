@@ -100,3 +100,38 @@ def test_injection_does_not_reach_the_build_it_was_cloned_from(clean_build, tmp_
 
     after = {r.check_id: r.passed for r in run_checks(cfg, source_layout, include_slow=True)}
     assert after == baseline, "injecting into the clone changed the original build"
+
+
+def test_the_audit_tool_reads_the_build_and_reports_only_aggregates(clean_build):
+    """`tools/audit_conversion.py` is the audit's queries; it must run and stay aggregate.
+
+    The tool exists so the numbers the remediation is judged by can be recomputed rather
+    than quoted. That makes two things testable: it reads a build of any dataset without
+    being told anything about it, and nothing patient-level reaches its output -- no
+    subject id, no note text -- because the document it writes is meant to be read,
+    shared and diffed.
+    """
+    import json
+
+    import polars as pl
+
+    from tools.audit_conversion import audit
+
+    cfg, layout, _baseline = clean_build
+    report = audit(cfg.dataset_id, layout.root.parent)
+
+    assert report["layers"] == {"manifest": True, "canonical": True, "omop": True, "meds": True}
+    assert report["events"] > 0 and report["sources"]
+    for section in ("merge_disagreements", "units", "visits", "doses", "death", "notes",
+                    "encounter_link_rate", "raw_coverage"):
+        assert section in report, f"{section} missing from the audit"
+    # The clean build is clean: nothing merged rows that disagree, every column declared.
+    assert not [s for s, e in report["merge_disagreements"].items() if e.get("disagreements")]
+    assert not [c for c in report["raw_coverage"]["columns"].values() if c["undeclared"]]
+
+    written = json.dumps(report, default=str)
+    events = pl.read_parquet(layout.canonical_path("events"))
+    for subject_id in events["subject_id"].unique().to_list():
+        assert str(subject_id) not in written, "a subject id reached the audit document"
+    for text in events["value_text"].drop_nulls().unique().to_list():
+        assert str(text)[:40] not in written, "text from a value column reached the audit document"
