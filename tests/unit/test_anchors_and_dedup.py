@@ -123,16 +123,16 @@ def test_events_sharing_an_id_merge_and_union_their_flags():
             event("a", quality_flags=["AVAILABILITY_ASSUMED"]),
             event("b"),
         ]
-    )
+    ).events
     assert len(merged) == 2
     assert merged[0]["quality_flags"] == ["AVAILABILITY_ASSUMED", "TIME_FALLBACK"]
 
 
-def test_merging_fills_a_gap_but_never_overwrites_an_observation():
-    merged = merge_events([event("a", unit_source=None), event("a", unit_source="mmol/L")])
-    assert merged[0]["unit_source"] == "mmol/L"
-    merged = merge_events([event("a", unit_source="mmol/L"), event("a", unit_source="mg/dL")])
-    assert merged[0]["unit_source"] == "mmol/L"
+def test_merging_fills_a_gap_without_calling_it_a_disagreement():
+    """Absence is not a value: a row that says nothing does not contradict one that does."""
+    result = merge_events([event("a", unit_source=None), event("a", unit_source="mmol/L")])
+    assert result.events[0]["unit_source"] == "mmol/L"
+    assert result.issues == [] and result.events[0]["quality_flags"] == []
 
 
 def test_link_relations_are_decided_by_sorting_not_by_arrival_order():

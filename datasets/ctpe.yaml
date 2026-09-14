@@ -101,6 +101,14 @@ sources:
       dose:         {from: [HV_Discrete_Dose]}
       event_time:   {from: [Ordering_Date], required: true}
       status:       {from: [Order_Status]}
+    # 534,610 of the 15,117,445 order rows (3.5%) have an empty Ordering_Date in the
+    # export and are quarantined MISSING_EVENT_TIME. There is no date to recover, so
+    # the share is declared as expected rather than left for the check to report
+    # (W1, plan section 2.6; measured on the build of 2026-09-11).
+    expected_quarantine:
+      MISSING_EVENT_TIME:
+        max_share: 0.05
+        reason: "534,610 of 15,117,445 order rows carry no Ordering_Date in the export; the source has no date for them (W1)"
 
   medication_admin:
     # One logical source, two physical forms: a standalone file in one partition, a
@@ -145,8 +153,25 @@ sources:
       source_name:    {from: [Lab_Name]}
       value:          {from: [Value]}
       unit:           {from: [Units]}
-      # Reference_Range_Low/High are NULL throughout this export; ranges, if needed,
-      # come from reference_ranges below rather than from the source.
+      # The reference range the laboratory reported with the result. Filled on
+      # 10,009,411 (low) and 10,010,801 (high) of 18,698,432 rows, 53.5%, all but a
+      # handful numeric -- not NULL throughout, as an earlier note here claimed
+      # (P-J6, T2.J2, measured 2026-09-14).
+      value_low:      {from: [Reference_Range_Low]}
+      value_high:     {from: [Reference_Range_High]}
+    # Arterial pH is the one code whose rows carry no unit at all (332,765 rows); pH is
+    # its own UCUM unit and is declared here so the value is not left unitless (T1.7).
+    declared_units:
+      PHART: pH
+    # The same result appears in both extraction batches with a different result time
+    # in 14,709 merged groups, 9,384 of them less than an hour apart. The earlier
+    # time is when the result first existed; the later one is when the second extract
+    # saw it. The earliest is kept and the event flagged AVAILABILITY_MERGED (D-R5,
+    # P-J3). Declared even though it is the default, so that the choice is visible here.
+    merge_rules:
+      available_time: {rule: earliest}
+    ignored_columns:
+      rn: "an extraction-time row number, 1 to 5,532, filled on every row and unique neither within a patient nor within a code; it says where the row sat in the extract, not anything about the patient"
 
   problem_list:
     adapter: delimited
@@ -180,6 +205,18 @@ sources:
       source_name: {from: [Diagnosis_Name]}
       event_time:  {from: [First_Noted_Date], required: true}
       status:      {from: [Status]}
+    # An entry whose status is Deleted was withdrawn by the clinician who entered it:
+    # 30,069 rows (the rest: empty 5,531,824, Active 571,102, Resolved 162,915). Not a
+    # diagnosis, so dropped before shaping (D-R6, P-J11).
+    excluded_status: [Deleted]
+    # The two batches disagree on the status of 45,348 merged entries, mostly an empty
+    # cell in one against Active in the other (27,177 groups), then empty against
+    # Resolved (6,454), then Active against Resolved (5,430). A recorded status outranks
+    # an empty one; Resolved outranks Active because it is the later state of the same
+    # problem; Active and Resolved together are a contradiction, and the event is
+    # flagged STATUS_CONFLICT (D-R6, P-J2).
+    merge_rules:
+      status_source: {rule: priority, order: [Resolved, Active], conflict_when: [[Active, Resolved]]}
 
   echo:
     adapter: delimited
@@ -223,6 +260,49 @@ sources:
       source_code:    {from: [Component_Name], required: true}
       text_line:      {from: [Line]}
       value:          {from: [Result_Value]}
+    # The ECG export has no unit column at all: 4,114,733 numeric results, every one of
+    # them unitless (P-J7, T2.J3). What each number is in is fixed by what the component
+    # is, and the cart's own naming convention says which: a RATE is beats per minute, a
+    # DURATION or an INTERVAL is what the cart prints in milliseconds, an AXIS is degrees
+    # of the frontal plane, and the two pressures recorded with the tracing are mmHg. The
+    # measured values agree: the rates have median 84, the QRS durations median 90, the
+    # QT intervals median 384, the corrected QT median 451 -- none of which is a number in
+    # any other unit. Every value carrying one of these flags UNIT_DECLARED, so a reader
+    # can always tell a unit this file asserted from one the hospital sent.
+    #
+    # `ECG <name>` is the same measurement under the second batch's spelling; both are
+    # declared because a source code is the string the export wrote, not a tidied one.
+    declared_units:
+      "VENTRICULAR RATE":        bpm
+      "ATRIAL RATE":             bpm
+      "ECG HEART RATE":          bpm
+      "QRS DURATION":            ms
+      "ECG QRS DURATION":        ms
+      "ECG P DURATION":          ms
+      "P-R INTERVAL":            ms
+      "ECG PR INTERVAL":         ms
+      "Q-T INTERVAL":            ms
+      "Q-T  INTERVAL":           ms    # the same component, written with two spaces
+      "Q-T INTERVA":             ms    # and with its name cut short by the export
+      "ECG QT INTERVAL":         ms
+      "Q-T DISPERSION":          ms
+      "QTC CALCULATION (BEZET)": ms
+      "QTC CALCULATION(BEZET)":  ms
+      "ECG QTC INTERVAL":        ms
+      "ECG RR INTERVAL":         ms
+      "P AXIS":                  degrees
+      "R AXIS":                  degrees
+      "T AXIS":                  degrees
+      "ECG P AXIS":              degrees
+      "ECG QRS AXIS":            degrees
+      "ECG T AXIS":              degrees
+      "SYSTOLIC BP":             mmHg
+      "DIASTOLIC BP":            mmHg
+    # DIAGNOSIS, DIAGNOSIS LINE, DIAGNOSIS CLASS and ECG REPORT are the cart's text, not
+    # measurements, and get no unit. 27 of those rows were read as a number followed by a
+    # unit -- `2 to 1 AV block` became 2 `to 1 AV block` (P-J8). None of those tails is a
+    # unit in `reference/units/`, so they stop parsing as values once T1.9 lands; nothing
+    # is declared here to make that happen.
 
   demographics:
     adapter: excel
@@ -245,6 +325,19 @@ sources:
       - {column: BMI, code: BMI, unit: "kg/m2"}
       - {column: Pulse, code: PULSE, unit: "/min"}
       - {column: BP_Systolic, code: BP_SYSTOLIC, unit: "mm[Hg]"}
+    # Both of these are the export, not the converter, and both are far past the 5%
+    # the checks complain at, so both are declared (plan section 2.6, T0.2). The three
+    # untimed vital signs above produce up to three quarantined values per patient --
+    # 92,005 from 30,971 rows -- so no share below 1 can bound them. The vital status is
+    # the `Status` column, which says whether a patient is alive without saying when it
+    # was true: 23,979 of 30,971 rows, 77%. Neither is given a time by guesswork.
+    expected_quarantine:
+      UNTIMED_CLINICAL_VALUE:
+        max_share: 1.0
+        reason: "the BMI, pulse and systolic pressure this sheet carries have no measurement time anywhere in the export; 92,005 values from 30,971 rows, up to three per patient (measured on the build of 2026-09-11)"
+      UNTIMED_VITAL_STATUS:
+        max_share: 0.8
+        reason: "23,979 of 30,971 rows state a vital status with no date it was true as of; 77.4%"
 
   outcome:
     adapter: excel
@@ -301,6 +394,221 @@ sources:
       source_code:    {from: [Component_Name], required: true}
       text_line:      {from: [Line]}
       value:          {from: [Result_Value]}
+    # The PFT values sheet has no unit column either: 107,550 numeric results with
+    # nothing saying what they are in (P-J7, T2.J3). Two reporting systems wrote into it
+    # and each has its own naming convention, which is what the units are read from:
+    #
+    #   `<measure>_ZBD` / `_AFD`   the measured value before / after bronchodilator, in
+    #                              the measure's own unit (FVC_ZBD median 2.31, FEV1_ZBD
+    #                              1.70, TLC_ZBD 4.01 -- litres);
+    #   `<measure>_PPR` / `_APP`   the same measure as a percentage of predicted
+    #                              (FEV1_PPR median 67, FVC_APP 81);
+    #   `<MEASURE>-PRE|PRED|POST`  the second system's measured, predicted and
+    #                              post-bronchodilator values, again in the measure's own
+    #                              unit (FEV1-PRE median 1.83, TLCPLETH-PRE 3.39);
+    #   `<MEASURE>-%PRED-PRE|POST` that system's percentage of predicted (median 49-76).
+    #
+    # Volumes are litres, flows litres per second, ratios and percentages of predicted
+    # percent, diffusing capacity mL/min/mmHg and per litre of alveolar volume for DL/VA,
+    # the breath-hold time seconds, and the walk tests carry their unit in their own name.
+    # Each declaration flags the value UNIT_DECLARED.
+    declared_units:
+      # volumes
+      "FVC_ZBD":                    L
+      "FEV1_ZBD":                   L
+      "FVC_AFD":                    L
+      "FEV1_AFD":                   L
+      "TLC_ZBD":                    L
+      "RV_ZBD":                     L
+      "FVC-PRE":                    L
+      "FVC-PRED":                   L
+      "FVC-POST":                   L
+      "FEV1-PRE":                   L
+      "FEV1-PRED":                  L
+      "FEV1-POST":                  L
+      "FEV05-PRE":                  L
+      "FEV05-POST":                 L
+      "FIVC-PRE":                   L
+      "FIVC-POST":                  L
+      "IVC-PRE":                    L
+      "SVCSB-PRE":                  L
+      "TLC-PRE":                    L
+      "TLC-PRED":                   L
+      "TLCPLETH-PRE":               L
+      "TLCPLETH-PRED":              L
+      "RVPLETH-PRE":                L
+      "RVPLETH-PRED":               L
+      "TGVPLETH-PRE":               L
+      "TGVPLETH-PRED":              L
+      "VA-PRE":                     L
+      "VA-PRED":                    L
+      "FVC PREDICTED, EXTERNAL":    L
+      "FEV1 PREDICTED, EXTERNAL":   L
+      "FEV1, EXTERNAL":             L
+      # flows
+      "FEF25_75_ZBD":               L/s
+      "FEF2575-PRE":                L/s
+      "FEF2575-PRED":               L/s
+      "FEF2575-POST":               L/s
+      "FEF25-PRE":                  L/s
+      "FEF25-PRED":                 L/s
+      "FEF25-POST":                 L/s
+      "FEF50-PRE":                  L/s
+      "FEF50-PRED":                 L/s
+      "FEF50-POST":                 L/s
+      "FEF75-PRE":                  L/s
+      "FEF75-PRED":                 L/s
+      "FEF75-POST":                 L/s
+      "FEFMAX-PRE":                 L/s
+      "FEFMAX-PRED":                L/s
+      "FEFMAX-POST":                L/s
+      "FIFMAX-PRE":                 L/s
+      "FIFMAX-POST":                L/s
+      "FIF2575-PRE":                L/s
+      "FIF2575-POST":               L/s
+      "FEF2001200-PRE":             L/s
+      "FEF2001200-POST":            L/s
+      # ratios and percentages of predicted
+      "FEV1OFVC_ZBD":               "%"
+      "FEV1OFVC_AFD":               "%"
+      "FEV1_PPR":                   "%"
+      "FVC_PPR":                    "%"
+      "FEF25_75_PPR":               "%"
+      "DLCO_UNC_PPR":               "%"
+      "TLC_PPR":                    "%"
+      "RV_PPR":                     "%"
+      "FEV1_APP":                   "%"
+      "FVC_APP":                    "%"
+      "FEV1/FVC-PREDICTED":         "%"
+      "FEV1FVC-PREDICTED":          "%"
+      "FEV1FVC-POST":               "%"
+      "FVC-%PRED-PRE":              "%"
+      "FVC-%PRED-POST":             "%"
+      "FEV1-%PRED-PRE":             "%"
+      "FEV1-%PRED-POST":            "%"
+      "FEF2575-%PRED-PRE":          "%"
+      "FEF2575-%PRED-POST":         "%"
+      "RVPLETH-%PRED-PRE":          "%"
+      "TLCPLETH-%PRED-PRE":         "%"
+      "DLCOUNC-%PRED-PRE":          "%"
+      "DLCOUNC-%PRED-POST":         "%"
+      "DLCOCOR-%PRED-PRE":          "%"
+      "DLCOCOR-%PRED-POST":         "%"
+      "RVTLCSB-PRE":                "%"
+      "RVTLCSB-POST":               "%"
+      "RVTLCPL-PRE":                "%"
+      "RV/TLC - PRE PREDICTED":     "%"
+      "RV/TLC - % PRE PREDICTED":   "%"
+      "DLCO % PREDICTED, EXTERNAL": "%"
+      # diffusing capacity
+      "DLCO_UNC_ZBD":               mL/min/mmHg
+      "DLCOUNC-PRE":                mL/min/mmHg
+      "DLCOUNC-PRED":               mL/min/mmHg
+      "DLCOUNC-POST":               mL/min/mmHg
+      "DLCOCOR-PRE":                mL/min/mmHg
+      "DLCOCOR-PRED":               mL/min/mmHg
+      "DLCOCOR-POST":               mL/min/mmHg
+      "DLCO, EXTERNAL":             mL/min/mmHg
+      "DLVA-PRE":                   mL/min/mmHg/L
+      "DLVA-PRED":                  mL/min/mmHg/L
+      # time and distance, where the component name already says the unit
+      "BHT-PRE":                    seconds
+      "6MW_RA_METERS":              m
+      "6MW_O2_METERS":              m
+      "6MW_RA_FEET":                feet
+      "6MW_O2_FEET":                feet
+    # Left undeclared on purpose, 56 rows: FEF50FVC-PRE/PRED/POST is a flow divided by a
+    # volume, which is a reciprocal time, and the sheet does not say whether this system
+    # writes it per second or as a percentage; FEF50FIF50-PRE/PRED/POST is a
+    # dimensionless expiratory-to-inspiratory flow ratio that is written both as a
+    # fraction and as a percentage by different carts. Both stay UNIT_UNKNOWN until
+    # someone with the report can say which, rather than being guessed at here.
+    # The remaining unitless codes are the four procedure names (JHOC/BAYVIEW/GSS/JHCP
+    # PULMONARY FUNCTION TEST(S) and the paediatric one), which carry no value.
+
+  # -- delivered in the second tree, All_kinds/, and projected by tools/prepare_ctpe.py --
+  #
+  # Both of these live under CTPE_PREPARED_ROOT rather than the raw export, in the same
+  # four partition directories. `tools/prepare_ctpe.py` writes them and refuses to write
+  # at all if the four groups differ in format, so that nothing about a row's shape can
+  # tell a model which cohort it came from. Running any ctpe command therefore needs
+  # CTPE_PREPARED_ROOT set; the loader says so by name if it is missing.
+
+  followup:
+    adapter: parquet
+    root_env: CTPE_PREPARED_ROOT
+    file_glob: "followup.parquet"
+    shape: point_event
+    event_kind: observation
+    required: false
+    # The most recent contact the health system recorded with this patient: 30,968 rows
+    # across the four groups, 22,979 patients, and exactly one date per patient once the
+    # groups are merged. It is not a diagnosis, a measurement or a procedure, which is
+    # what `observation` is for. Two things make it worth carrying: it is the censoring
+    # date a survival analysis needs, and the observation-period rule already runs to the
+    # last trustworthy event, so a follow-up contact extends the window to where the
+    # record really ends instead of to the last laboratory result (D-R12, T2.J7, P-J4).
+    #
+    # The code is the constant the preparation step projects. The delivery states the
+    # fact by which table the row is in, and an event needs a code to be publishable, so
+    # the code is written once in the projection rather than invented here.
+    fields:
+      person_id:      {from: [PAT_MRN_ID], required: true}
+      source_code:    {from: [observation_code], required: true}
+      source_name:    {from: [observation_code]}
+      event_time:     {from: [EFFECTIVE_DATE_DTTM], required: true}
+      available_time: {from: [EFFECTIVE_DATE_DTTM]}
+    ignored_columns:
+      rn: "the rank of the contact within the patient. The delivery already kept only the most recent one, so the column is the constant 1 on all 30,968 rows and says nothing a row does not already say"
+
+  icu_transfers:
+    adapter: parquet
+    root_env: CTPE_PREPARED_ROOT
+    file_glob: "icu_transfers.parquet"
+    shape: visit
+    # A department stay is a stay *inside* an admission, not an admission: OMOP has
+    # VISIT_DETAIL for exactly this, and publishing 946,025 of them as visits would
+    # invent that many hospitalisations (D-R14, T2.J7).
+    event_kind: visit_detail
+    required: false
+    # 1,523,224 ADT rows across the four groups, covering 22,914 of the 22,980 published
+    # patients; 946,025 events once the same stay delivered in both batches collapses.
+    fields:
+      person_id:       {from: [PAT_MRN_ID], required: true}
+      encounter_id:    {from: [PAT_ENC_CSN_ID]}
+      event_time:      {from: [IN_DTTM], required: true}
+      end_time:        {from: [PAT_OUT_DTTM]}
+      # The department is what kind of stay this was, in the hospital's own words: 241
+      # names, each with exactly one department id behind it. Kept verbatim rather than
+      # reduced to an ICU/not-ICU label, because the label is already delivered beside it
+      # and collapsing 241 names into 2 would throw away the ward a patient was on.
+      visit_type:      {from: [ADT_DEPARTMENT_NAME]}
+      # d:hh:mm:ss as delivered, kept as text and never parsed as a duration -- the same
+      # treatment the identically named column gets in `outcome`.
+      duration_masked: {from: [Time_Difference]}
+    # The site says which of the 241 departments is meant (they repeat across hospitals),
+    # and the hospital's own ICU flag is evidence a department name alone does not carry:
+    # 22 departments are flagged, 8 of them named only by building and floor.
+    keep_columns: [ADT_LOC_NAME, ICU_DEPT_YN]
+    # 10,828 of the 946,025 stays are delivered twice with a different departure time.
+    # The arrival is recorded to the second, so these are the same stay disagreeing about
+    # when it ended, not two stays: keep the arrival, publish no departure, flag the
+    # event and quarantine both values (D-R4). The stay length disagrees exactly when the
+    # departure does, and is withheld with it rather than left pointing at one of them.
+    merge_rules:
+      end_time:        {rule: null_and_flag}
+      duration_masked: {rule: null_and_flag}
+    # The ADT table is the patient's whole department history; the `Outcome` sheet holds
+    # only the 25,573 encounters this extract was built around. So 91% of these encounter
+    # ids are real -- they appear on other events of the same patient -- but only 13.29%
+    # of the stays name an encounter that was delivered as a visit. That is a gap in the
+    # delivery, not a parsing failure, and it is declared rather than treated as one.
+    expected_encounter_link_rate:
+      min_rate: 0.12
+      reason: "13.29% of the 946,025 stays carry an encounter id that was delivered as a visit; the ADT table spans 226,608 encounters and the Outcome sheet only 25,573 (measured 2026-09-14)"
+    ignored_columns:
+      ADT_DEPARTMENT_ID: "the numeric key of ADT_DEPARTMENT_NAME: 241 ids, 241 names, one to one, so it identifies nothing the name does not. NULL on the 358,928 post-discharge rows, which belong to no department"
+      NAME: "not a name of a person and not a name of a department: 4 distinct values over 1,523,224 rows, in three masked shapes (aaaaaaaa aa, aaaaaaaaa x2, aaaaa aa aaaaaaa aaaaaa), which is the ADT event vocabulary saying how the stay began. It could be carried as the `action` role; it is left out until someone decides that, because this file's instruction was to project it only if it were a department name, and it is not"
 
 anchors:
   anchor_type: ctpa
@@ -358,6 +666,85 @@ execution:
   bucket_count: 64
   workers: 4
   chunk_rows: 200000
+
+validation:
+  # Thresholds are the remediation plan's defaults. One of them is known to fail here and
+  # is left failing on purpose: a department stay's `visit_type` is one of 241 site-local
+  # ward names, and only the 14 whose name actually says ICU or INTENSIVE CARE are mapped
+  # (the other 8 flagged as ICU are named by building and floor, and are in the review
+  # queue). Lowering the number would hide a real gap; the queue is where it gets closed.
+  note: >-
+    visit_concept_coverage_min is expected to fail for `visit_detail` until the ADT
+    department names are reviewed: 14 of 241 are mapped as of 2026-09-14.
+
+# Delivered tables this conversion deliberately does not read (D-R12, decided 2026-09-13).
+# Paths are under the second delivery tree, `All_kinds/`, beside the two tables
+# tools/prepare_ctpe.py does read; that script lists every file it skipped, with the same
+# reasons, in its own manifest, so the two cannot drift apart silently.
+out_of_scope:
+  surgical_pathology_reports:
+    matches: ["All_kinds/Surgical Pathology Reports/**"]
+    reason: >-
+      Surgical pathology report text, 131-159 MB per group. Free-text pathology is a
+      conversion of its own -- it needs a section parser and a terminology pass before any
+      of it is a fact -- and nothing in this cohort's questions turns on it.
+  cardiac_cath:
+    matches: ["All_kinds/Cardiac Cath/**"]
+    reason: >-
+      Catheterisation reports covering about 11% of patients, at the same proportion in
+      each group. A finding present for one patient in nine cannot support a cohort-level
+      claim, and the text needs the same parser the pathology reports do.
+  lipid_panel:
+    matches: ["All_kinds/Labs - Lipid Panel/**"]
+    reason: >-
+      Lipid results, 109,000-191,000 rows per group, covering about 70% of patients. They
+      are laboratory values the main `labs` table does not carry, and they could be
+      included later; they are out of scope now because no question in this cohort asks
+      about lipids and each new code needs its own unit and range declarations.
+  icu_progress_notes:
+    matches:
+      - "All_kinds/ICU/ICU/*_notes.txt"
+      - "All_kinds/ICU/ICU/*_note.txt"
+      - "All_kinds/ICU/ICU/29b_pulmonary_embolism.txt"
+    reason: >-
+      ICU progress-note text, about 33.6 GB in four files for this cohort. They have no
+      header row -- the note text starts at byte 0 -- and they hold emergency, admission
+      and pre-procedure notes as well, so which note a block of text is cannot be told
+      without a parser nobody has written. Never opened.
+  surgical_cases:
+    matches: ["All_kinds/Surgical Cases/**"]
+    reason: >-
+      Surgical case lists, 30-77 rows per group. Too few rows to support anything, and the
+      delivery is wrong: `29_pulmonary_embolism.xlsx` has the same row count as the 29_no
+      file and every one of its MRNs belongs to 29_no, so it is a copy and the 29_has list
+      is missing (P-J12). Raised with the data owner 2026-09-13; still unanswered.
+  other_cohorts:
+    matches:
+      - "All_kinds/**/28_*"
+      - "All_kinds/**/28a_*"
+      - "All_kinds/**/30b_*"
+      - "All_kinds/**/33b_*"
+      - "All_kinds/**/35_*"
+      - "All_kinds/Ultrasound/**"
+      - "All_kinds/Most Recent Follow-Up/Most Recent Follow-Up/followup.xlsx::28_*"
+      - "All_kinds/Most Recent Follow-Up/Most Recent Follow-Up/followup.xlsx::30b_*"
+      - "All_kinds/Most Recent Follow-Up/Most Recent Follow-Up/followup.xlsx::33b_*"
+      - "All_kinds/Most Recent Follow-Up/Most Recent Follow-Up/followup.xlsx::35_*"
+    reason: >-
+      Another cohort's tables, delivered in the same tree: coronary CT (28, 28a), cardiac
+      MRI (30b), cholecystitis ultrasound (33b) and ED head CT (35). Not these patients.
+      The follow-up workbook holds one worksheet per cohort, so the same rule names the
+      sheets as well as the files.
+  archive_metadata:
+    matches: ["All_kinds/**/__MACOSX/**"]
+    reason: "AppleDouble resource forks macOS wrote when the archive was made; not data."
+  prototype_extracts:
+    matches: ["data-test/**", "data-test-v2/**"]
+    reason: >-
+      Two hand-built prototypes that sit beside the partition directories under
+      EHR_DATA_ROOT: per-patient timelines and reports for three patients, with the
+      scripts that made them. Derived from the same export, not part of it, and superseded
+      by this converter.
 
 owner_answers:
   # Answered by the data owner 2026-08-21: one cohort, exported twice. The two extracts

@@ -1,0 +1,956 @@
+source_unit,ucum,basis
+mg,mg,UCUM case-sensitive code: milligram
+milligram,mg,UCUM case-sensitive code: milligram
+milligrams,mg,UCUM case-sensitive code: milligram
+mgs,mg,UCUM case-sensitive code: milligram
+mcg,ug,UCUM case-sensitive code: microgram; mcg is the clinical spelling
+ug,ug,UCUM case-sensitive code: microgram; mcg is the clinical spelling
+µg,ug,UCUM case-sensitive code: microgram; mcg is the clinical spelling
+μg,ug,UCUM case-sensitive code: microgram; mcg is the clinical spelling
+microgram,ug,UCUM case-sensitive code: microgram; mcg is the clinical spelling
+micrograms,ug,UCUM case-sensitive code: microgram; mcg is the clinical spelling
+mcgs,ug,UCUM case-sensitive code: microgram; mcg is the clinical spelling
+g,g,UCUM case-sensitive code: gram
+gm,g,UCUM case-sensitive code: gram
+gms,g,UCUM case-sensitive code: gram
+gram,g,UCUM case-sensitive code: gram
+grams,g,UCUM case-sensitive code: gram
+kg,kg,UCUM case-sensitive code: kilogram
+kgs,kg,UCUM case-sensitive code: kilogram
+kilogram,kg,UCUM case-sensitive code: kilogram
+kilograms,kg,UCUM case-sensitive code: kilogram
+ng,ng,UCUM case-sensitive code: nanogram
+nanogram,ng,UCUM case-sensitive code: nanogram
+nanograms,ng,UCUM case-sensitive code: nanogram
+pg,pg,UCUM case-sensitive code: picogram
+picogram,pg,UCUM case-sensitive code: picogram
+picograms,pg,UCUM case-sensitive code: picogram
+lb,[lb_av],UCUM case-sensitive code: avoirdupois pound; OMOP's UCUM vocabulary spells it [lb_us]; converted to kg by unit_conversions.csv
+lbs,[lb_av],UCUM case-sensitive code: avoirdupois pound; OMOP's UCUM vocabulary spells it [lb_us]; converted to kg by unit_conversions.csv
+pound,[lb_av],UCUM case-sensitive code: avoirdupois pound; OMOP's UCUM vocabulary spells it [lb_us]; converted to kg by unit_conversions.csv
+pounds,[lb_av],UCUM case-sensitive code: avoirdupois pound; OMOP's UCUM vocabulary spells it [lb_us]; converted to kg by unit_conversions.csv
+oz,[oz_av],UCUM case-sensitive code: avoirdupois ounce; converted to g by unit_conversions.csv
+ounce,[oz_av],UCUM case-sensitive code: avoirdupois ounce; converted to g by unit_conversions.csv
+ounces,[oz_av],UCUM case-sensitive code: avoirdupois ounce; converted to g by unit_conversions.csv
+stone,[stone_av],UCUM case-sensitive code: stone (14 [lb_av]); converted to kg by unit_conversions.csv
+stones,[stone_av],UCUM case-sensitive code: stone (14 [lb_av]); converted to kg by unit_conversions.csv
+st,[stone_av],UCUM case-sensitive code: stone (14 [lb_av]); converted to kg by unit_conversions.csv
+mL,mL,"UCUM case-sensitive code: millilitre; cc is one cubic centimetre, which is one millilitre exactly"
+milliliter,mL,"UCUM case-sensitive code: millilitre; cc is one cubic centimetre, which is one millilitre exactly"
+milliliters,mL,"UCUM case-sensitive code: millilitre; cc is one cubic centimetre, which is one millilitre exactly"
+millilitre,mL,"UCUM case-sensitive code: millilitre; cc is one cubic centimetre, which is one millilitre exactly"
+millilitres,mL,"UCUM case-sensitive code: millilitre; cc is one cubic centimetre, which is one millilitre exactly"
+cc,mL,"UCUM case-sensitive code: millilitre; cc is one cubic centimetre, which is one millilitre exactly"
+mls,mL,"UCUM case-sensitive code: millilitre; cc is one cubic centimetre, which is one millilitre exactly"
+L,L,UCUM case-sensitive code: litre
+liter,L,UCUM case-sensitive code: litre
+liters,L,UCUM case-sensitive code: litre
+litre,L,UCUM case-sensitive code: litre
+litres,L,UCUM case-sensitive code: litre
+ltr,L,UCUM case-sensitive code: litre
+dL,dL,UCUM case-sensitive code: decilitre
+deciliter,dL,UCUM case-sensitive code: decilitre
+decilitre,dL,UCUM case-sensitive code: decilitre
+uL,uL,UCUM case-sensitive code: microlitre; mcL is the clinical spelling
+µL,uL,UCUM case-sensitive code: microlitre; mcL is the clinical spelling
+μL,uL,UCUM case-sensitive code: microlitre; mcL is the clinical spelling
+mcL,uL,UCUM case-sensitive code: microlitre; mcL is the clinical spelling
+microliter,uL,UCUM case-sensitive code: microlitre; mcL is the clinical spelling
+microlitre,uL,UCUM case-sensitive code: microlitre; mcL is the clinical spelling
+fL,fL,UCUM case-sensitive code: femtolitre (mean cell volume)
+femtoliter,fL,UCUM case-sensitive code: femtolitre (mean cell volume)
+femtolitre,fL,UCUM case-sensitive code: femtolitre (mean cell volume)
+cm3,cm3,UCUM case-sensitive code: cubic centimetre; converted to mL by unit_conversions.csv
+cm^3,cm3,UCUM case-sensitive code: cubic centimetre; converted to mL by unit_conversions.csv
+cubic centimeter,cm3,UCUM case-sensitive code: cubic centimetre; converted to mL by unit_conversions.csv
+cubic centimetre,cm3,UCUM case-sensitive code: cubic centimetre; converted to mL by unit_conversions.csv
+mm3,mm3,UCUM case-sensitive code: cubic millimetre; converted to uL by unit_conversions.csv
+mm^3,mm3,UCUM case-sensitive code: cubic millimetre; converted to uL by unit_conversions.csv
+cu mm,mm3,UCUM case-sensitive code: cubic millimetre; converted to uL by unit_conversions.csv
+cumm,mm3,UCUM case-sensitive code: cubic millimetre; converted to uL by unit_conversions.csv
+cubic millimeter,mm3,UCUM case-sensitive code: cubic millimetre; converted to uL by unit_conversions.csv
+cubic millimetre,mm3,UCUM case-sensitive code: cubic millimetre; converted to uL by unit_conversions.csv
+U,[U],"UCUM case-sensitive code: unit; the source does not say international, so [U] rather than [iU]"
+units,[U],"UCUM case-sensitive code: unit; the source does not say international, so [U] rather than [iU]"
+unit,[U],"UCUM case-sensitive code: unit; the source does not say international, so [U] rather than [iU]"
+IU,[iU],UCUM case-sensitive code: international unit ([IU] is the case-insensitive form)
+[IU],[iU],UCUM case-sensitive code: international unit ([IU] is the case-insensitive form)
+international unit,[iU],UCUM case-sensitive code: international unit ([IU] is the case-insensitive form)
+international units,[iU],UCUM case-sensitive code: international unit ([IU] is the case-insensitive form)
+intl units,[iU],UCUM case-sensitive code: international unit ([IU] is the case-insensitive form)
+mIU,m[iU],UCUM case-sensitive code: milli-international unit
+milli-international unit,m[iU],UCUM case-sensitive code: milli-international unit
+U/L,[U]/L,UCUM case-sensitive code: unit per litre (enzyme activity)
+units/L,[U]/L,UCUM case-sensitive code: unit per litre (enzyme activity)
+unit/L,[U]/L,UCUM case-sensitive code: unit per litre (enzyme activity)
+U/mL,[U]/mL,UCUM case-sensitive code: unit per millilitre
+units/mL,[U]/mL,UCUM case-sensitive code: unit per millilitre
+unit/mL,[U]/mL,UCUM case-sensitive code: unit per millilitre
+IU/L,[iU]/L,UCUM case-sensitive code: international unit per litre
+[IU]/L,[iU]/L,UCUM case-sensitive code: international unit per litre
+IU/mL,[iU]/mL,UCUM case-sensitive code: international unit per millilitre
+[IU]/mL,[iU]/mL,UCUM case-sensitive code: international unit per millilitre
+mU/mL,m[U]/mL,UCUM case-sensitive code: milliunit per millilitre
+milliunits/mL,m[U]/mL,UCUM case-sensitive code: milliunit per millilitre
+mU/L,m[U]/L,UCUM case-sensitive code: milliunit per litre
+milliunits/L,m[U]/L,UCUM case-sensitive code: milliunit per litre
+uU/mL,u[U]/mL,UCUM case-sensitive code: microunit per millilitre
+µU/mL,u[U]/mL,UCUM case-sensitive code: microunit per millilitre
+mcU/mL,u[U]/mL,UCUM case-sensitive code: microunit per millilitre
+mIU/mL,m[iU]/mL,UCUM case-sensitive code: milli-international unit per millilitre
+m[IU]/mL,m[iU]/mL,UCUM case-sensitive code: milli-international unit per millilitre
+mIU/L,m[iU]/L,UCUM case-sensitive code: milli-international unit per litre
+m[IU]/L,m[iU]/L,UCUM case-sensitive code: milli-international unit per litre
+uIU/mL,u[iU]/mL,UCUM case-sensitive code: micro-international unit per millilitre
+µIU/mL,u[iU]/mL,UCUM case-sensitive code: micro-international unit per millilitre
+mcIU/mL,u[iU]/mL,UCUM case-sensitive code: micro-international unit per millilitre
+u[IU]/mL,u[iU]/mL,UCUM case-sensitive code: micro-international unit per millilitre
+kIU/L,k[iU]/L,UCUM case-sensitive code: kilo-international unit per litre
+kU/L,k[iU]/L,UCUM case-sensitive code: kilo-international unit per litre
+units/hr,[U]/h,"UCUM case-sensitive code: unit per hour (heparin, insulin infusions)"
+U/hr,[U]/h,"UCUM case-sensitive code: unit per hour (heparin, insulin infusions)"
+units/h,[U]/h,"UCUM case-sensitive code: unit per hour (heparin, insulin infusions)"
+U/h,[U]/h,"UCUM case-sensitive code: unit per hour (heparin, insulin infusions)"
+unit/hr,[U]/h,"UCUM case-sensitive code: unit per hour (heparin, insulin infusions)"
+units/hour,[U]/h,"UCUM case-sensitive code: unit per hour (heparin, insulin infusions)"
+units/min,[U]/min,UCUM case-sensitive code: unit per minute
+U/min,[U]/min,UCUM case-sensitive code: unit per minute
+unit/min,[U]/min,UCUM case-sensitive code: unit per minute
+units/kg,[U]/kg,UCUM case-sensitive code: unit per kilogram
+U/kg,[U]/kg,UCUM case-sensitive code: unit per kilogram
+unit/kg,[U]/kg,UCUM case-sensitive code: unit per kilogram
+units/kg/hr,[U]/kg/h,UCUM case-sensitive code: unit per kilogram per hour (weight-based heparin)
+U/kg/hr,[U]/kg/h,UCUM case-sensitive code: unit per kilogram per hour (weight-based heparin)
+units/kg/h,[U]/kg/h,UCUM case-sensitive code: unit per kilogram per hour (weight-based heparin)
+U/kg/h,[U]/kg/h,UCUM case-sensitive code: unit per kilogram per hour (weight-based heparin)
+unit/kg/hr,[U]/kg/h,UCUM case-sensitive code: unit per kilogram per hour (weight-based heparin)
+units/kg/hour,[U]/kg/h,UCUM case-sensitive code: unit per kilogram per hour (weight-based heparin)
+units/kg/min,[U]/kg/min,UCUM case-sensitive code: unit per kilogram per minute
+U/kg/min,[U]/kg/min,UCUM case-sensitive code: unit per kilogram per minute
+IU/kg,[iU]/kg,UCUM case-sensitive code: international unit per kilogram
+[IU]/kg,[iU]/kg,UCUM case-sensitive code: international unit per kilogram
+IU/hr,[iU]/h,UCUM case-sensitive code: international unit per hour
+IU/h,[iU]/h,UCUM case-sensitive code: international unit per hour
+AU,[arb'U],UCUM case-sensitive code: arbitrary unit
+arb U,[arb'U],UCUM case-sensitive code: arbitrary unit
+arbitrary units,[arb'U],UCUM case-sensitive code: arbitrary unit
+arbitrary unit,[arb'U],UCUM case-sensitive code: arbitrary unit
+AU/mL,[arb'U]/mL,UCUM case-sensitive code: arbitrary unit per millilitre
+arb U/mL,[arb'U]/mL,UCUM case-sensitive code: arbitrary unit per millilitre
+arbitrary units/mL,[arb'U]/mL,UCUM case-sensitive code: arbitrary unit per millilitre
+mEq,meq,UCUM case-sensitive code: milliequivalent; OMOP's UCUM vocabulary spells it 10*-3.eq
+milliequivalent,meq,UCUM case-sensitive code: milliequivalent; OMOP's UCUM vocabulary spells it 10*-3.eq
+milliequivalents,meq,UCUM case-sensitive code: milliequivalent; OMOP's UCUM vocabulary spells it 10*-3.eq
+mEq/L,10*-3.eq/L,"UCUM case-sensitive code: milliequivalent per litre; OMOP's UCUM vocabulary spells it 10*-3.eq/L; reconciled 2026-09-14 with reference/units/ctpe.csv: this is the spelling OMOP's UCUM vocabulary carries a concept for, and a unit that resolves to no concept normalizes to nothing downstream"
+milliequivalents/L,meq/L,UCUM case-sensitive code: milliequivalent per litre; OMOP's UCUM vocabulary spells it 10*-3.eq/L
+meq/liter,meq/L,UCUM case-sensitive code: milliequivalent per litre; OMOP's UCUM vocabulary spells it 10*-3.eq/L
+mEq/hr,meq/h,UCUM case-sensitive code: milliequivalent per hour
+mEq/h,meq/h,UCUM case-sensitive code: milliequivalent per hour
+meq/hour,meq/h,UCUM case-sensitive code: milliequivalent per hour
+mEq/kg,meq/kg,UCUM case-sensitive code: milliequivalent per kilogram
+mEq/24h,meq/(24.h),UCUM case-sensitive code: milliequivalent per 24 hours
+mEq/24 h,meq/(24.h),UCUM case-sensitive code: milliequivalent per 24 hours
+mEq/24hr,meq/(24.h),UCUM case-sensitive code: milliequivalent per 24 hours
+mEq/24 hr,meq/(24.h),UCUM case-sensitive code: milliequivalent per 24 hours
+mmol,mmol,UCUM case-sensitive code: millimole
+millimole,mmol,UCUM case-sensitive code: millimole
+millimoles,mmol,UCUM case-sensitive code: millimole
+umol,umol,UCUM case-sensitive code: micromole
+µmol,umol,UCUM case-sensitive code: micromole
+mcmol,umol,UCUM case-sensitive code: micromole
+micromole,umol,UCUM case-sensitive code: micromole
+nmol,nmol,UCUM case-sensitive code: nanomole
+nanomole,nmol,UCUM case-sensitive code: nanomole
+mol/L,mol/L,UCUM case-sensitive code: mole per litre
+mmol/L,mmol/L,UCUM case-sensitive code: millimole per litre
+mmol/liter,mmol/L,UCUM case-sensitive code: millimole per litre
+millimole/L,mmol/L,UCUM case-sensitive code: millimole per litre
+millimoles/L,mmol/L,UCUM case-sensitive code: millimole per litre
+umol/L,umol/L,UCUM case-sensitive code: micromole per litre
+µmol/L,umol/L,UCUM case-sensitive code: micromole per litre
+μmol/L,umol/L,UCUM case-sensitive code: micromole per litre
+mcmol/L,umol/L,UCUM case-sensitive code: micromole per litre
+micromole/L,umol/L,UCUM case-sensitive code: micromole per litre
+nmol/L,nmol/L,UCUM case-sensitive code: nanomole per litre
+nanomole/L,nmol/L,UCUM case-sensitive code: nanomole per litre
+pmol/L,pmol/L,UCUM case-sensitive code: picomole per litre
+picomole/L,pmol/L,UCUM case-sensitive code: picomole per litre
+fmol/L,fmol/L,UCUM case-sensitive code: femtomole per litre
+nmol/mL,nmol/mL,UCUM case-sensitive code: nanomole per millilitre
+umol/mL,umol/mL,UCUM case-sensitive code: micromole per millilitre
+µmol/mL,umol/mL,UCUM case-sensitive code: micromole per millilitre
+mmol/mL,mmol/mL,UCUM case-sensitive code: millimole per millilitre
+mmol/kg,mmol/kg,UCUM case-sensitive code: millimole per kilogram
+mmol/mol,mmol/mol,"UCUM case-sensitive code: millimole per mole (HbA1c, IFCC)"
+mmol/g,mmol/g,UCUM case-sensitive code: millimole per gram
+umol/g,umol/g,UCUM case-sensitive code: micromole per gram
+µmol/g,umol/g,UCUM case-sensitive code: micromole per gram
+mmol/hr,mmol/h,UCUM case-sensitive code: millimole per hour
+mmol/h,mmol/h,UCUM case-sensitive code: millimole per hour
+mmol/24h,mmol/(24.h),UCUM case-sensitive code: millimole per 24 hours
+mmol/24 h,mmol/(24.h),UCUM case-sensitive code: millimole per 24 hours
+mmol/24hr,mmol/(24.h),UCUM case-sensitive code: millimole per 24 hours
+mmol/24 hr,mmol/(24.h),UCUM case-sensitive code: millimole per 24 hours
+mmol/day,mmol/d,UCUM case-sensitive code: millimole per day
+mmol/d,mmol/d,UCUM case-sensitive code: millimole per day
+umol/24h,umol/(24.h),UCUM case-sensitive code: micromole per 24 hours
+umol/24 h,umol/(24.h),UCUM case-sensitive code: micromole per 24 hours
+µmol/24h,umol/(24.h),UCUM case-sensitive code: micromole per 24 hours
+umol/day,umol/d,UCUM case-sensitive code: micromole per day
+umol/d,umol/d,UCUM case-sensitive code: micromole per day
+mg/dL,mg/dL,UCUM case-sensitive code: milligram per decilitre
+mg/deciliter,mg/dL,UCUM case-sensitive code: milligram per decilitre
+mg per dL,mg/dL,UCUM case-sensitive code: milligram per decilitre
+mg%,mg/dL,UCUM case-sensitive code: milligram per decilitre
+g/dL,g/dL,UCUM case-sensitive code: gram per decilitre
+gm/dL,g/dL,UCUM case-sensitive code: gram per decilitre
+g%,g/dL,UCUM case-sensitive code: gram per decilitre
+gm%,g/dL,UCUM case-sensitive code: gram per decilitre
+g/L,g/L,UCUM case-sensitive code: gram per litre
+gm/L,g/L,UCUM case-sensitive code: gram per litre
+grams/L,g/L,UCUM case-sensitive code: gram per litre
+mg/L,mg/L,UCUM case-sensitive code: milligram per litre
+mg/liter,mg/L,UCUM case-sensitive code: milligram per litre
+ug/L,ug/L,UCUM case-sensitive code: microgram per litre
+mcg/L,ug/L,UCUM case-sensitive code: microgram per litre
+µg/L,ug/L,UCUM case-sensitive code: microgram per litre
+μg/L,ug/L,UCUM case-sensitive code: microgram per litre
+ng/L,ng/L,UCUM case-sensitive code: nanogram per litre
+ng/mL,ng/mL,UCUM case-sensitive code: nanogram per millilitre
+nanogram/mL,ng/mL,UCUM case-sensitive code: nanogram per millilitre
+nanograms/mL,ng/mL,UCUM case-sensitive code: nanogram per millilitre
+ug/mL,ug/mL,UCUM case-sensitive code: microgram per millilitre
+mcg/mL,ug/mL,UCUM case-sensitive code: microgram per millilitre
+µg/mL,ug/mL,UCUM case-sensitive code: microgram per millilitre
+μg/mL,ug/mL,UCUM case-sensitive code: microgram per millilitre
+microgram/mL,ug/mL,UCUM case-sensitive code: microgram per millilitre
+micrograms/mL,ug/mL,UCUM case-sensitive code: microgram per millilitre
+ug/dL,ug/dL,UCUM case-sensitive code: microgram per decilitre
+mcg/dL,ug/dL,UCUM case-sensitive code: microgram per decilitre
+µg/dL,ug/dL,UCUM case-sensitive code: microgram per decilitre
+μg/dL,ug/dL,UCUM case-sensitive code: microgram per decilitre
+ng/dL,ng/dL,UCUM case-sensitive code: nanogram per decilitre
+pg/mL,pg/mL,UCUM case-sensitive code: picogram per millilitre
+picogram/mL,pg/mL,UCUM case-sensitive code: picogram per millilitre
+pg/dL,pg/dL,UCUM case-sensitive code: picogram per decilitre
+mg/mL,mg/mL,UCUM case-sensitive code: milligram per millilitre
+g/mL,g/mL,UCUM case-sensitive code: gram per millilitre
+ug/uL,ug/uL,UCUM case-sensitive code: microgram per microlitre
+mcg/uL,ug/uL,UCUM case-sensitive code: microgram per microlitre
+µg/µL,ug/uL,UCUM case-sensitive code: microgram per microlitre
+ng/uL,ng/uL,UCUM case-sensitive code: nanogram per microlitre
+ng/µL,ng/uL,UCUM case-sensitive code: nanogram per microlitre
+ng/mL FEU,ng/mL{FEU},"UCUM case-sensitive code: nanogram per millilitre, fibrinogen-equivalent units; OMOP's UCUM vocabulary spells it ng{FEU}/mL"
+ng/mL{FEU},ng/mL{FEU},"UCUM case-sensitive code: nanogram per millilitre, fibrinogen-equivalent units; OMOP's UCUM vocabulary spells it ng{FEU}/mL"
+ng FEU/mL,ng/mL{FEU},"UCUM case-sensitive code: nanogram per millilitre, fibrinogen-equivalent units; OMOP's UCUM vocabulary spells it ng{FEU}/mL"
+ng/mL (FEU),ng/mL{FEU},"UCUM case-sensitive code: nanogram per millilitre, fibrinogen-equivalent units; OMOP's UCUM vocabulary spells it ng{FEU}/mL"
+ug/mL FEU,ug/mL{FEU},"UCUM case-sensitive code: microgram per millilitre, fibrinogen-equivalent units"
+mcg/mL FEU,ug/mL{FEU},"UCUM case-sensitive code: microgram per millilitre, fibrinogen-equivalent units"
+µg/mL FEU,ug/mL{FEU},"UCUM case-sensitive code: microgram per millilitre, fibrinogen-equivalent units"
+ug/mL{FEU},ug/mL{FEU},"UCUM case-sensitive code: microgram per millilitre, fibrinogen-equivalent units"
+ug FEU/mL,ug/mL{FEU},"UCUM case-sensitive code: microgram per millilitre, fibrinogen-equivalent units"
+mcg/mL (FEU),ug/mL{FEU},"UCUM case-sensitive code: microgram per millilitre, fibrinogen-equivalent units"
+ug/mL (FEU),ug/mL{FEU},"UCUM case-sensitive code: microgram per millilitre, fibrinogen-equivalent units"
+mg/L FEU,mg/L{FEU},"UCUM case-sensitive code: milligram per litre, fibrinogen-equivalent units; OMOP's UCUM vocabulary spells it mg{FEU}/L"
+mg/L{FEU},mg/L{FEU},"UCUM case-sensitive code: milligram per litre, fibrinogen-equivalent units; OMOP's UCUM vocabulary spells it mg{FEU}/L"
+mg FEU/L,mg/L{FEU},"UCUM case-sensitive code: milligram per litre, fibrinogen-equivalent units; OMOP's UCUM vocabulary spells it mg{FEU}/L"
+ng/mL DDU,ng/mL{DDU},"UCUM case-sensitive code: nanogram per millilitre, D-dimer units (not convertible to FEU)"
+ng/mL{DDU},ng/mL{DDU},"UCUM case-sensitive code: nanogram per millilitre, D-dimer units (not convertible to FEU)"
+ng DDU/mL,ng/mL{DDU},"UCUM case-sensitive code: nanogram per millilitre, D-dimer units (not convertible to FEU)"
+ug/mL DDU,ug/mL{DDU},"UCUM case-sensitive code: microgram per millilitre, D-dimer units"
+mcg/mL DDU,ug/mL{DDU},"UCUM case-sensitive code: microgram per millilitre, D-dimer units"
+ug/mL{DDU},ug/mL{DDU},"UCUM case-sensitive code: microgram per millilitre, D-dimer units"
+mg/g,mg/g,UCUM case-sensitive code: milligram per gram (urine albumin/creatinine)
+mg/g creat,mg/g,UCUM case-sensitive code: milligram per gram (urine albumin/creatinine)
+mg/g creatinine,mg/g,UCUM case-sensitive code: milligram per gram (urine albumin/creatinine)
+ug/g,ug/g,UCUM case-sensitive code: microgram per gram
+mcg/g,ug/g,UCUM case-sensitive code: microgram per gram
+µg/g,ug/g,UCUM case-sensitive code: microgram per gram
+ng/g,ng/g,UCUM case-sensitive code: nanogram per gram
+g/g,g/g,UCUM case-sensitive code: gram per gram
+mg/mg,mg/mg,UCUM case-sensitive code: milligram per milligram
+mg/mmol,mg/mmol,UCUM case-sensitive code: milligram per millimole
+ug/mmol,ug/mmol,UCUM case-sensitive code: microgram per millimole
+mcg/mmol,ug/mmol,UCUM case-sensitive code: microgram per millimole
+mg/kg,mg/kg,UCUM case-sensitive code: milligram per kilogram (weight-based dose)
+mg per kg,mg/kg,UCUM case-sensitive code: milligram per kilogram (weight-based dose)
+mcg/kg,ug/kg,UCUM case-sensitive code: microgram per kilogram
+ug/kg,ug/kg,UCUM case-sensitive code: microgram per kilogram
+µg/kg,ug/kg,UCUM case-sensitive code: microgram per kilogram
+mg/m2,mg/m2,UCUM case-sensitive code: milligram per square metre (body-surface dose)
+mg/m^2,mg/m2,UCUM case-sensitive code: milligram per square metre (body-surface dose)
+mg/m²,mg/m2,UCUM case-sensitive code: milligram per square metre (body-surface dose)
+g/kg,g/kg,UCUM case-sensitive code: gram per kilogram
+gm/kg,g/kg,UCUM case-sensitive code: gram per kilogram
+mL/kg,mL/kg,UCUM case-sensitive code: millilitre per kilogram
+ml per kg,mL/kg,UCUM case-sensitive code: millilitre per kilogram
+mg/24h,mg/(24.h),UCUM case-sensitive code: milligram per 24 hours
+mg/24 h,mg/(24.h),UCUM case-sensitive code: milligram per 24 hours
+mg/24hr,mg/(24.h),UCUM case-sensitive code: milligram per 24 hours
+mg/24 hr,mg/(24.h),UCUM case-sensitive code: milligram per 24 hours
+mg/24 hrs,mg/(24.h),UCUM case-sensitive code: milligram per 24 hours
+mg/day,mg/d,UCUM case-sensitive code: milligram per day
+mg/d,mg/d,UCUM case-sensitive code: milligram per day
+g/24h,g/(24.h),UCUM case-sensitive code: gram per 24 hours
+g/24 h,g/(24.h),UCUM case-sensitive code: gram per 24 hours
+g/24hr,g/(24.h),UCUM case-sensitive code: gram per 24 hours
+g/24 hr,g/(24.h),UCUM case-sensitive code: gram per 24 hours
+gm/24h,g/(24.h),UCUM case-sensitive code: gram per 24 hours
+g/day,g/d,UCUM case-sensitive code: gram per day
+g/d,g/d,UCUM case-sensitive code: gram per day
+mL/24h,mL/(24.h),UCUM case-sensitive code: millilitre per 24 hours
+mL/24 h,mL/(24.h),UCUM case-sensitive code: millilitre per 24 hours
+mL/24hr,mL/(24.h),UCUM case-sensitive code: millilitre per 24 hours
+mL/24 hr,mL/(24.h),UCUM case-sensitive code: millilitre per 24 hours
+mL/day,mL/d,UCUM case-sensitive code: millilitre per day
+mL/d,mL/d,UCUM case-sensitive code: millilitre per day
+L/24h,L/(24.h),UCUM case-sensitive code: litre per 24 hours
+L/24 h,L/(24.h),UCUM case-sensitive code: litre per 24 hours
+L/24hr,L/(24.h),UCUM case-sensitive code: litre per 24 hours
+L/day,L/d,UCUM case-sensitive code: litre per day
+L/d,L/d,UCUM case-sensitive code: litre per day
+ng/mL/hr,ng/mL/h,UCUM case-sensitive code: nanogram per millilitre per hour (renin)
+ng/mL/h,ng/mL/h,UCUM case-sensitive code: nanogram per millilitre per hour (renin)
+copies/mL,{copies}/mL,UCUM case-sensitive code: copies per millilitre (viral load)
+cp/mL,{copies}/mL,UCUM case-sensitive code: copies per millilitre (viral load)
+copies per mL,{copies}/mL,UCUM case-sensitive code: copies per millilitre (viral load)
+%,%,UCUM case-sensitive code: percent
+percent,%,UCUM case-sensitive code: percent
+pct,%,UCUM case-sensitive code: percent
+perc,%,UCUM case-sensitive code: percent
+% of total,%,UCUM case-sensitive code: percent
+ratio,{ratio},UCUM case-sensitive code annotation: ratio
+INR,{INR},UCUM case-sensitive code annotation: international normalized ratio
+titer,{titer},UCUM case-sensitive code annotation: titre
+titre,{titer},UCUM case-sensitive code annotation: titre
+index,{index},UCUM case-sensitive code annotation: index value
+index value,{index},UCUM case-sensitive code annotation: index value
+score,{score},UCUM case-sensitive code annotation: score; OMOP's UCUM vocabulary spells it [score]
+points,{score},UCUM case-sensitive code annotation: score; OMOP's UCUM vocabulary spells it [score]
+pts,{score},UCUM case-sensitive code annotation: score; OMOP's UCUM vocabulary spells it [score]
+point,{score},UCUM case-sensitive code annotation: score; OMOP's UCUM vocabulary spells it [score]
+pH,pH,"UCUM case-sensitive code: pH; OMOP's UCUM vocabulary spells it pH; reconciled 2026-09-14 with reference/units/ctpe.csv: this is the spelling OMOP's UCUM vocabulary carries a concept for, and a unit that resolves to no concept normalizes to nothing downstream"
+pH units,[pH],UCUM case-sensitive code: pH; OMOP's UCUM vocabulary spells it pH
+pH unit,[pH],UCUM case-sensitive code: pH; OMOP's UCUM vocabulary spells it pH
+mL/dL,mL/dL,UCUM case-sensitive code: millilitre per decilitre (volume percent)
+vol%,mL/dL,UCUM case-sensitive code: millilitre per decilitre (volume percent)
+vol %,mL/dL,UCUM case-sensitive code: millilitre per decilitre (volume percent)
+L/L,L/L,UCUM case-sensitive code: litre per litre (haematocrit as a fraction)
+mL/L,mL/L,UCUM case-sensitive code: millilitre per litre
+mmol/mmol,mmol/mmol,UCUM case-sensitive code: millimole per millimole
+ppm,[ppm],UCUM case-sensitive code: parts per million
+parts per million,[ppm],UCUM case-sensitive code: parts per million
+ppb,[ppb],UCUM case-sensitive code: parts per billion
+parts per billion,[ppb],UCUM case-sensitive code: parts per billion
+count,{count},UCUM case-sensitive code annotation: a count
+counts,{count},UCUM case-sensitive code annotation: a count
+#,{count},UCUM case-sensitive code annotation: a count
+number,{count},UCUM case-sensitive code annotation: a count
+cells,{cells},UCUM case-sensitive code annotation: cells
+K/uL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+K/µL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+K/μL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+K/mcL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+x10^3/uL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+10^3/uL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+10*3/uL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+x10E3/uL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+10E3/uL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+thou/uL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+thousand/uL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+x10(3)/uL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+10^3/µL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+x10^3/µL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+th/uL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+x1000/uL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+1000/uL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+kilo/uL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+10*3/µL,10*3/uL,UCUM case-sensitive code: thousand per microlitre
+K/cu mm,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+K/cumm,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+K/mm3,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+K/mm^3,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+10^3/mm3,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+x10^3/mm3,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+10*3/mm3,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+thou/cu mm,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+thou/mm3,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+thousand/mm3,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+x10E3/mm3,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+10E3/mm3,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+th/cu mm,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+th/mm3,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+K/cu.mm,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+thou/cumm,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+x10^3/cu mm,10*3/mm3,UCUM case-sensitive code: thousand per cubic millimetre; converted to 10*3/uL by unit_conversions.csv (1 mm3 = 1 uL)
+M/uL,10*6/uL,UCUM case-sensitive code: million per microlitre
+M/µL,10*6/uL,UCUM case-sensitive code: million per microlitre
+M/μL,10*6/uL,UCUM case-sensitive code: million per microlitre
+M/mcL,10*6/uL,UCUM case-sensitive code: million per microlitre
+x10^6/uL,10*6/uL,UCUM case-sensitive code: million per microlitre
+10^6/uL,10*6/uL,UCUM case-sensitive code: million per microlitre
+10*6/uL,10*6/uL,UCUM case-sensitive code: million per microlitre
+x10E6/uL,10*6/uL,UCUM case-sensitive code: million per microlitre
+10E6/uL,10*6/uL,UCUM case-sensitive code: million per microlitre
+mil/uL,10*6/uL,UCUM case-sensitive code: million per microlitre
+million/uL,10*6/uL,UCUM case-sensitive code: million per microlitre
+x10(6)/uL,10*6/uL,UCUM case-sensitive code: million per microlitre
+10^6/µL,10*6/uL,UCUM case-sensitive code: million per microlitre
+x10^6/µL,10*6/uL,UCUM case-sensitive code: million per microlitre
+mill/uL,10*6/uL,UCUM case-sensitive code: million per microlitre
+10*6/µL,10*6/uL,UCUM case-sensitive code: million per microlitre
+M/cu mm,10*6/mm3,UCUM case-sensitive code: million per cubic millimetre; converted to 10*6/uL by unit_conversions.csv
+M/cumm,10*6/mm3,UCUM case-sensitive code: million per cubic millimetre; converted to 10*6/uL by unit_conversions.csv
+M/mm3,10*6/mm3,UCUM case-sensitive code: million per cubic millimetre; converted to 10*6/uL by unit_conversions.csv
+M/mm^3,10*6/mm3,UCUM case-sensitive code: million per cubic millimetre; converted to 10*6/uL by unit_conversions.csv
+10^6/mm3,10*6/mm3,UCUM case-sensitive code: million per cubic millimetre; converted to 10*6/uL by unit_conversions.csv
+x10^6/mm3,10*6/mm3,UCUM case-sensitive code: million per cubic millimetre; converted to 10*6/uL by unit_conversions.csv
+10*6/mm3,10*6/mm3,UCUM case-sensitive code: million per cubic millimetre; converted to 10*6/uL by unit_conversions.csv
+mil/cu mm,10*6/mm3,UCUM case-sensitive code: million per cubic millimetre; converted to 10*6/uL by unit_conversions.csv
+mil/mm3,10*6/mm3,UCUM case-sensitive code: million per cubic millimetre; converted to 10*6/uL by unit_conversions.csv
+million/mm3,10*6/mm3,UCUM case-sensitive code: million per cubic millimetre; converted to 10*6/uL by unit_conversions.csv
+x10E6/mm3,10*6/mm3,UCUM case-sensitive code: million per cubic millimetre; converted to 10*6/uL by unit_conversions.csv
+10E6/mm3,10*6/mm3,UCUM case-sensitive code: million per cubic millimetre; converted to 10*6/uL by unit_conversions.csv
+mill/cu mm,10*6/mm3,UCUM case-sensitive code: million per cubic millimetre; converted to 10*6/uL by unit_conversions.csv
+M/cu.mm,10*6/mm3,UCUM case-sensitive code: million per cubic millimetre; converted to 10*6/uL by unit_conversions.csv
+mil/cumm,10*6/mm3,UCUM case-sensitive code: million per cubic millimetre; converted to 10*6/uL by unit_conversions.csv
+10^9/L,10*9/L,UCUM case-sensitive code: 10^9 per litre; converted to 10*3/uL by unit_conversions.csv (the same quantity)
+x10^9/L,10*9/L,UCUM case-sensitive code: 10^9 per litre; converted to 10*3/uL by unit_conversions.csv (the same quantity)
+10*9/L,10*9/L,UCUM case-sensitive code: 10^9 per litre; converted to 10*3/uL by unit_conversions.csv (the same quantity)
+x10E9/L,10*9/L,UCUM case-sensitive code: 10^9 per litre; converted to 10*3/uL by unit_conversions.csv (the same quantity)
+10E9/L,10*9/L,UCUM case-sensitive code: 10^9 per litre; converted to 10*3/uL by unit_conversions.csv (the same quantity)
+giga/L,10*9/L,UCUM case-sensitive code: 10^9 per litre; converted to 10*3/uL by unit_conversions.csv (the same quantity)
+x10(9)/L,10*9/L,UCUM case-sensitive code: 10^9 per litre; converted to 10*3/uL by unit_conversions.csv (the same quantity)
+10^12/L,10*12/L,UCUM case-sensitive code: 10^12 per litre; converted to 10*6/uL by unit_conversions.csv (the same quantity)
+x10^12/L,10*12/L,UCUM case-sensitive code: 10^12 per litre; converted to 10*6/uL by unit_conversions.csv (the same quantity)
+10*12/L,10*12/L,UCUM case-sensitive code: 10^12 per litre; converted to 10*6/uL by unit_conversions.csv (the same quantity)
+x10E12/L,10*12/L,UCUM case-sensitive code: 10^12 per litre; converted to 10*6/uL by unit_conversions.csv (the same quantity)
+10E12/L,10*12/L,UCUM case-sensitive code: 10^12 per litre; converted to 10*6/uL by unit_conversions.csv (the same quantity)
+tera/L,10*12/L,UCUM case-sensitive code: 10^12 per litre; converted to 10*6/uL by unit_conversions.csv (the same quantity)
+x10(12)/L,10*12/L,UCUM case-sensitive code: 10^12 per litre; converted to 10*6/uL by unit_conversions.csv (the same quantity)
+/uL,/uL,UCUM case-sensitive code: per microlitre
+/µL,/uL,UCUM case-sensitive code: per microlitre
+/μL,/uL,UCUM case-sensitive code: per microlitre
+/mcL,/uL,UCUM case-sensitive code: per microlitre
+per uL,/uL,UCUM case-sensitive code: per microlitre
+per microliter,/uL,UCUM case-sensitive code: per microlitre
+1/uL,/uL,UCUM case-sensitive code: per microlitre
+cells/uL,{cells}/uL,UCUM case-sensitive code: cells per microlitre
+cells/µL,{cells}/uL,UCUM case-sensitive code: cells per microlitre
+cells/μL,{cells}/uL,UCUM case-sensitive code: cells per microlitre
+cells/mcL,{cells}/uL,UCUM case-sensitive code: cells per microlitre
+cell/uL,{cells}/uL,UCUM case-sensitive code: cells per microlitre
+/mm3,/mm3,UCUM case-sensitive code: per cubic millimetre; converted to /uL by unit_conversions.csv
+/cu mm,/mm3,UCUM case-sensitive code: per cubic millimetre; converted to /uL by unit_conversions.csv
+/cumm,/mm3,UCUM case-sensitive code: per cubic millimetre; converted to /uL by unit_conversions.csv
+/mm^3,/mm3,UCUM case-sensitive code: per cubic millimetre; converted to /uL by unit_conversions.csv
+per mm3,/mm3,UCUM case-sensitive code: per cubic millimetre; converted to /uL by unit_conversions.csv
+per cu mm,/mm3,UCUM case-sensitive code: per cubic millimetre; converted to /uL by unit_conversions.csv
+1/mm3,/mm3,UCUM case-sensitive code: per cubic millimetre; converted to /uL by unit_conversions.csv
+/cu.mm,/mm3,UCUM case-sensitive code: per cubic millimetre; converted to /uL by unit_conversions.csv
+cells/mm3,{cells}/mm3,UCUM case-sensitive code: cells per cubic millimetre; converted to {cells}/uL by unit_conversions.csv
+cells/cu mm,{cells}/mm3,UCUM case-sensitive code: cells per cubic millimetre; converted to {cells}/uL by unit_conversions.csv
+cells/cumm,{cells}/mm3,UCUM case-sensitive code: cells per cubic millimetre; converted to {cells}/uL by unit_conversions.csv
+cells/mm^3,{cells}/mm3,UCUM case-sensitive code: cells per cubic millimetre; converted to {cells}/uL by unit_conversions.csv
+cell/mm3,{cells}/mm3,UCUM case-sensitive code: cells per cubic millimetre; converted to {cells}/uL by unit_conversions.csv
+/mL,/mL,UCUM case-sensitive code: per millilitre
+per mL,/mL,UCUM case-sensitive code: per millilitre
+1/mL,/mL,UCUM case-sensitive code: per millilitre
+cells/mL,{cells}/mL,UCUM case-sensitive code: cells per millilitre
+/L,/L,UCUM case-sensitive code: per litre
+per L,/L,UCUM case-sensitive code: per litre
+1/L,/L,UCUM case-sensitive code: per litre
+/hpf,/[HPF],UCUM case-sensitive code: per high-power field
+per hpf,/[HPF],UCUM case-sensitive code: per high-power field
+per high power field,/[HPF],UCUM case-sensitive code: per high-power field
+/high power field,/[HPF],UCUM case-sensitive code: per high-power field
+/lpf,/[LPF],UCUM case-sensitive code: per low-power field
+per lpf,/[LPF],UCUM case-sensitive code: per low-power field
+per low power field,/[LPF],UCUM case-sensitive code: per low-power field
+/low power field,/[LPF],UCUM case-sensitive code: per low-power field
+s,s,UCUM case-sensitive code: second
+sec,s,UCUM case-sensitive code: second
+secs,s,UCUM case-sensitive code: second
+second,s,UCUM case-sensitive code: second
+seconds,s,UCUM case-sensitive code: second
+ms,ms,UCUM case-sensitive code: millisecond (ECG intervals)
+msec,ms,UCUM case-sensitive code: millisecond (ECG intervals)
+msecs,ms,UCUM case-sensitive code: millisecond (ECG intervals)
+millisecond,ms,UCUM case-sensitive code: millisecond (ECG intervals)
+milliseconds,ms,UCUM case-sensitive code: millisecond (ECG intervals)
+us,us,UCUM case-sensitive code: microsecond
+usec,us,UCUM case-sensitive code: microsecond
+µs,us,UCUM case-sensitive code: microsecond
+microsecond,us,UCUM case-sensitive code: microsecond
+microseconds,us,UCUM case-sensitive code: microsecond
+min,min,UCUM case-sensitive code: minute
+mins,min,UCUM case-sensitive code: minute
+minute,min,UCUM case-sensitive code: minute
+minutes,min,UCUM case-sensitive code: minute
+h,h,UCUM case-sensitive code: hour
+hr,h,UCUM case-sensitive code: hour
+hrs,h,UCUM case-sensitive code: hour
+hour,h,UCUM case-sensitive code: hour
+hours,h,UCUM case-sensitive code: hour
+d,d,UCUM case-sensitive code: day
+day,d,UCUM case-sensitive code: day
+days,d,UCUM case-sensitive code: day
+wk,wk,UCUM case-sensitive code: week
+wks,wk,UCUM case-sensitive code: week
+week,wk,UCUM case-sensitive code: week
+weeks,wk,UCUM case-sensitive code: week
+mo,mo,UCUM case-sensitive code: month
+mos,mo,UCUM case-sensitive code: month
+month,mo,UCUM case-sensitive code: month
+months,mo,UCUM case-sensitive code: month
+y,a,UCUM case-sensitive code: year (annum)
+yr,a,UCUM case-sensitive code: year (annum)
+yrs,a,UCUM case-sensitive code: year (annum)
+year,a,UCUM case-sensitive code: year (annum)
+years,a,UCUM case-sensitive code: year (annum)
+/min,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+per min,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+per minute,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+1/min,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+min-1,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+bpm,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+beats/min,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+beats per minute,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+beats/minute,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+b/min,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+breaths/min,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+breaths per minute,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+breaths/minute,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+br/min,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+resp/min,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+rpm,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+cpm,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+counts/min,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+/minute,/min,UCUM case-sensitive code: per minute; the OMOP convention for heart and respiratory rate
+/h,/h,UCUM case-sensitive code: per hour
+/hr,/h,UCUM case-sensitive code: per hour
+per hour,/h,UCUM case-sensitive code: per hour
+per hr,/h,UCUM case-sensitive code: per hour
+1/h,/h,UCUM case-sensitive code: per hour
+/hour,/h,UCUM case-sensitive code: per hour
+/d,/d,UCUM case-sensitive code: per day
+/day,/d,UCUM case-sensitive code: per day
+per day,/d,UCUM case-sensitive code: per day
+1/d,/d,UCUM case-sensitive code: per day
+/wk,/wk,UCUM case-sensitive code: per week
+/week,/wk,UCUM case-sensitive code: per week
+per week,/wk,UCUM case-sensitive code: per week
+/24h,/(24.h),UCUM case-sensitive code: per 24 hours
+/24 h,/(24.h),UCUM case-sensitive code: per 24 hours
+/24hr,/(24.h),UCUM case-sensitive code: per 24 hours
+/24 hr,/(24.h),UCUM case-sensitive code: per 24 hours
+per 24 hours,/(24.h),UCUM case-sensitive code: per 24 hours
+per 24h,/(24.h),UCUM case-sensitive code: per 24 hours
+mL/h,mL/h,UCUM case-sensitive code: millilitre per hour (infusion rate)
+mL/hr,mL/h,UCUM case-sensitive code: millilitre per hour (infusion rate)
+mL/hour,mL/h,UCUM case-sensitive code: millilitre per hour (infusion rate)
+mls/hr,mL/h,UCUM case-sensitive code: millilitre per hour (infusion rate)
+ml per hour,mL/h,UCUM case-sensitive code: millilitre per hour (infusion rate)
+cc/hr,mL/h,UCUM case-sensitive code: millilitre per hour (infusion rate)
+cc/h,mL/h,UCUM case-sensitive code: millilitre per hour (infusion rate)
+mL/hrs,mL/h,UCUM case-sensitive code: millilitre per hour (infusion rate)
+mL/min,mL/min,UCUM case-sensitive code: millilitre per minute
+mL/minute,mL/min,UCUM case-sensitive code: millilitre per minute
+cc/min,mL/min,UCUM case-sensitive code: millilitre per minute
+ml per min,mL/min,UCUM case-sensitive code: millilitre per minute
+mL/s,mL/s,UCUM case-sensitive code: millilitre per second
+mL/sec,mL/s,UCUM case-sensitive code: millilitre per second
+L/min,L/min,UCUM case-sensitive code: litre per minute (oxygen flow)
+LPM,L/min,UCUM case-sensitive code: litre per minute (oxygen flow)
+L/minute,L/min,UCUM case-sensitive code: litre per minute (oxygen flow)
+liters/min,L/min,UCUM case-sensitive code: litre per minute (oxygen flow)
+litres/min,L/min,UCUM case-sensitive code: litre per minute (oxygen flow)
+l per min,L/min,UCUM case-sensitive code: litre per minute (oxygen flow)
+L/h,L/h,UCUM case-sensitive code: litre per hour
+L/hr,L/h,UCUM case-sensitive code: litre per hour
+liters/hr,L/h,UCUM case-sensitive code: litre per hour
+L/s,L/s,UCUM case-sensitive code: litre per second
+L/sec,L/s,UCUM case-sensitive code: litre per second
+mL/kg/h,mL/kg/h,UCUM case-sensitive code: millilitre per kilogram per hour
+mL/kg/hr,mL/kg/h,UCUM case-sensitive code: millilitre per kilogram per hour
+mL/kg/hour,mL/kg/h,UCUM case-sensitive code: millilitre per kilogram per hour
+cc/kg/hr,mL/kg/h,UCUM case-sensitive code: millilitre per kilogram per hour
+cc/kg/h,mL/kg/h,UCUM case-sensitive code: millilitre per kilogram per hour
+mL/kg/min,mL/kg/min,UCUM case-sensitive code: millilitre per kilogram per minute
+mL/kg/minute,mL/kg/min,UCUM case-sensitive code: millilitre per kilogram per minute
+cc/kg/min,mL/kg/min,UCUM case-sensitive code: millilitre per kilogram per minute
+mL/min/1.73m2,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
+mL/min/1.73 m2,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
+mL/min/1.73m^2,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
+mL/min/1.73 m^2,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
+mL/min/1.73sqm,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
+mL/min/1.73,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
+mL/min/{1.73_m2},mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
+mL/min/1.73m²,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
+ml/min/1.73sq m,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
+mL/min/BSA,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
+mg/h,mg/h,UCUM case-sensitive code: milligram per hour
+mg/hr,mg/h,UCUM case-sensitive code: milligram per hour
+mg/hour,mg/h,UCUM case-sensitive code: milligram per hour
+mg per hour,mg/h,UCUM case-sensitive code: milligram per hour
+mg/hrs,mg/h,UCUM case-sensitive code: milligram per hour
+mg/min,mg/min,UCUM case-sensitive code: milligram per minute
+mg/minute,mg/min,UCUM case-sensitive code: milligram per minute
+mg per min,mg/min,UCUM case-sensitive code: milligram per minute
+mg/kg/h,mg/kg/h,UCUM case-sensitive code: milligram per kilogram per hour
+mg/kg/hr,mg/kg/h,UCUM case-sensitive code: milligram per kilogram per hour
+mg/kg/hour,mg/kg/h,UCUM case-sensitive code: milligram per kilogram per hour
+mg/kg/min,mg/kg/min,UCUM case-sensitive code: milligram per kilogram per minute
+mg/kg/minute,mg/kg/min,UCUM case-sensitive code: milligram per kilogram per minute
+mg/kg/day,mg/kg/d,UCUM case-sensitive code: milligram per kilogram per day
+mg/kg/d,mg/kg/d,UCUM case-sensitive code: milligram per kilogram per day
+mcg/h,ug/h,UCUM case-sensitive code: microgram per hour
+mcg/hr,ug/h,UCUM case-sensitive code: microgram per hour
+ug/h,ug/h,UCUM case-sensitive code: microgram per hour
+ug/hr,ug/h,UCUM case-sensitive code: microgram per hour
+µg/h,ug/h,UCUM case-sensitive code: microgram per hour
+µg/hr,ug/h,UCUM case-sensitive code: microgram per hour
+mcg/hour,ug/h,UCUM case-sensitive code: microgram per hour
+mcg/min,ug/min,UCUM case-sensitive code: microgram per minute
+ug/min,ug/min,UCUM case-sensitive code: microgram per minute
+µg/min,ug/min,UCUM case-sensitive code: microgram per minute
+mcg/minute,ug/min,UCUM case-sensitive code: microgram per minute
+mcg/kg/min,ug/kg/min,UCUM case-sensitive code: microgram per kilogram per minute (vasoactive infusions)
+ug/kg/min,ug/kg/min,UCUM case-sensitive code: microgram per kilogram per minute (vasoactive infusions)
+µg/kg/min,ug/kg/min,UCUM case-sensitive code: microgram per kilogram per minute (vasoactive infusions)
+mcg/kg/minute,ug/kg/min,UCUM case-sensitive code: microgram per kilogram per minute (vasoactive infusions)
+mcg per kg per min,ug/kg/min,UCUM case-sensitive code: microgram per kilogram per minute (vasoactive infusions)
+mcg/kg/mins,ug/kg/min,UCUM case-sensitive code: microgram per kilogram per minute (vasoactive infusions)
+μg/kg/min,ug/kg/min,UCUM case-sensitive code: microgram per kilogram per minute (vasoactive infusions)
+mcg/kg/h,ug/kg/h,UCUM case-sensitive code: microgram per kilogram per hour
+mcg/kg/hr,ug/kg/h,UCUM case-sensitive code: microgram per kilogram per hour
+ug/kg/h,ug/kg/h,UCUM case-sensitive code: microgram per kilogram per hour
+ug/kg/hr,ug/kg/h,UCUM case-sensitive code: microgram per kilogram per hour
+µg/kg/h,ug/kg/h,UCUM case-sensitive code: microgram per kilogram per hour
+µg/kg/hr,ug/kg/h,UCUM case-sensitive code: microgram per kilogram per hour
+mcg/kg/hour,ug/kg/h,UCUM case-sensitive code: microgram per kilogram per hour
+μg/kg/h,ug/kg/h,UCUM case-sensitive code: microgram per kilogram per hour
+mcg/kg/day,ug/kg/d,UCUM case-sensitive code: microgram per kilogram per day
+ug/kg/day,ug/kg/d,UCUM case-sensitive code: microgram per kilogram per day
+mcg/kg/d,ug/kg/d,UCUM case-sensitive code: microgram per kilogram per day
+ng/kg/min,ng/kg/min,UCUM case-sensitive code: nanogram per kilogram per minute
+ng/kg/minute,ng/kg/min,UCUM case-sensitive code: nanogram per kilogram per minute
+ng/kg/h,ng/kg/h,UCUM case-sensitive code: nanogram per kilogram per hour
+ng/kg/hr,ng/kg/h,UCUM case-sensitive code: nanogram per kilogram per hour
+g/h,g/h,UCUM case-sensitive code: gram per hour
+g/hr,g/h,UCUM case-sensitive code: gram per hour
+grams/hr,g/h,UCUM case-sensitive code: gram per hour
+grams/hour,g/h,UCUM case-sensitive code: gram per hour
+gm/hr,g/h,UCUM case-sensitive code: gram per hour
+g/hour,g/h,UCUM case-sensitive code: gram per hour
+g/min,g/min,UCUM case-sensitive code: gram per minute
+drops/min,[drp]/min,UCUM case-sensitive code: drops per minute
+gtt/min,[drp]/min,UCUM case-sensitive code: drops per minute
+drops per minute,[drp]/min,UCUM case-sensitive code: drops per minute
+gtts/min,[drp]/min,UCUM case-sensitive code: drops per minute
+mm/h,mm/h,UCUM case-sensitive code: millimetre per hour (sedimentation rate)
+mm/hr,mm/h,UCUM case-sensitive code: millimetre per hour (sedimentation rate)
+mm/hour,mm/h,UCUM case-sensitive code: millimetre per hour (sedimentation rate)
+cm/s,cm/s,UCUM case-sensitive code: centimetre per second (Doppler velocity)
+cm/sec,cm/s,UCUM case-sensitive code: centimetre per second (Doppler velocity)
+m/s,m/s,UCUM case-sensitive code: metre per second
+m/sec,m/s,UCUM case-sensitive code: metre per second
+mmHg,mm[Hg],UCUM case-sensitive code: millimetre of mercury
+mm Hg,mm[Hg],UCUM case-sensitive code: millimetre of mercury
+mm[Hg],mm[Hg],UCUM case-sensitive code: millimetre of mercury
+torr,mm[Hg],UCUM case-sensitive code: millimetre of mercury
+mm.Hg,mm[Hg],UCUM case-sensitive code: millimetre of mercury
+mm of Hg,mm[Hg],UCUM case-sensitive code: millimetre of mercury
+cmH2O,cm[H2O],UCUM case-sensitive code: centimetre of water
+cm H2O,cm[H2O],UCUM case-sensitive code: centimetre of water
+cm[H2O],cm[H2O],UCUM case-sensitive code: centimetre of water
+cm of H2O,cm[H2O],UCUM case-sensitive code: centimetre of water
+cm water,cm[H2O],UCUM case-sensitive code: centimetre of water
+kPa,kPa,UCUM case-sensitive code: kilopascal
+kilopascal,kPa,UCUM case-sensitive code: kilopascal
+kilopascals,kPa,UCUM case-sensitive code: kilopascal
+Pa,Pa,UCUM case-sensitive code: pascal
+pascal,Pa,UCUM case-sensitive code: pascal
+bar,{bar},"UCUM case-sensitive code: bar; reconciled 2026-09-14 with reference/units/ctpe.csv: this is the spelling OMOP's UCUM vocabulary carries a concept for, and a unit that resolves to no concept normalizes to nothing downstream"
+mbar,mbar,UCUM case-sensitive code: millibar
+millibar,mbar,UCUM case-sensitive code: millibar
+atm,atm,UCUM case-sensitive code: standard atmosphere
+atmosphere,atm,UCUM case-sensitive code: standard atmosphere
+atmospheres,atm,UCUM case-sensitive code: standard atmosphere
+psi,[psi],UCUM case-sensitive code: pound per square inch
+degF,[degF],UCUM case-sensitive code: degree Fahrenheit; converted to Cel by unit_conversions.csv
+deg F,[degF],UCUM case-sensitive code: degree Fahrenheit; converted to Cel by unit_conversions.csv
+°F,[degF],UCUM case-sensitive code: degree Fahrenheit; converted to Cel by unit_conversions.csv
+℉,[degF],UCUM case-sensitive code: degree Fahrenheit; converted to Cel by unit_conversions.csv
+F°,[degF],UCUM case-sensitive code: degree Fahrenheit; converted to Cel by unit_conversions.csv
+[degF],[degF],UCUM case-sensitive code: degree Fahrenheit; converted to Cel by unit_conversions.csv
+fahrenheit,[degF],UCUM case-sensitive code: degree Fahrenheit; converted to Cel by unit_conversions.csv
+degrees F,[degF],UCUM case-sensitive code: degree Fahrenheit; converted to Cel by unit_conversions.csv
+degrees fahrenheit,[degF],UCUM case-sensitive code: degree Fahrenheit; converted to Cel by unit_conversions.csv
+degree fahrenheit,[degF],UCUM case-sensitive code: degree Fahrenheit; converted to Cel by unit_conversions.csv
+deg. F,[degF],UCUM case-sensitive code: degree Fahrenheit; converted to Cel by unit_conversions.csv
+degree F,[degF],UCUM case-sensitive code: degree Fahrenheit; converted to Cel by unit_conversions.csv
+ºF,[degF],UCUM case-sensitive code: degree Fahrenheit; converted to Cel by unit_conversions.csv
+deg.F,[degF],UCUM case-sensitive code: degree Fahrenheit; converted to Cel by unit_conversions.csv
+Cel,Cel,UCUM case-sensitive code: degree Celsius
+degC,Cel,UCUM case-sensitive code: degree Celsius
+deg C,Cel,UCUM case-sensitive code: degree Celsius
+°C,Cel,UCUM case-sensitive code: degree Celsius
+℃,Cel,UCUM case-sensitive code: degree Celsius
+C°,Cel,UCUM case-sensitive code: degree Celsius
+[degC],Cel,UCUM case-sensitive code: degree Celsius
+celsius,Cel,UCUM case-sensitive code: degree Celsius
+degrees C,Cel,UCUM case-sensitive code: degree Celsius
+degrees celsius,Cel,UCUM case-sensitive code: degree Celsius
+degree celsius,Cel,UCUM case-sensitive code: degree Celsius
+deg. C,Cel,UCUM case-sensitive code: degree Celsius
+degree C,Cel,UCUM case-sensitive code: degree Celsius
+centigrade,Cel,UCUM case-sensitive code: degree Celsius
+ºC,Cel,UCUM case-sensitive code: degree Celsius
+deg.C,Cel,UCUM case-sensitive code: degree Celsius
+cm,cm,UCUM case-sensitive code: centimetre
+cms,cm,UCUM case-sensitive code: centimetre
+centimeter,cm,UCUM case-sensitive code: centimetre
+centimeters,cm,UCUM case-sensitive code: centimetre
+centimetre,cm,UCUM case-sensitive code: centimetre
+centimetres,cm,UCUM case-sensitive code: centimetre
+mm,mm,UCUM case-sensitive code: millimetre
+millimeter,mm,UCUM case-sensitive code: millimetre
+millimeters,mm,UCUM case-sensitive code: millimetre
+millimetre,mm,UCUM case-sensitive code: millimetre
+millimetres,mm,UCUM case-sensitive code: millimetre
+m,m,UCUM case-sensitive code: metre
+meter,m,UCUM case-sensitive code: metre
+meters,m,UCUM case-sensitive code: metre
+metre,m,UCUM case-sensitive code: metre
+metres,m,UCUM case-sensitive code: metre
+um,um,UCUM case-sensitive code: micrometre
+µm,um,UCUM case-sensitive code: micrometre
+μm,um,UCUM case-sensitive code: micrometre
+micron,um,UCUM case-sensitive code: micrometre
+microns,um,UCUM case-sensitive code: micrometre
+micrometer,um,UCUM case-sensitive code: micrometre
+in,[in_i],UCUM case-sensitive code: international inch; converted to cm by unit_conversions.csv
+inch,[in_i],UCUM case-sensitive code: international inch; converted to cm by unit_conversions.csv
+inches,[in_i],UCUM case-sensitive code: international inch; converted to cm by unit_conversions.csv
+[in_i],[in_i],UCUM case-sensitive code: international inch; converted to cm by unit_conversions.csv
+in_i,[in_i],UCUM case-sensitive code: international inch; converted to cm by unit_conversions.csv
+ins,[in_i],UCUM case-sensitive code: international inch; converted to cm by unit_conversions.csv
+ft,[ft_i],UCUM case-sensitive code: international foot; converted to cm by unit_conversions.csv
+foot,[ft_i],UCUM case-sensitive code: international foot; converted to cm by unit_conversions.csv
+feet,[ft_i],UCUM case-sensitive code: international foot; converted to cm by unit_conversions.csv
+[ft_i],[ft_i],UCUM case-sensitive code: international foot; converted to cm by unit_conversions.csv
+ft_i,[ft_i],UCUM case-sensitive code: international foot; converted to cm by unit_conversions.csv
+kg/m2,kg/m2,UCUM case-sensitive code: kilogram per square metre (body mass index)
+kg/m^2,kg/m2,UCUM case-sensitive code: kilogram per square metre (body mass index)
+kg/m²,kg/m2,UCUM case-sensitive code: kilogram per square metre (body mass index)
+kg/sq m,kg/m2,UCUM case-sensitive code: kilogram per square metre (body mass index)
+kg/sqm,kg/m2,UCUM case-sensitive code: kilogram per square metre (body mass index)
+kg per m2,kg/m2,UCUM case-sensitive code: kilogram per square metre (body mass index)
+m2,m2,UCUM case-sensitive code: square metre (body surface area)
+m^2,m2,UCUM case-sensitive code: square metre (body surface area)
+m²,m2,UCUM case-sensitive code: square metre (body surface area)
+sq m,m2,UCUM case-sensitive code: square metre (body surface area)
+sqm,m2,UCUM case-sensitive code: square metre (body surface area)
+square meter,m2,UCUM case-sensitive code: square metre (body surface area)
+square metre,m2,UCUM case-sensitive code: square metre (body surface area)
+cm2,cm2,UCUM case-sensitive code: square centimetre
+cm^2,cm2,UCUM case-sensitive code: square centimetre
+cm²,cm2,UCUM case-sensitive code: square centimetre
+sq cm,cm2,UCUM case-sensitive code: square centimetre
+mm2,mm2,UCUM case-sensitive code: square millimetre
+mm^2,mm2,UCUM case-sensitive code: square millimetre
+mm²,mm2,UCUM case-sensitive code: square millimetre
+sq mm,mm2,UCUM case-sensitive code: square millimetre
+kcal,kcal,UCUM case-sensitive code: kilocalorie
+kilocalorie,kcal,UCUM case-sensitive code: kilocalorie
+kilocalories,kcal,UCUM case-sensitive code: kilocalorie
+Cal,kcal,UCUM case-sensitive code: kilocalorie
+calories,kcal,UCUM case-sensitive code: kilocalorie
+kcal/day,kcal/d,UCUM case-sensitive code: kilocalorie per day
+kcal/d,kcal/d,UCUM case-sensitive code: kilocalorie per day
+kcal/24h,kcal/d,UCUM case-sensitive code: kilocalorie per day
+calories/day,kcal/d,UCUM case-sensitive code: kilocalorie per day
+kcal/kg,kcal/kg,UCUM case-sensitive code: kilocalorie per kilogram
+kcal/kg/day,kcal/kg/d,UCUM case-sensitive code: kilocalorie per kilogram per day
+kcal/kg/d,kcal/kg/d,UCUM case-sensitive code: kilocalorie per kilogram per day
+kcal/h,kcal/h,UCUM case-sensitive code: kilocalorie per hour
+kcal/hr,kcal/h,UCUM case-sensitive code: kilocalorie per hour
+kJ,kJ,UCUM case-sensitive code: kilojoule
+kilojoule,kJ,UCUM case-sensitive code: kilojoule
+kilojoules,kJ,UCUM case-sensitive code: kilojoule
+J,J,UCUM case-sensitive code: joule
+joule,J,UCUM case-sensitive code: joule
+joules,J,UCUM case-sensitive code: joule
+mOsm/kg,mosm/kg,UCUM case-sensitive code: milliosmole per kilogram
+mosmol/kg,mosm/kg,UCUM case-sensitive code: milliosmole per kilogram
+mOsm/kg H2O,mosm/kg,UCUM case-sensitive code: milliosmole per kilogram
+milliosmoles/kg,mosm/kg,UCUM case-sensitive code: milliosmole per kilogram
+mOs/kg,mosm/kg,UCUM case-sensitive code: milliosmole per kilogram
+mOsm/L,mosm/L,UCUM case-sensitive code: milliosmole per litre
+mosmol/L,mosm/L,UCUM case-sensitive code: milliosmole per litre
+milliosmoles/L,mosm/L,UCUM case-sensitive code: milliosmole per litre
+mOsm,mosm,UCUM case-sensitive code: milliosmole
+mosmol,mosm,UCUM case-sensitive code: milliosmole
+milliosmole,mosm,UCUM case-sensitive code: milliosmole
+Hz,Hz,UCUM case-sensitive code: hertz
+hertz,Hz,UCUM case-sensitive code: hertz
+dB,dB,UCUM case-sensitive code: decibel
+decibel,dB,UCUM case-sensitive code: decibel
+decibels,dB,UCUM case-sensitive code: decibel
+V,V,UCUM case-sensitive code: volt
+volt,V,UCUM case-sensitive code: volt
+volts,V,UCUM case-sensitive code: volt
+mV,mV,UCUM case-sensitive code: millivolt (ECG amplitude)
+millivolt,mV,UCUM case-sensitive code: millivolt (ECG amplitude)
+millivolts,mV,UCUM case-sensitive code: millivolt (ECG amplitude)
+uV,uV,UCUM case-sensitive code: microvolt
+µV,uV,UCUM case-sensitive code: microvolt
+μV,uV,UCUM case-sensitive code: microvolt
+microvolt,uV,UCUM case-sensitive code: microvolt
+microvolts,uV,UCUM case-sensitive code: microvolt
+ohm,Ohm,UCUM case-sensitive code: ohm
+ohms,Ohm,UCUM case-sensitive code: ohm
+Ω,Ohm,UCUM case-sensitive code: ohm
+W,W,UCUM case-sensitive code: watt
+watt,W,UCUM case-sensitive code: watt
+watts,W,UCUM case-sensitive code: watt
+deg,deg,UCUM case-sensitive code: degree of arc (ECG axis)
+degrees,deg,UCUM case-sensitive code: degree of arc (ECG axis)
+degree,deg,UCUM case-sensitive code: degree of arc (ECG axis)
+°,deg,UCUM case-sensitive code: degree of arc (ECG axis)
+Gy,Gy,UCUM case-sensitive code: gray
+gray,Gy,UCUM case-sensitive code: gray
+mGy,mGy,UCUM case-sensitive code: milligray
+milligray,mGy,UCUM case-sensitive code: milligray
+mGy.cm,mGy.cm,UCUM case-sensitive code: milligray centimetre (CT dose-length product)
+mGy*cm,mGy.cm,UCUM case-sensitive code: milligray centimetre (CT dose-length product)
+mGy-cm,mGy.cm,UCUM case-sensitive code: milligray centimetre (CT dose-length product)
+mGycm,mGy.cm,UCUM case-sensitive code: milligray centimetre (CT dose-length product)
+mSv,mSv,UCUM case-sensitive code: millisievert
+millisievert,mSv,UCUM case-sensitive code: millisievert
+dose,{dose},UCUM case-sensitive code annotation: a dose
+doses,{dose},UCUM case-sensitive code annotation: a dose
+tablet,{tbl},"UCUM case-sensitive code annotation: tablet, as the OMOP UCUM vocabulary spells it"
+tablets,{tbl},"UCUM case-sensitive code annotation: tablet, as the OMOP UCUM vocabulary spells it"
+tab,{tbl},"UCUM case-sensitive code annotation: tablet, as the OMOP UCUM vocabulary spells it"
+tabs,{tbl},"UCUM case-sensitive code annotation: tablet, as the OMOP UCUM vocabulary spells it"
+tbl,{tbl},"UCUM case-sensitive code annotation: tablet, as the OMOP UCUM vocabulary spells it"
+capsule,{capsule},UCUM case-sensitive code annotation: capsule
+capsules,{capsule},UCUM case-sensitive code annotation: capsule
+cap,{capsule},UCUM case-sensitive code annotation: capsule
+caps,{capsule},UCUM case-sensitive code annotation: capsule
+puff,{puff},UCUM case-sensitive code annotation: puff (inhaler)
+puffs,{puff},UCUM case-sensitive code annotation: puff (inhaler)
+spray,{spray},UCUM case-sensitive code annotation: spray
+sprays,{spray},UCUM case-sensitive code annotation: spray
+drop,[drp],UCUM case-sensitive code: drop
+drops,[drp],UCUM case-sensitive code: drop
+gtt,[drp],UCUM case-sensitive code: drop
+gtts,[drp],UCUM case-sensitive code: drop
+[drp],[drp],UCUM case-sensitive code: drop
+patch,{patch},UCUM case-sensitive code annotation: transdermal patch
+patches,{patch},UCUM case-sensitive code annotation: transdermal patch
+each,{each},UCUM case-sensitive code annotation: each
+ea,{each},UCUM case-sensitive code annotation: each
+application,[App],"UCUM case-sensitive code annotation: application; reconciled 2026-09-14 with reference/units/ctpe.csv: this is the spelling OMOP's UCUM vocabulary carries a concept for, and a unit that resolves to no concept normalizes to nothing downstream"
+applications,{application},UCUM case-sensitive code annotation: application
+appl,{application},UCUM case-sensitive code annotation: application
+applic,{application},UCUM case-sensitive code annotation: application
+vial,{vial},UCUM case-sensitive code annotation: vial
+vials,{vial},UCUM case-sensitive code annotation: vial
+ampule,{ampule},UCUM case-sensitive code annotation: ampule
+ampules,{ampule},UCUM case-sensitive code annotation: ampule
+ampoule,{ampule},UCUM case-sensitive code annotation: ampule
+ampoules,{ampule},UCUM case-sensitive code annotation: ampule
+amp,{ampule},UCUM case-sensitive code annotation: ampule
+amps,{ampule},UCUM case-sensitive code annotation: ampule
+bag,{bag},UCUM case-sensitive code annotation: bag
+bags,{bag},UCUM case-sensitive code annotation: bag
+bottle,{bottle},UCUM case-sensitive code annotation: bottle
+bottles,{bottle},UCUM case-sensitive code annotation: bottle
+packet,{packet},UCUM case-sensitive code annotation: packet
+packets,{packet},UCUM case-sensitive code annotation: packet
+pkt,{packet},UCUM case-sensitive code annotation: packet
+pkts,{packet},UCUM case-sensitive code annotation: packet
+suppository,{suppository},UCUM case-sensitive code annotation: suppository
+suppositories,{suppository},UCUM case-sensitive code annotation: suppository
+supp,{suppository},UCUM case-sensitive code annotation: suppository
+lozenge,{lozenge},UCUM case-sensitive code annotation: lozenge
+lozenges,{lozenge},UCUM case-sensitive code annotation: lozenge
+troche,{lozenge},UCUM case-sensitive code annotation: lozenge
+troches,{lozenge},UCUM case-sensitive code annotation: lozenge
+inhalation,{inhalation},UCUM case-sensitive code annotation: inhalation
+inhalations,{inhalation},UCUM case-sensitive code annotation: inhalation
+inh,{inhalation},UCUM case-sensitive code annotation: inhalation
+actuation,{actuat},"UCUM case-sensitive code annotation: actuation, as the OMOP UCUM vocabulary spells it"
+actuations,{actuat},"UCUM case-sensitive code annotation: actuation, as the OMOP UCUM vocabulary spells it"
+act,{actuat},"UCUM case-sensitive code annotation: actuation, as the OMOP UCUM vocabulary spells it"
+actuat,{actuat},"UCUM case-sensitive code annotation: actuation, as the OMOP UCUM vocabulary spells it"
+syringe,{syringe},UCUM case-sensitive code annotation: syringe
+syringes,{syringe},UCUM case-sensitive code annotation: syringe
+pen,{pen},UCUM case-sensitive code annotation: pen
+pens,{pen},UCUM case-sensitive code annotation: pen
+enema,{enema},UCUM case-sensitive code annotation: enema
+enemas,{enema},UCUM case-sensitive code annotation: enema
+kit,{kit},UCUM case-sensitive code annotation: kit
+kits,{kit},UCUM case-sensitive code annotation: kit
+strip,{strip},UCUM case-sensitive code annotation: test strip
+strips,{strip},UCUM case-sensitive code annotation: test strip
+scoop,{scoop},UCUM case-sensitive code annotation: scoop
+scoops,{scoop},UCUM case-sensitive code annotation: scoop
+sachet,{sachet},UCUM case-sensitive code annotation: sachet
+sachets,{sachet},UCUM case-sensitive code annotation: sachet
+tube,{tube},UCUM case-sensitive code annotation: tube
+tubes,{tube},UCUM case-sensitive code annotation: tube
+implant,{implant},UCUM case-sensitive code annotation: implant
+implants,{implant},UCUM case-sensitive code annotation: implant
+insert,{insert},UCUM case-sensitive code annotation: insert
+inserts,{insert},UCUM case-sensitive code annotation: insert
+film,{film},UCUM case-sensitive code annotation: film
+films,{film},UCUM case-sensitive code annotation: film
+gum,{gum},UCUM case-sensitive code annotation: gum
+gums,{gum},UCUM case-sensitive code annotation: gum
+piece,{piece},UCUM case-sensitive code annotation: piece
+pieces,{piece},UCUM case-sensitive code annotation: piece
+wafer,{wafer},UCUM case-sensitive code annotation: wafer
+wafers,{wafer},UCUM case-sensitive code annotation: wafer
+device,{device},UCUM case-sensitive code annotation: device
+devices,{device},UCUM case-sensitive code annotation: device
+cartridge,{cartridge},UCUM case-sensitive code annotation: cartridge
+cartridges,{cartridge},UCUM case-sensitive code annotation: cartridge
+container,{container},UCUM case-sensitive code annotation: container
+containers,{container},UCUM case-sensitive code annotation: container
+can,{can},UCUM case-sensitive code annotation: can
+cans,{can},UCUM case-sensitive code annotation: can
+pack,{pack},UCUM case-sensitive code annotation: pack
+packs,{pack},UCUM case-sensitive code annotation: pack
+blister,{blister},UCUM case-sensitive code annotation: blister
+blisters,{blister},UCUM case-sensitive code annotation: blister
+unit dose,{unit_dose},UCUM case-sensitive code annotation: unit dose
+unit doses,{unit_dose},UCUM case-sensitive code annotation: unit dose
+UD,{unit_dose},UCUM case-sensitive code annotation: unit dose
+tsp,[tsp_us],UCUM case-sensitive code: US teaspoon
+teaspoon,[tsp_us],UCUM case-sensitive code: US teaspoon
+teaspoons,[tsp_us],UCUM case-sensitive code: US teaspoon
+tsps,[tsp_us],UCUM case-sensitive code: US teaspoon
+tbsp,[tbs_us],UCUM case-sensitive code: US tablespoon
+tbs,[tbs_us],UCUM case-sensitive code: US tablespoon
+tablespoon,[tbs_us],UCUM case-sensitive code: US tablespoon
+tablespoons,[tbs_us],UCUM case-sensitive code: US tablespoon
+fl oz,[foz_us],UCUM case-sensitive code: US fluid ounce
+fl. oz.,[foz_us],UCUM case-sensitive code: US fluid ounce
+fluid ounce,[foz_us],UCUM case-sensitive code: US fluid ounce
+fluid ounces,[foz_us],UCUM case-sensitive code: US fluid ounce
+floz,[foz_us],UCUM case-sensitive code: US fluid ounce
+cup,[cup_us],UCUM case-sensitive code: US cup
+cups,[cup_us],UCUM case-sensitive code: US cup
+pint,[pt_us],UCUM case-sensitive code: US pint
+pints,[pt_us],UCUM case-sensitive code: US pint
+pt,[pt_us],UCUM case-sensitive code: US pint
+quart,[qt_us],UCUM case-sensitive code: US quart
+quarts,[qt_us],UCUM case-sensitive code: US quart
+qt,[qt_us],UCUM case-sensitive code: US quart
+gallon,[gal_us],UCUM case-sensitive code: US gallon
+gallons,[gal_us],UCUM case-sensitive code: US gallon
+gal,[gal_us],UCUM case-sensitive code: US gallon

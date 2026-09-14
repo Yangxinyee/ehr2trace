@@ -8,8 +8,9 @@
 # reference export does not contain at all.
 #
 # The flat CSVs are already the shape ehr2trace ingests; tools/prepare_cu.py closes
-# three gaps a config must not close itself, and records a hash manifest across the
-# boundary. See that script's docstring.
+# the gaps a config must not close itself -- projections and lookups only -- and
+# records a hash manifest across the boundary, with every row it drops counted and
+# named. See that script's docstring.
 
 dataset_id: cu_ctpa
 root_env: CU_CTPA_DATA_ROOT
@@ -97,6 +98,25 @@ sources:
       # "BMI closest to the first inclusion procedure" -- a real measurement whose own
       # time the export dropped. Quarantined rather than dated by the CT's timestamp.
       - {column: bmi, code: BMI, unit: "kg/m2"}
+    expected_quarantine:
+      UNTIMED_CLINICAL_VALUE:
+        max_share: 1.0
+        reason: >-
+          W2 (2026-09-13): every BMI this export delivers is the one closest to the
+          first inclusion procedure, with no time of its own -- 124,367 of 127,955
+          rows carry one -- so every one is quarantined rather than dated by the CT.
+          The source's shape, not a conversion fault.
+    ignored_columns:
+      mrn: >-
+        the hospital's medical record number, delivered beside the export's own
+        surrogate id; identity is arb_person_id, and an MRN must reach no output
+      age_reference_day: >-
+        provenance written by tools/prepare_cu.py: the day the age was current at,
+        from which it derived birth_date; the prepare manifest counts the rows under
+        each rule
+      age_reference_source: >-
+        provenance written by tools/prepare_cu.py: which rule dated the age
+        (cta_timestamp for 127,952 rows, earliest_flowsheet_day for 3; D12)
 
   # -- vitals ---------------------------------------------------------------------
   flowsheets:
@@ -105,16 +125,31 @@ sources:
     shape: point_event
     event_kind: measurement
     required: true
-    # Four flowsheet rows, 28 in all, are not vital signs this cohort can use: a
-    # maternal respiration prompt, a home pulse-oximetry questionnaire item, and two
-    # post-something pressures with no `Blood Pressure` value_type. Dropped by name
-    # (D11, 2026-09-11).
-    row_filter: {column: flowsheet_row_name, drop: ["Maternal Respirations:", "7. Personal Pulse Oximetry", "Post BP systolic", "Post BP diastolic"]}
+    # Five flowsheet rows, 42 in all, are not vital signs this cohort can use: a
+    # maternal respiration prompt (12 rows), a home pulse-oximetry questionnaire item
+    # (6), two "Post" pressures (5 each) that nothing says are post what, and
+    # `Respirations` (14), a `Custom List` row whose values are the option numbers 3
+    # and 4 and not breaths per minute (P-CU9). Dropped by name (D11, 2026-09-11;
+    # Respirations added 2026-09-14). An earlier version of this comment said the Post
+    # BP rows lacked the `Blood Pressure` value_type; they carry it and were split like
+    # the others (P-CU11) -- what excludes them is the unmappable "Post".
+    row_filter: {column: flowsheet_row_name, drop: ["Maternal Respirations:", "7. Personal Pulse Oximetry", "Post BP systolic", "Post BP diastolic", "Respirations"]}
     # Blood pressure arrives as one cell, "135/76". It is not split here: splitting one
     # recorded observation into two asserts that the source recorded two, which is a
     # declaration to make in the open, not a regex in a converter. tools/prepare_cu.py
     # makes it, on the source's own `value_type = 'Blood Pressure'` rows and only where
     # the cell is exactly `N/N`, and its manifest says how many rows that added.
+    unit_override:
+      # D-R1 (2026-09-13). The unit column says "degree Celsius" on every temperature
+      # row, and for these two rows the values are Fahrenheit: of 67,660 `Temp`
+      # values 67,604 lie in 90-110 and 13 in 30-45, median 98.0; all 90 `Core (Body)
+      # Temperature` values lie in 90-110, median 98.2 (P-CU2). `Temp (in Celsius)`
+      # (59,953 values, median 36.7, 59,941 in 30-45) is what its unit says and is not
+      # overridden. The source string stays in unit_source; normalization reads these
+      # as [degF], converts to Cel and flags UNIT_OVERRIDDEN. Put to the data owner
+      # for confirmation (plan section 3.3), executed meanwhile.
+      "Temp": "[degF]"
+      "Core (Body) Temperature": "[degF]"
     fields:
       person_id:    {from: [arb_person_id], required: true}
       encounter_id: {from: [arb_encounter_id]}
@@ -123,6 +158,10 @@ sources:
       source_name:  {from: [flowsheet_row_name]}
       value:        {from: [value]}
       unit:         {from: [unit]}
+    # The source's own type label for the row (Numeric Type, Blood Pressure,
+    # Temperature, Custom List): what the preparation step split blood pressure on,
+    # kept so a reader can see it beside every value.
+    keep_columns: [value_type]
 
   # -- conditions -----------------------------------------------------------------
   diagnoses:
@@ -141,6 +180,10 @@ sources:
       event_time:   {from: [diagnosis_date], required: true}
       source_code:  {from: [code], required: true}
       source_name:  {from: [code_description]}
+    ignored_columns:
+      code_type: >-
+        constant ICD10CM on all 5,398,425 rows (measured 2026-09-14); the source
+        declares code_system ICD10CM, so the column repeats it
 
   # -- procedures -----------------------------------------------------------------
   # Two sources rather than one because code_system is a property of the source: a CPT4
@@ -153,6 +196,22 @@ sources:
     code_system: CPT4
     required: true
     row_filter: {column: code_type, keep: [CPT4]}
+    # D-R3 (2026-09-13). 97,183 groups of rows (97,205 rows beyond the first) are the
+    # same patient, encounter, day and CPT code billed twice: once by the hospital
+    # (`HB CHG ...`) and once professionally (`PR ...`, `MEDICINE`, `EM ...`), 55,120
+    # of them a 93306 echocardiogram (P-CU7). One service, two bills: one event, both
+    # rows in the lineage, flagged BILLING_DUPLICATE, and no quantity of two published.
+    merge_rules:
+      procedure_name:     {rule: keep_all_flag, flag: BILLING_DUPLICATE}
+      procedure_category: {rule: keep_all_flag, flag: BILLING_DUPLICATE}
+      # The two bills also disagree about when the service ended -- 20 groups in a
+      # 1-in-200 sample, about 4,000 across the export, which the merge reported as
+      # MERGE_CONFLICT on the first rebuild (2026-09-14). One service ended once, and a
+      # facility charge and a professional charge disagreeing about when is a
+      # contradiction neither settles, so the end time is dropped and both values are
+      # quarantined -- the rule D-R4 gives MIMIC-IV's transfers for the same reason.
+      # The start, which they agree on, is what the event keeps.
+      end_time:           {rule: null_and_flag}
     fields:
       person_id:    {from: [arb_person_id], required: true}
       encounter_id: {from: [arb_encounter_id]}
@@ -170,6 +229,14 @@ sources:
     code_system: ICD10PCS
     required: false
     row_filter: {column: code_type, keep: [ICD10PCS]}
+    # The same physical table read under the other code system, so the same billing
+    # duplication reaches it and the same rules answer it (D-R3, D-R4). The counts in
+    # the CPT source's note are that source's; 1,162 of this export's 816,628
+    # procedure rows carry a PCS code.
+    merge_rules:
+      procedure_name:     {rule: keep_all_flag, flag: BILLING_DUPLICATE}
+      procedure_category: {rule: keep_all_flag, flag: BILLING_DUPLICATE}
+      end_time:           {rule: null_and_flag}
     fields:
       person_id:    {from: [arb_person_id], required: true}
       encounter_id: {from: [arb_encounter_id]}
@@ -189,6 +256,16 @@ sources:
     # Ordering intent. This export carries no administration table at all, so nothing
     # here is evidence that a drug reached a patient, and no source is declared
     # drug_admin. `order_status` is kept as recorded.
+    #
+    # The identity of a drug order (hash rule 2) carries the dose, unit, route, status
+    # and end time, and 8,445 groups of rows here still agree on all of those and
+    # differ in the frequency (4,458 groups) or in a dispensing column (4,939)
+    # (measured 2026-09-14 on the prepared table; P-CU1). An order of the same drug and
+    # dose at a different frequency is a different order. T7 carries no order id, so
+    # tools/prepare_cu.py writes `order_record_key`, a digest of the row's own columns,
+    # and it is declared as the record's sequence number: rows identical in every
+    # delivered column collapse to one event, rows that differ anywhere stay apart,
+    # and the prepare manifest counts the repeats.
     fields:
       person_id:    {from: [arb_person_id], required: true}
       encounter_id: {from: [arb_encounter_id]}
@@ -197,15 +274,30 @@ sources:
       source_code:  {from: [medication_name], required: true}
       source_name:  {from: [medication_name]}
       dose:         {from: [ordered_dose]}
+      # T2.CU1 (P-CU3). 3,571,793 of 4,206,761 rows carry a dose unit -- mg 1,420,563,
+      # Units 1,158,072, Units/kg/hr 418,259, ... -- and until 2026-09-13 it was only
+      # kept, so every published dose was a bare number. `*Unspecified` (428,344 rows)
+      # is the export's placeholder and stays unmapped in reference/units/cu_ctpa.csv.
+      unit:         {from: [dose_unit]}
       route:        {from: [route]}
       status:       {from: [order_status]}
+      sequence_number: {from: [order_record_key]}
     keep_columns:
       - therapeutic_class
       - pharmaceutical_class
       - pharmaceutical_subclass
       - form
-      - dose_unit
       - ordered_frequency
+      # T2.CU8 (P-CU8). `dispensed_quantity` (834,932 rows) with `quantity_unit`
+      # (1,430,902 rows, 1,081,075 of them '*Not Applicable') is the amount dispensed
+      # against the order -- what OMOP's drug_exposure.quantity means -- and
+      # `number_of_doses` (244,181 rows, median 1) how many doses the order covers.
+      # None of the three is a dose, a unit or a time, so none has a canonical field;
+      # they are kept whole in the source layer rather than ignored, so a publisher
+      # that learns to fill `quantity` reads them from there.
+      - number_of_doses
+      - dispensed_quantity
+      - quantity_unit
 
   # -- notes ----------------------------------------------------------------------
   notes:
@@ -224,13 +316,33 @@ sources:
     #
     # No sequence number is declared, and that is deliberate. The note text is part of
     # the event's identity, so two different notes on one day stay two events, while the
-    # same note appearing in both the 2026-03-10 and 2026-03-23 pulls -- 56% of distinct
-    # texts do -- collapses to one event with both source rows still linked. A row-order
-    # discriminator would defeat exactly that.
+    # same note appearing in more than one pull -- 1,427,559 identical note groups span
+    # the three files -- collapses to one event with every source row still linked. A
+    # row-order discriminator would defeat exactly that.
+    #
+    # The encounter id is not part of the identity either (D-R2, 2026-09-13). 491,192
+    # groups of notes are the same patient, day, type and full text filed under
+    # different arb_encounter_ids (P-CU4), and those ids are mostly unknown to every
+    # other table: of the notes' 163,612 (patient, encounter) pairs, 4,293 (2.6%) occur
+    # in diagnoses, medications, flowsheets or procedures, against 65.6% of the
+    # medications' pairs (P-CU12). tools/prepare_cu.py looks each pair up and writes
+    # `encounter_linked`; the merge keeps the one encounter id of a group that is
+    # linked, otherwise none, flagged ENCOUNTER_UNLINKED.
     #
     # `note_date` is a date with no time. Every note in a day therefore lands at local
     # midnight, and an availability-aware model must not read that as "known at 00:00".
     # The time component is missing in the source and is not invented here.
+    encounter_in_identity: false
+    merge_rules:
+      encounter_id: {rule: prefer_linked}
+    expected_encounter_link_rate:
+      # 2.6% of the notes' (patient, encounter) pairs, 2.0% of note rows on the 1-in-200
+      # sample of 2026-09-14 (338 of 16,977): the floor sits under both readings.
+      min_rate: 0.015
+      reason: >-
+        P-CU12: the notes' encounter ids are the source's and almost none of them occur
+        in any other table of this export (4,293 of 163,612 pairs); not a conversion
+        fault, and no encounter table was delivered to resolve them against.
     fields:
       person_id:    {from: [arb_person_id], required: true}
       encounter_id: {from: [arb_encounter_id]}
@@ -238,6 +350,10 @@ sources:
       source_name:  {from: [NoteType]}
       event_time:   {from: [note_date], required: true}
       text:         {from: [NoteText]}
+      # '1' when the row's (patient, encounter) pair occurs in diagnoses, medications,
+      # flowsheets or procedures; a lookup the preparation step made, read by the
+      # prefer_linked rule above and by nothing else.
+      encounter_linked: {from: [encounter_linked]}
     keep_columns: [AuthorService, note_author, source_file]
 
   # -- outcomes as visits ---------------------------------------------------------
@@ -245,16 +361,25 @@ sources:
     adapter: parquet
     file_glob: "icu_stays.parquet"
     shape: visit
-    event_kind: visit
+    event_kind: visit_detail
     required: false
     # `visit_type` is a constant the preparation step projects from the table's own
-    # identity -- see tools/prepare_cu.py. Strictly, an ICU stay inside a hospitalisation
-    # is a VISIT_DETAIL and not a VISIT_OCCURRENCE; there is no visit_detail publisher
-    # here because the canonical event kinds are a closed set, so this is the same
-    # compromise datasets/mimiciv.yaml records for its service transfers, made once and
-    # written down rather than left for a reader to discover. The constant resolves to
-    # 32037 Intensive Care through mappings/visit.csv (accepted 2026-09-09; the row that
-    # carries it was missing until 2026-09-11, and every ICU stay sat at concept 0).
+    # identity -- see tools/prepare_cu.py. An ICU stay inside a hospitalisation is a
+    # VISIT_DETAIL and not a VISIT_OCCURRENCE, and since D-R14 (2026-09-13) there is a
+    # visit_detail publisher: the shape stays `visit`, the kind is visit_detail, and
+    # the constant still resolves to 32037 Intensive Care through mappings/visit.csv.
+    # T5 carries no arb_encounter_id, so a stay is parented by time containment in
+    # the same patient's visits, and the only visits this export has are readmission
+    # dates with no end -- so most stays will be unparented and reported as
+    # VISIT_DETAIL_UNPARENTED, which is the truth of this delivery, rather than
+    # attached to a hospitalisation that was not delivered.
+    #
+    # `icu_start_date` is a date; `icu_los` carries a fraction of a day. 176 start
+    # dates carry more than one length of stay (177 rows beyond the first), the
+    # lengths 0.25-9.9 days apart (P-CU6): two stays that began the same day, not one
+    # stay recorded twice (D-R4), so the length of stay is part of the identity and
+    # each row is its own stay.
+    identity_extra_fields: [length_of_stay]
     fields:
       person_id:      {from: [arb_person_id], required: true}
       event_time:     {from: [icu_start_date], required: true}
@@ -327,8 +452,75 @@ execution:
   workers: 4
   chunk_rows: 200000
 
+validation:
+  # Thresholds at their defaults. One caveat for ENCOUNTER_RESOLVES: this export
+  # delivers no encounter table, and neither visit source (ICU stays, readmissions)
+  # carries an arb_encounter_id, so an encounter id here can only ever be matched to
+  # another clinical event of the same patient, never to a visit. The notes declare
+  # their own rate; if the check resolves against visits alone, every source of this
+  # dataset needs a declaration, and this note is where that decision starts.
+  note: >-
+    defaults; no visit of this export carries an encounter id, so a visit-based
+    encounter link rate is 0 for every source by construction (see the comment)
+
+# Files under the prepared root and the raw delivery that no source reads, each with
+# its reason, so RAW_COVERAGE_DECLARED can tell "unread on purpose" from "forgotten".
+# tools/prepare_cu.py lists the raw delivery's unread files one by one in
+# prepare_manifest.json (unread_inputs) with the same reasons.
+out_of_scope:
+  flowsheets_undated:
+    matches: ["flowsheets_undated.parquet"]
+    reason: >-
+      the flowsheet rows tools/prepare_cu.py found without a date or a time, written
+      out so the count is visible rather than lost; 0 rows on the 2026-03 extract
+  ct_studies:
+    matches: ["ct_studies.parquet"]
+    reason: >-
+      T1a as delivered, 168,046 accession numbers of the cohort with no date (P-CU5).
+      Not a source and not events (D-R16); the imaging manifest is built from it
+  imaging_manifest:
+    matches: ["imaging_studies.parquet", "imaging_series.parquet"]
+    reason: >-
+      D-R16 (2026-09-13): the imaging study manifest tools/prepare_cu.py writes and
+      the event stream never reads. imaging_studies.parquet is one row per T1a
+      accession -- whether image metadata exists for it, the original study date and
+      series count from the imaging directory's links.csv, the NIfTI path from
+      conversion_summary.csv; imaging_series.parquet is one row per accession x series
+      with the series description, number and de-identified DICOM path from
+      copy_summary.csv. Patient name, birth date and original patient id columns of
+      those files are never projected. Counts are in prepare_manifest.json under
+      "imaging"; the OMOP etl_audit and MEDS metadata are where the manifest is meant
+      to be recorded (T2.CU7)
+  prepare_manifest:
+    matches: ["prepare_manifest.json"]
+    reason: >-
+      the preparation step's own record: sha256 of every raw input, per-step row
+      accounting with every drop named, unread files, imaging counts
+  delivery_documents:
+    matches: ["*.pptx", "*.docx", "*.pdf", "*.xlsx", "*.ipynb", ".ipynb_checkpoints/*", ".idea/*", ".DS_Store", ".~lock*", "__MACOSX/*", "._*", "*.zip"]
+    reason: >-
+      project documentation (summary deck, ICD/CPT list, requirements workbook, the
+      assignment letter), the owner's processing notebook, and the archive, editor and
+      OS metadata unpacked with the delivery: no records
+  owner_derived_summaries:
+    matches: ["patient_level_*_binary_flags.csv", "*_missingness_relative_to_table1.csv", "Table7_medication_name_missing_rate_vs_T1.csv"]
+    reason: >-
+      per-patient diagnosis flags and coverage statistics the owner's notebook derived
+      from T1, T4 and T7, which are read in full; derivations, not records
+  imaging_copy_bookkeeping:
+    matches: ["links.csv", "copy_summary.csv", "conversion_summary.csv", "not_found_series.csv", "patient_copy_status.csv"]
+    reason: >-
+      imaging metadata under CU_Images: links.csv, copy_summary.csv and
+      conversion_summary.csv are read by tools/prepare_cu.py into the imaging
+      manifest with the identifier columns never projected; not_found_series.csv and
+      patient_copy_status.csv are the copy step's status files whose facts
+      copy_summary.csv already carries per series
+
 owner_answers:
-  batch_relationship: "one cohort, one extract; the three note files are disjoint pulls"
+  # Measured 2026-09-13: 1,427,559 groups of identical notes (same patient, day, type
+  # and full text) occur in more than one of the three note files, so the files are
+  # overlapping pulls and an identical note across files is one event, not two.
+  batch_relationship: "one cohort, one extract; the three note files are overlapping pulls of the same notes"
   # Unlike the reference export, the images are here: 553 GB of DICOM and NIfTI for the
   # 2016 and 2017 scans. The *report text* is not: nothing in the export states a CT
   # finding, so no imaging conclusion may be derived from an anchor date.
@@ -336,7 +528,10 @@ owner_answers:
   imaging_note: >-
     DICOM/NIfTI delivered for the 2016 and 2017 scans and linked by ACCESSIONNUMBER in
     T1a. Radiology report text is not in this extract. T1a carries no date, so the
-    accession numbers are not declared as a source here.
+    accession numbers are not declared as a source; tools/prepare_cu.py writes every
+    one of them into imaging_studies.parquet with the original study date and series
+    counts the imaging directory's links.csv carries for the roughly 7,500 that have
+    images (D-R16), declared out_of_scope above because it is a manifest, not events.
   open_questions:
     readmission_index_event:
       # Measured 2026-09-09, and this is why the question was asked rather than guessed:
@@ -420,6 +615,17 @@ owner_answers:
         owner; applied in tools/prepare_cu.py (age_reference_source =
         earliest_flowsheet_day), with cta_time left empty.
       blocks: "OMOP PERSON rows for these three patients, and OMOP_BIRTH_POLICY_ENFORCED"
+    temperature_unit:
+      # P-CU2 / D-R1. The unit column of every temperature row reads "degree Celsius";
+      # the values of `Temp` (67,660 rows, median 98.0, 67,604 in 90-110) and `Core
+      # (Body) Temperature` (90 rows, median 98.2, all in 90-110) are Fahrenheit, and
+      # only `Temp (in Celsius)` (median 36.7) is what the column says. Executed as
+      # Fahrenheit by unit_override on the flowsheets source pending the answer.
+      question: >-
+        Are the `Temp` and `Core (Body) Temperature` flowsheet values Fahrenheit, as
+        their distribution says, although the unit column reads degree Celsius?
+      answer: null
+      blocks: "nothing; the override stands and every affected event is flagged UNIT_OVERRIDDEN"
   # CPT4 matters here and nowhere else in this repository: 815,466 of this export's
   # 816,628 procedure rows carry one, and Athena ships CPT4 without its names because
   # the AMA licenses them separately, so the bundle is unusable for this dataset until

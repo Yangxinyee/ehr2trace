@@ -8,7 +8,9 @@ value that matches none is quarantined -- a forced numeric cast would turn "<0.5
 Form                         Destination
 ===========================  ==========================================
 plain number                 ``value_number``
-number + unit in one cell    ``value_number`` + ``unit_source``
+number + unit in one cell    ``value_number`` + ``unit_source`` (the unit must be in
+                             the unit table when one is given; otherwise the cell is
+                             free text + ``NON_NUMERIC_RESULT``)
 range (``35-40``)            ``value_low`` / ``value_high``
 comparator (``<0.5``)        ``value_text`` verbatim + ``COMPARATOR_VALUE``
 sentinel text                ``value_text`` + ``NON_NUMERIC_RESULT``
@@ -23,7 +25,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Literal, Sequence
+from typing import Iterable, Literal, Sequence
 
 from ehr2trace.errors import QuarantineRow
 from ehr2trace.schema import QualityFlag, QuarantineReason
@@ -67,6 +69,18 @@ class ValueParsingSpec:
     sentinels: tuple[str, ...] = DEFAULT_SENTINELS
     signature_patterns: tuple[str, ...] = DEFAULT_SIGNATURE_PATTERNS
     null_literals: tuple[str, ...] = ("NULL",)
+    #: lower-cased unit spellings a ``number + unit`` cell may end in (the reference
+    #: unit table, see :mod:`ehr2trace.reference`). ``None`` accepts any tail, which is
+    #: the historical behaviour and turned twenty-six ECG diagnoses of the form
+    #: ``2 SINUS TACHYCARDIA`` into a measurement of 2 in units of sinus tachycardia
+    #: (remediation plan P-C8). A build always passes the table; only a caller with no
+    #: table at hand -- a unit test of the forms themselves -- gets the permissive rule.
+    known_units: frozenset[str] | None = None
+
+    def accepts_unit(self, tail: str) -> bool:
+        if self.known_units is None:
+            return True
+        return tail.strip().lower() in self.known_units
 
 
 @dataclass
@@ -113,14 +127,20 @@ def parse_value(
         return ParsedValue(number=_to_float(text), unit=unit, form="number")
 
     m = RE_NUMBER_UNIT.match(text)
+    numeric_looking = False
     if m and not RE_RANGE.match(text):
-        embedded = m.group("unit").strip()
-        return ParsedValue(
-            number=_to_float(m.group("num")),
-            unit=unit or embedded,
-            flags=[] if (unit is None or unit == embedded) else [str(QualityFlag.UNIT_UNPARSED)],
-            form="number_unit",
-        )
+        if spec.accepts_unit(m.group("unit")):
+            embedded = m.group("unit").strip()
+            return ParsedValue(
+                number=_to_float(m.group("num")),
+                unit=unit or embedded,
+                flags=[] if (unit is None or unit == embedded) else [str(QualityFlag.UNIT_UNPARSED)],
+                form="number_unit",
+            )
+        # A number followed by words that are not a unit is text, and text that looks
+        # like a measurement is worth marking: `2 SINUS TACHYCARDIA` is an ECG
+        # diagnosis line, and the reason it reached here is that somebody numbered it.
+        numeric_looking = True
 
     m = RE_RANGE.match(text)
     if m:
@@ -156,7 +176,12 @@ def parse_value(
     if expect == "numeric":
         raise QuarantineRow(QuarantineReason.UNPARSEABLE_VALUE, text[:200])
 
-    return ParsedValue(text=text, unit=unit, form="text")
+    return ParsedValue(
+        text=text,
+        unit=unit,
+        flags=[str(QualityFlag.NON_NUMERIC_RESULT)] if numeric_looking else [],
+        form="text",
+    )
 
 
 def _clean(value: object, spec: ValueParsingSpec) -> str | None:
@@ -168,8 +193,13 @@ def _clean(value: object, spec: ValueParsingSpec) -> str | None:
     return text
 
 
-def spec_from_config(sentinels: Sequence[str] | None, null_literals: Sequence[str]) -> ValueParsingSpec:
+def spec_from_config(
+    sentinels: Sequence[str] | None,
+    null_literals: Sequence[str],
+    known_units: Iterable[str] | None = None,
+) -> ValueParsingSpec:
     return ValueParsingSpec(
         sentinels=tuple(s.lower() for s in (sentinels or DEFAULT_SENTINELS)),
         null_literals=tuple(null_literals),
+        known_units=None if known_units is None else frozenset(u.strip().lower() for u in known_units),
     )
