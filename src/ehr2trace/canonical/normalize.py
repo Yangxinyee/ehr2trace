@@ -13,7 +13,8 @@ Shape                         Meaning
 ``component_measurements``    one row is one component of a study; the study is its own
                               event and the components hang off it
 ``person_attributes``         one row carries a person's static attributes
-``visit``                     one row is an encounter, optionally carrying a death date
+``visit``                     one row is an encounter (or, as ``visit_detail``, a stay inside
+                              one), optionally carrying a death date
 ============================  =========================================================
 
 Rules that hold across every shape:
@@ -27,13 +28,15 @@ Rules that hold across every shape:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Callable, Iterable, Iterator, Sequence
 
+from ehr2trace.canonical.dedup import Instance, is_truthy_cell, rule_field
 from ehr2trace.canonical.values import ParsedValue, ValueParsingSpec, parse_value
 from ehr2trace.config import DatasetConfig, SourceSpec
 from ehr2trace.errors import QuarantineRow
-from ehr2trace.hashing import sha256_hex, stable_id
+from ehr2trace.hashing import canonical_cell, sha256_hex, stable_id
+from ehr2trace.reference import ReferenceTables
 from ehr2trace.registry import register_shape
 from ehr2trace.schema import (
     CanonicalEvent,
@@ -46,6 +49,18 @@ from ehr2trace.schema import (
 from ehr2trace.timeutil import TimeContext, parse_naive, to_utc
 
 COL_PREFIX = "col__"
+
+#: Field roles that hold a time; an identity extra naming one is folded in as the
+#: parsed instant rather than as the source's spelling of it.
+TIME_ROLES: frozenset[str] = frozenset(
+    {"event_time", "available_time", "end_time", "anchor_time", "death_time", "birth_date"}
+)
+
+#: Kinds whose identity includes the dose, unit, route, status and end time (T1.1).
+#: Two orders of one drug in one minute with different doses are two orders.
+DRUG_KINDS: frozenset[str] = frozenset(
+    {str(EventKind.drug_order), str(EventKind.drug_admin), str(EventKind.drug_dispense)}
+)
 
 
 # --------------------------------------------------------------------------------
@@ -146,12 +161,19 @@ def filter_rows(spec: SourceSpec, rows: Sequence["Row"], columns: Iterable[str])
     demographics row carrying nothing but a patient key produces none either. What the
     design forbids is that being invisible, and it is not: SOURCE_ROWS_ACCOUNTED reports
     every parsed row's destination, so rows removed here show up as a number that moved.
+
+    ``excluded_status`` is the same mechanism keyed on the ``status`` role instead of a
+    column: a problem list's deleted entries are not diagnoses (D-R6), and dropping them
+    here keeps them out of every downstream table at once.
     """
+    out = list(rows)
+    excluded = {v.strip().lower() for v in spec.excluded_status}
+    if excluded:
+        out = [row for row in out if (row.text("status") or "").strip().lower() not in excluded]
     filters = spec.row_filters
     if not filters:
-        return list(rows)
+        return out
     available = {c[len(COL_PREFIX):].strip().lower(): c for c in columns if c.startswith(COL_PREFIX)}
-    out = list(rows)
     for rf in filters:
         column = available.get(rf.column.strip().lower())
         if column is None:
@@ -274,6 +296,8 @@ class ShapeContext:
     time: TimeContext
     values: ValueParsingSpec
     mapping_version: str
+    #: unit spellings, exact conversions and plausible ranges (see ehr2trace.reference)
+    reference: ReferenceTables = field(default_factory=ReferenceTables.empty)
 
     @property
     def null_literals(self) -> tuple[str, ...]:
@@ -283,6 +307,9 @@ class ShapeContext:
 @dataclass
 class Emission:
     events: list[CanonicalEvent] = field(default_factory=list)
+    #: one per event, in step with ``events``: the row behind it and the values the
+    #: merge rules read. Attached by :meth:`emit`; read by ``merge_events``.
+    instances: list[Instance] = field(default_factory=list)
     links: list[dict[str, Any]] = field(default_factory=list)
     issues: list[dict[str, Any]] = field(default_factory=list)
     quarantine: list[dict[str, Any]] = field(default_factory=list)
@@ -292,10 +319,16 @@ class Emission:
 
     def extend(self, other: "Emission") -> None:
         self.events.extend(other.events)
+        self.instances.extend(other.instances)
         self.links.extend(other.links)
         self.issues.extend(other.issues)
         self.quarantine.extend(other.quarantine)
         self.action_keys.extend(other.action_keys)
+
+    def emit(self, event: CanonicalEvent, row: Row, extra: dict[str, Any] | None = None) -> None:
+        """Record an event together with the row it came from."""
+        self.events.append(event)
+        self.instances.append(Instance(row.source_row_id, row.partition_id, extra or None))
 
     def link(self, event_id: str, row: Row, relation: SourceRelation = SourceRelation.derived_from) -> None:
         self.links.append(
@@ -357,12 +390,18 @@ def event_identity(
     encounter_id: str | None,
     discriminator: object = None,
     value: ParsedValue | None = None,
+    extra: Sequence[object] = (),
 ) -> str:
     """The canonical key of an event.
 
     Deliberately excludes the partition, the batch, the membership label and the
     anchor: the same clinical fact extracted twice must land on one event id, and a
     directory name must never be able to split it into two.
+
+    ``extra`` is what a shape adds for its kind -- a drug's normalized dose, unit,
+    route, status and end time; a visit's declared ``identity_extra_fields``. The
+    encounter leaves the key when the source says its encounter ids are noise
+    (``encounter_in_identity: false``), so the copies of one note collapse.
     """
     v = value or ParsedValue()
     return stable_id(
@@ -373,15 +412,204 @@ def event_identity(
         code_system,
         source_code,
         event_time,
-        encounter_id,
+        encounter_id if ctx.spec.encounter_in_identity else None,
         v.number,
         v.text,
         v.low,
         v.high,
         v.unit,
         discriminator,
+        *extra,
         prefix="event/",
     )
+
+
+def identity_extras(ctx: ShapeContext, row: Row) -> tuple[object, ...]:
+    """The values of ``identity_extra_fields``, in declared order.
+
+    A time role contributes the parsed instant, a number the number, anything else its
+    stripped text -- so ``3`` and ``3.0`` name one length of stay and a bare date and
+    its midnight timestamp name one end time, exactly as they would anywhere else in
+    the identity.
+    """
+    out: list[object] = []
+    for role in ctx.spec.identity_extra_fields:
+        if role in TIME_ROLES:
+            try:
+                naive = parse_naive(row.raw(role), ctx.time)
+            except QuarantineRow:
+                out.append(row.text(role, ctx.null_literals))
+                continue
+            out.append(to_utc(naive, ctx.time)[0])
+            continue
+        text = row.text(role, ctx.null_literals)
+        if text is None:
+            out.append(None)
+            continue
+        parsed = parse_value(text, None, ctx.values)
+        out.append(parsed.number if parsed.number is not None else text)
+    return tuple(out)
+
+
+def dose_identity(ctx: ShapeContext, dose: str | None) -> str | None:
+    """A dose as it enters a drug event's identity: ``"<number> <unit>"``.
+
+    ``10 mg``, ``10 MG`` and ``10.0 mg`` are one dose; the text is kept as written on
+    the event and only the identity reads through the spelling. A dose that does not
+    parse as a number (``1 tablet``, ``1-2 tabs``) is compared as lower-cased text.
+    """
+    if dose is None:
+        return None
+    parsed = parse_value(dose, None, ctx.values)
+    if parsed.number is not None:
+        unit = (parsed.unit or "").strip().lower()
+        return f"{canonical_cell(parsed.number)} {unit}".strip()
+    return dose.strip().lower()
+
+
+@dataclass
+class UnitOutcome:
+    """What unit normalization decided for one value (T1.6, T1.7; D-R1, D-R10, D-R17)."""
+
+    source_code: str | None
+    unit_source: str | None
+    unit_normalized: str | None
+    value_number_normalized: float | None
+    flags: list[str]
+
+
+def normalize_units(ctx: ShapeContext, code: str | None, value: ParsedValue) -> UnitOutcome:
+    """Resolve the unit a value is in, normalize it, and judge the value against its range.
+
+    Resolution order: the unit the source gave (a unit column, or embedded in the
+    cell) -> ``declared_units`` when the source gave none -> ``unit_override``, which
+    replaces whatever was resolved because the source's own label is known to be wrong.
+    ``unit_source`` always keeps the source's string; the override and the declaration
+    only reach ``unit_normalized``. The value is converted only by an exact rule, and a
+    converted value outside its declared plausible range is withheld from the
+    normalized column and flagged; ``value_number`` is never touched.
+    """
+    spec = ctx.spec
+    flags: list[str] = []
+    unit_source = value.unit
+    resolving = unit_source
+    if resolving is None and code is not None and code in spec.declared_units:
+        resolving = spec.declared_units[code]
+        flags.append(str(QualityFlag.UNIT_DECLARED))
+    if code is not None and code in spec.unit_override:
+        # Flagged as overridden only when it replaced something; a row of that code
+        # with no unit at all has had one declared for it, which is a different claim.
+        flags.append(str(QualityFlag.UNIT_OVERRIDDEN if resolving is not None else QualityFlag.UNIT_DECLARED))
+        resolving = spec.unit_override[code]
+
+    unit_normalized: str | None
+    value_normalized: float | None
+    if resolving is None:
+        unit_normalized, value_normalized = None, value.number
+    else:
+        ucum = ctx.reference.units.lookup(resolving)
+        if ucum is None:
+            flags.append(str(QualityFlag.UNIT_UNKNOWN))
+            unit_normalized, value_normalized = None, None
+        else:
+            unit_normalized, value_normalized = ctx.reference.normalize(ucum, value.number)
+
+    if code is not None and unit_source is not None and code in spec.split_code_by_unit:
+        # D-R10: the source mixes units under one code that cannot be converted into
+        # each other, so the unit becomes part of the code and of the identity.
+        code = f"{code}|{unit_source}"
+        flags.append(str(QualityFlag.CODE_SPLIT_BY_UNIT))
+
+    if value_normalized is not None and code is not None:
+        base = code.split("|", 1)[0]
+        for lookup in (code, base) if base != code else (code,):
+            if ctx.reference.implausible(spec.code_system, lookup, unit_normalized, value_normalized):
+                flags.append(str(QualityFlag.IMPLAUSIBLE))
+                value_normalized = None
+                break
+
+    return UnitOutcome(code, unit_source, unit_normalized, value_normalized, flags)
+
+
+def parse_rate(ctx: ShapeContext, row: Row) -> tuple[str | None, float | None, str | None, list[str]]:
+    """``rate_source`` verbatim, ``rate`` as a number, ``rate_unit`` from its role or the cell."""
+    source = row.text("rate", ctx.null_literals)
+    unit = row.text("rate_unit", ctx.null_literals)
+    if source is None:
+        return None, None, unit, []
+    parsed = parse_value(source, None, ctx.values)
+    if parsed.number is None:
+        return source, None, unit, [str(QualityFlag.RATE_UNPARSED)]
+    return source, parsed.number, unit or parsed.unit, []
+
+
+def flag_resolver(ctx: ShapeContext, rows: Sequence[Row]) -> Callable[[Row], list[str]]:
+    """``flag_when``: a truthy marker cell adds the declared flag to the row's events.
+
+    A column the source does not have raises, as a ``row_filter`` naming one does: a
+    typo would otherwise silently un-flag every row.
+    """
+    if not ctx.spec.flag_when:
+        return lambda row: []
+    available = _available_columns(rows)
+    plan: list[tuple[str, str]] = []
+    for flag, column in sorted(ctx.spec.flag_when.items()):
+        found = available.get(column.strip().lower())
+        if found is None:
+            raise ValueError(
+                f"flag_when names column {column!r} for {flag}, which this source does not "
+                f"have; available: {sorted(available)[:20]}"
+            )
+        plan.append((flag, found))
+
+    def resolve(row: Row) -> list[str]:
+        return [flag for flag, column in plan if is_truthy_cell(row.data.get(column))]
+
+    return resolve
+
+
+def merge_extra_resolver(ctx: ShapeContext, rows: Sequence[Row]) -> Callable[[Row], dict[str, Any] | None]:
+    """The per-row values a source's ``merge_rules`` read that the event itself lacks.
+
+    A rule keyed by a canonical field, or by the role that feeds one, compares the
+    event; only a rule keyed by a kept column or another role, and the ``linked_by``
+    marker of a ``prefer_linked`` rule, needs the row's value carried beside the event.
+    """
+    spec = ctx.spec
+    names = {name for name in spec.merge_rules if rule_field(name) is None}
+    names |= {rule.linked_by for rule in spec.merge_rules.values() if rule.rule == "prefer_linked"}
+    if not names:
+        return lambda row: None
+    available = _available_columns(rows)
+    plan: list[tuple[str, str | None]] = []
+    for name in sorted(names):
+        if name in spec.fields:
+            plan.append((name, None))
+            continue
+        column = available.get(name.strip().lower())
+        if column is not None:
+            plan.append((name, column))
+
+    def resolve(row: Row) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for name, column in plan:
+            if column is None:
+                out[name] = row.text(name, ctx.null_literals)
+            else:
+                raw = row.data.get(column)
+                text = None if raw is None else str(raw).strip()
+                out[name] = text if text and text not in ctx.null_literals else None
+        return out
+
+    return resolve
+
+
+def _available_columns(rows: Sequence[Row]) -> dict[str, str]:
+    return {
+        c[len(COL_PREFIX):].strip().lower(): c
+        for c in (rows[0].data if rows else {})
+        if c.startswith(COL_PREFIX)
+    }
 
 
 def resolve_times(ctx: ShapeContext, row: Row) -> tuple[datetime | None, datetime | None, datetime | None, list[str]]:
@@ -457,6 +685,8 @@ def shape_point_event(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
     """One row, one event: conditions, orders, administrations, single measurements."""
     out = Emission()
     kind_of = kind_resolver(ctx, rows, ctx.spec.event_kind or str(EventKind.measurement))
+    flags_of = flag_resolver(ctx, rows)
+    extra_of = merge_extra_resolver(ctx, rows)
     administered = {v.strip().lower() for v in ctx.spec.administered_when}
     for row in rows:
         kind = kind_of(row)
@@ -468,6 +698,7 @@ def shape_point_event(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
         except QuarantineRow as q:
             out.quarantine_row(row, q.issue, q.detail, ctx.source_id)
             continue
+        flags = flags + flags_of(row)
 
         # A source may carry its content as free text rather than as a result value, and
         # a whole note per row is the case that matters. `text` is a declared role and
@@ -507,6 +738,24 @@ def shape_point_event(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
             if status_text is None or status_text.strip().lower() not in administered:
                 flags = flags + [str(QualityFlag.NOT_ADMINISTERED)]
 
+        units = normalize_units(ctx, code, value)
+        code = units.source_code
+        route_text = row.text("route", ctx.null_literals)
+        dose_text = row.text("dose", ctx.null_literals)
+        rate_source, rate, rate_unit, rate_flags = parse_rate(ctx, row)
+
+        extra: tuple[object, ...] = identity_extras(ctx, row)
+        identity_value = value
+        if kind in DRUG_KINDS:
+            # T1.1: the same drug ordered twice in one minute at two doses is two
+            # orders, and an order continued to a different end date is a different
+            # order. The dose and its unit are read through their spelling (`10 mg`,
+            # `10 MG`), so the unit leaves the value's part of the key and enters here
+            # lower-cased. A condition's status stays out: a problem first Active and
+            # later Resolved is one problem (D-R6 settles the status by merge rule).
+            identity_value = ParsedValue(value.number, value.text, value.low, value.high, None)
+            extra = (dose_identity(ctx, dose_text), (units.unit_source or "").strip().lower(),
+                     route_text, status_text, end_time) + extra
         discriminator = row.text("sequence_number", ctx.null_literals)
         event_id = event_identity(
             ctx,
@@ -517,9 +766,10 @@ def shape_point_event(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
             event_time=event_time,
             encounter_id=row.encounter_source_id,
             discriminator=discriminator,
-            value=value,
+            value=identity_value,
+            extra=extra,
         )
-        out.events.append(
+        out.emit(
             make_event(
                 ctx,
                 row,
@@ -536,12 +786,21 @@ def shape_point_event(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
                 value_text=value.text,
                 value_low=value.low,
                 value_high=value.high,
-                unit_source=value.unit,
+                unit_source=units.unit_source,
                 status_source=status_text,
-                route_source=row.text("route", ctx.null_literals),
-                dose_source=row.text("dose", ctx.null_literals),
-                quality_flags=_dedup_flags(flags + value.flags),
-            )
+                route_source=route_text,
+                dose_source=dose_text,
+                value_number_normalized=units.value_number_normalized,
+                unit_normalized=units.unit_normalized,
+                rate_source=rate_source,
+                rate=rate,
+                rate_unit=rate_unit,
+                action=row.text("action", ctx.null_literals),
+                discharged_to=row.text("discharged_to", ctx.null_literals),
+                quality_flags=_dedup_flags(flags + value.flags + units.flags + rate_flags),
+            ),
+            row,
+            extra_of(row),
         )
         out.link(event_id, row)
         record_action_keys(out, ctx, row, event_id)
@@ -559,8 +818,11 @@ def shape_narrative_lines(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
     """
     out = Emission()
     kind = ctx.spec.event_kind or str(EventKind.note)
-    for (key, flags), group in _group(ctx, rows, out):
+    flags_of = flag_resolver(ctx, rows)
+    extra_of = merge_extra_resolver(ctx, rows)
+    for (key, group_flags), group in _group(ctx, rows, out):
         subject_id, encounter_id, title, event_time, available_time = key
+        flags = tuple(group_flags) + tuple(f for row in group for f in flags_of(row))
         lines: dict[tuple[int, str], str] = {}
         line_rows: dict[tuple[int, str], list[Row]] = {}
         for row in group:
@@ -591,7 +853,7 @@ def shape_narrative_lines(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
             encounter_id=encounter_id,
             discriminator=sha256_hex(body),
         )
-        out.events.append(
+        out.emit(
             make_event(
                 ctx,
                 first,
@@ -605,7 +867,9 @@ def shape_narrative_lines(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
                 source_name=title,
                 value_text=body,
                 quality_flags=_dedup_flags(flags),
-            )
+            ),
+            first,
+            extra_of(first),
         )
         seen_rows: set[str] = set()
         for slot, rws in line_rows.items():
@@ -639,6 +903,8 @@ def shape_component_measurements(ctx: ShapeContext, rows: Sequence[Row]) -> Emis
     """One row is one component of a study; the study itself becomes its own event."""
     out = Emission()
     kind = ctx.spec.event_kind or str(EventKind.measurement)
+    flags_of = flag_resolver(ctx, rows)
+    extra_of = merge_extra_resolver(ctx, rows)
     for (key, flags), group in _group(ctx, rows, out):
         subject_id, encounter_id, title, event_time, available_time = key
         study_emission = (
@@ -674,6 +940,8 @@ def shape_component_measurements(ctx: ShapeContext, rows: Sequence[Row]) -> Emis
                 out.quarantine_row(row, q.issue, q.detail, ctx.source_id)
                 continue
             line_no = _as_int(row.text("text_line", ctx.null_literals))
+            units = normalize_units(ctx, code, value)
+            code = units.source_code
             event_id = event_identity(
                 ctx,
                 subject_id=subject_id,
@@ -687,7 +955,7 @@ def shape_component_measurements(ctx: ShapeContext, rows: Sequence[Row]) -> Emis
             )
             if event_id not in emitted:
                 emitted[event_id] = []
-                out.events.append(
+                out.emit(
                     make_event(
                         ctx,
                         row,
@@ -703,10 +971,14 @@ def shape_component_measurements(ctx: ShapeContext, rows: Sequence[Row]) -> Emis
                         value_text=value.text,
                         value_low=value.low,
                         value_high=value.high,
-                        unit_source=value.unit,
-                        quality_flags=_dedup_flags(list(flags) + value.flags),
+                        unit_source=units.unit_source,
+                        value_number_normalized=units.value_number_normalized,
+                        unit_normalized=units.unit_normalized,
+                        quality_flags=_dedup_flags(list(flags) + flags_of(row) + value.flags + units.flags),
                         parent_event_id=parent_id,
-                    )
+                    ),
+                    row,
+                    extra_of(row),
                 )
                 out.link(event_id, row)
             else:
@@ -739,7 +1011,7 @@ def shape_person_attributes(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
                 encounter_id=None,
                 value=ParsedValue(text=text),
             )
-            out.events.append(
+            out.emit(
                 make_event(
                     ctx,
                     row,
@@ -750,7 +1022,8 @@ def shape_person_attributes(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
                     source_code=role.upper(),
                     source_name=role,
                     value_text=text,
-                )
+                ),
+                row,
             )
             out.link(event_id, row)
 
@@ -772,7 +1045,7 @@ def shape_person_attributes(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
                     encounter_id=None,
                     value=age_value,
                 )
-                out.events.append(
+                out.emit(
                     make_event(
                         ctx,
                         row,
@@ -784,7 +1057,8 @@ def shape_person_attributes(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
                         source_name="age",
                         value_number=age_value.number,
                         value_text=age_value.text,
-                    )
+                    ),
+                    row,
                 )
                 out.link(event_id, row)
 
@@ -798,8 +1072,22 @@ def shape_person_attributes(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
 
 @register_shape("visit")
 def shape_visit(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
-    """An encounter. An end time derived from a length of stay is flagged as derived."""
+    """An encounter, or with ``event_kind: visit_detail`` a stay inside one.
+
+    An end time derived from a length of stay is flagged as derived. The end time is
+    not part of the identity unless ``identity_extra_fields`` names it: two rows for
+    one admission that disagree on when it ended are one visit with a merge rule to
+    settle the end, while two ICU stays that began the same day are told apart by
+    their declared length of stay (D-R4).
+    """
     out = Emission()
+    kind = ctx.spec.event_kind or str(EventKind.visit)
+    if kind not in (str(EventKind.visit), str(EventKind.visit_detail)):
+        raise ValueError(
+            f"the visit shape publishes 'visit' or 'visit_detail' events, not {kind!r}"
+        )
+    flags_of = flag_resolver(ctx, rows)
+    extra_of = merge_extra_resolver(ctx, rows)
     for row in rows:
         try:
             event_time, available_time, end_time, flags = resolve_times(ctx, row)
@@ -810,6 +1098,7 @@ def shape_visit(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
             out.quarantine_row(row, str(QuarantineReason.MISSING_EVENT_TIME), "visit", ctx.source_id)
             out.extend(_emit_death(ctx, row))
             continue
+        flags = flags + flags_of(row)
 
         los = row.text("length_of_stay", ctx.null_literals)
         if end_time is None and los is not None:
@@ -818,8 +1107,6 @@ def shape_visit(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
             except QuarantineRow:
                 days = None
             if days is not None and days.number is not None:
-                from datetime import timedelta
-
                 end_time = event_time + timedelta(days=days.number)
                 flags.append(str(QualityFlag.DERIVED_END_TIME))
 
@@ -827,19 +1114,20 @@ def shape_visit(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
         event_id = event_identity(
             ctx,
             subject_id=row.subject_id,
-            event_kind=str(EventKind.visit),
+            event_kind=kind,
             code_system=ctx.spec.code_system,
             source_code=visit_type,
             event_time=event_time,
             encounter_id=row.encounter_source_id,
+            extra=identity_extras(ctx, row),
         )
-        out.events.append(
+        out.emit(
             make_event(
                 ctx,
                 row,
                 event_id=event_id,
                 encounter_id=row.encounter_source_id,
-                event_kind=str(EventKind.visit),
+                event_kind=kind,
                 event_time=event_time,
                 available_time=available_time,
                 end_time=end_time,
@@ -847,13 +1135,16 @@ def shape_visit(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
                 source_code=visit_type,
                 source_name=visit_type,
                 value_text=row.text("duration_masked", ctx.null_literals),
+                discharged_to=row.text("discharged_to", ctx.null_literals),
                 quality_flags=_dedup_flags(flags),
                 provenance_status=(
                     ProvenanceStatus.derived
                     if str(QualityFlag.DERIVED_END_TIME) in flags
                     else ProvenanceStatus.observed
                 ),
-            )
+            ),
+            row,
+            extra_of(row),
         )
         out.link(event_id, row)
         out.extend(_emit_death(ctx, row))
@@ -900,7 +1191,7 @@ def _emit_birth_date(ctx: ShapeContext, row: Row) -> Emission:
         encounter_id=None,
         value=None,
     )
-    out.events.append(
+    out.emit(
         make_event(
             ctx,
             row,
@@ -911,7 +1202,8 @@ def _emit_birth_date(ctx: ShapeContext, row: Row) -> Emission:
             source_code="BIRTH_DATE",
             source_name="birth date",
             value_text=iso,
-        )
+        ),
+        row,
     )
     out.link(event_id, row)
     return out
@@ -939,7 +1231,7 @@ def _emit_death(ctx: ShapeContext, row: Row) -> Emission:
     event_id = stable_id(
         ctx.cfg.dataset_id, row.subject_id, "death", death_time, prefix="event/death/"
     )
-    out.events.append(
+    out.emit(
         make_event(
             ctx,
             row,
@@ -951,7 +1243,8 @@ def _emit_death(ctx: ShapeContext, row: Row) -> Emission:
             source_code="DEATH",
             source_name="death",
             quality_flags=_dedup_flags(flags),
-        )
+        ),
+        row,
     )
     out.link(event_id, row)
     return out
@@ -1045,7 +1338,7 @@ def _emit_study_event(
         event_time=event_time,
         encounter_id=encounter_id,
     )
-    out.events.append(
+    out.emit(
         make_event(
             ctx,
             row,
@@ -1058,7 +1351,8 @@ def _emit_study_event(
             source_code=title,
             source_name=title,
             quality_flags=_dedup_flags(flags),
-        )
+        ),
+        row,
     )
     for i, r in enumerate(rows):
         out.link(event_id, r, SourceRelation.derived_from if i == 0 else SourceRelation.duplicate_of)

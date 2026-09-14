@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from fractions import Fraction
 from functools import lru_cache
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 
 from ehr2trace.canonical.values import DEFAULT_SENTINELS, ValueParsingSpec
 from ehr2trace.errors import ConfigError
@@ -268,6 +268,35 @@ def _load_ranges(path: Path) -> dict[RangeKey, PlausibleRange]:
             raise ConfigError(f"{path}:{row['_line']}: {key} is declared twice")
         out[key] = PlausibleRange(low, high)
     return out
+
+
+class UnitMap(dict):
+    """Unit spellings, looked up without caring how they were capitalized.
+
+    A plain mapping of lower-cased spelling to UCUM code, except that reading it
+    lower-cases the key first, so both ``units["MG"]`` and ``units["mg"]`` answer. The
+    OMOP publisher holds one of these to turn a dose's unit into a concept, and it has
+    no business knowing that the table is keyed in lower case.
+    """
+
+    def __getitem__(self, key: object) -> str:
+        return super().__getitem__(UnitTable.key(key))
+
+    def __contains__(self, key: object) -> bool:
+        return super().__contains__(UnitTable.key(key))
+
+    def get(self, key: object, default: object = None) -> Any:
+        return super().get(UnitTable.key(key), default)
+
+
+def load_units(root: Path | None = None) -> UnitMap:
+    """Every unit spelling any table lists -> its UCUM code.
+
+    The one function outside the canonical build that needs the unit table, kept
+    deliberately small and dependency-free: the publisher imports it inside a
+    ``try/except ImportError`` and falls back to publishing the source's spelling.
+    """
+    return UnitMap(load_reference(root, dataset_id="").units.by_spelling)
 
 
 def reference_digest(root: Path | None) -> str:
