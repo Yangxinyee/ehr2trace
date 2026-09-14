@@ -1000,6 +1000,14 @@ sources:
     code_system: NDC
     required: false
     row_filter: {column: ndc, drop: ["0", ""]}
+    # 28 merged events in a 1-in-100 sample, about 2,800 in the export, are a compounded
+    # order's MAIN and BASE rows for one fluid under one NDC and pharmacy_id: `Sodium
+    # Chloride 0.9%` as `Bag` and as `Floor Stock Bag`, `Lactated Ringers` likewise. One
+    # bag is one event; the name differs only in how it describes the container. One name
+    # is kept, every name stays in the lineage, and the event says so instead of carrying
+    # a merge conflict with no rule behind it (2026-09-14).
+    merge_rules:
+      source_name: {rule: keep_all_flag, flag: NAME_VARIANTS_MERGED}
     fields:
       person_id:    {from: [subject_id], required: true}
       encounter_id: {from: [hadm_id]}
@@ -1053,6 +1061,10 @@ sources:
     row_filter:
       - {column: ndc, keep: ["0", ""]}
       - {column: drug, drop: ["Bag", "Vial", "Soln"]}
+    # The same MAIN and BASE pairs of one fluid, where the order carries no NDC; the rule
+    # and its reason are the prescriptions source's (2026-09-14).
+    merge_rules:
+      source_name: {rule: keep_all_flag, flag: NAME_VARIANTS_MERGED}
     fields:
       person_id:    {from: [subject_id], required: true}
       encounter_id: {from: [hadm_id]}
@@ -1367,7 +1379,11 @@ execution:
   # this dataset's buckets are large enough that sixteen of them were OOM-killed. These
   # settings are outside the content address, so changing them costs nothing already
   # built.
-  bucket_count: 64
+  # 256, not 64 (2026-09-14): with the ICU modules a canonical bucket holds about four
+  # times what it did, and the sample build extrapolates to about 390 GB at 64 buckets and
+  # four workers on a 251 GB machine. Outside the content address, so nothing is rebuilt
+  # for it; it only divides the same work into smaller pieces.
+  bucket_count: 256
   workers: 4
   chunk_rows: 200000
 
