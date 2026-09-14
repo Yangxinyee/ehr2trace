@@ -162,6 +162,9 @@ def test_ctpe_config_declares_every_partition_and_source(ctpe_config: DatasetCon
         "outcome",
         "pft_narrative",
         "pft_values",
+        # delivered in the second tree and projected by tools/prepare_ctpe.py
+        "followup",
+        "icu_transfers",
     }
 
 
