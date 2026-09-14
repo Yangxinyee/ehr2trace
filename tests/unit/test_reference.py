@@ -60,12 +60,25 @@ def test_unit_lookup_is_case_insensitive_and_returns_the_ucum_code(tmp_path: Pat
     assert ref.units.known("mmol/l") and not ref.units.known("")
 
 
-def test_unit_files_are_merged_and_a_spelling_listed_twice_is_an_error(tmp_path: Path):
+def test_unit_files_are_merged_and_a_spelling_two_tables_agree_on_is_allowed(tmp_path: Path):
+    """A dataset's own table repeats the common spellings, and that is not a clash.
+
+    Each dataset's unit table is written from that export's own spellings, with a basis
+    citing that export's counts, by someone who cannot see the common table. Refusing
+    the repetition would make every such table a diff against a file its author never
+    reads, and the evidence in the repeated row is worth keeping.
+    """
     root = make_reference(tmp_path, extra_units="source_unit,ucum,basis\nmcg,ug,microgram\n")
     ref = load_reference(root, "any")
     assert ref.units.lookup("mcg") == "ug" and ref.units.lookup("mg") == "mg"
 
-    clash = make_reference(tmp_path / "clash", extra_units="source_unit,ucum,basis\nMg,mg,again\n")
+    agreeing = make_reference(tmp_path / "agree", extra_units="source_unit,ucum,basis\nMg,mg,again\n")
+    assert load_reference(agreeing, "any").units.lookup("mg") == "mg"
+
+
+def test_two_tables_that_disagree_about_a_spelling_are_an_error(tmp_path: Path):
+    """One spelling means one unit. Two answers is a question nothing downstream can settle."""
+    clash = make_reference(tmp_path / "clash", extra_units="source_unit,ucum,basis\nMg,ug,wrong\n")
     with pytest.raises(ConfigError, match="Mg.*common.csv"):
         load_reference(clash, "any")
 
@@ -188,3 +201,30 @@ def test_the_fixture_datasets_ship_a_range_table_keyed_on_units_the_table_produc
     reachable = set(ref.units.by_spelling.values()) | {c.to_ucum for c in ref.conversions.values()}
     for (_system, _code, ucum) in ref.ranges:
         assert ucum is None or ucum in reachable, ucum
+
+
+def test_a_spelling_with_no_code_is_declared_not_to_be_a_unit(tmp_path: Path):
+    """`*Unspecified` is what an order screen writes when nobody entered a unit.
+
+    It has to be listed -- "somebody looked at this and it is not a unit" is a different
+    fact from "nobody has seen this yet", and only the second deserves UNIT_UNKNOWN --
+    but it must not become a known tail, or `5 *Unspecified` would parse as a
+    measurement of five in units of unspecified.
+    """
+    root = make_reference(
+        tmp_path,
+        extra_units="source_unit,ucum,basis\n*Unspecified,,the order screen's blank; not a unit\n",
+    )
+    units = load_reference(root, "any").units
+    assert not units.known("*Unspecified")
+    assert units.lookup("*unspecified") is None
+    assert units.declared("  *UNSPECIFIED ")
+    assert not units.declared("furlongs")
+    assert "*unspecified" not in units.spellings, "a non-unit must not be a number's tail"
+
+
+def test_a_spelling_with_no_code_and_no_reason_is_refused(tmp_path: Path):
+    """An empty code with an empty basis is a row somebody left half-written."""
+    root = make_reference(tmp_path, extra_units="source_unit,ucum,basis\nwhatsit,,\n")
+    with pytest.raises(ConfigError, match="not a unit"):
+        load_reference(root, "any")

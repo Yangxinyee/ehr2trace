@@ -67,9 +67,27 @@ def reference_directory() -> Path:
 
 @dataclass(frozen=True)
 class UnitTable:
-    """Source spelling -> UCUM code, compared case-insensitively after stripping."""
+    """Source spelling -> UCUM code, compared case-insensitively after stripping.
+
+    A spelling may also be listed with no UCUM code, which declares that it is *not* a
+    unit: `*Unspecified` and `*Not Applicable` are what an order-entry screen writes
+    into a unit column when the prescriber left it blank. Such a spelling is deliberately
+    not :meth:`known` -- a number followed by it is text, not a measurement -- and it
+    normalizes to nothing. Listing it is how "somebody looked at this and it is not a
+    unit" differs from "nobody has seen this yet", which is the whole point of
+    UNIT_UNKNOWN.
+    """
 
     by_spelling: Mapping[str, str]
+    #: spellings declared not to be units, lower-cased
+    not_units: frozenset[str] = frozenset()
+
+    def declared(self, spelling: object) -> bool:
+        """Whether any table has seen this spelling, unit or not."""
+        if spelling is None:
+            return False
+        key = self.key(spelling)
+        return key in self.by_spelling or key in self.not_units
 
     @staticmethod
     def key(spelling: object) -> str:
@@ -197,23 +215,47 @@ def _rows(path: Path, columns: tuple[str, ...]) -> list[dict[str, str]]:
 
 def _load_units(directory: Path) -> UnitTable:
     by_spelling: dict[str, str] = {}
+    not_units: set[str] = set()
     origin: dict[str, str] = {}
     if not directory.is_dir():
         return UnitTable({})
     for path in sorted(directory.glob("*.csv")):
         for row in _rows(path, UNIT_COLUMNS):
             spelling, ucum = row["source_unit"], row["ucum"]
-            if not spelling or not ucum:
-                raise ConfigError(f"{path}:{row['_line']}: source_unit and ucum are both required")
+            if not spelling:
+                raise ConfigError(f"{path}:{row['_line']}: source_unit is required")
+            if not ucum:
+                # A spelling with no code is a declaration that it is not a unit, and it
+                # has to say why -- otherwise an empty cell is indistinguishable from a
+                # row somebody forgot to finish.
+                if not row.get("basis"):
+                    raise ConfigError(
+                        f"{path}:{row['_line']}: {spelling!r} has no ucum code, which declares it "
+                        "is not a unit; say so in 'basis' or give it a code"
+                    )
+                not_units.add(UnitTable.key(spelling))
+                continue
             key = UnitTable.key(spelling)
-            if key in by_spelling:
+            # Two tables naming one spelling is only a problem when they disagree about
+            # it. A dataset's own table is written from that export's spellings and will
+            # repeat the common ones -- `mg`, `percent`, `mcg/kg/min` -- with a basis
+            # citing that export's counts, which is evidence worth keeping. Refusing the
+            # repetition would make every dataset's table a diff against a file its
+            # author cannot see. Refusing a *contradiction* is the point, and that is
+            # what stays: one spelling may mean exactly one unit.
+            previous = by_spelling.get(key)
+            if previous is not None and previous != ucum:
                 raise ConfigError(
-                    f"{path}:{row['_line']}: unit spelling {spelling!r} is already listed in "
-                    f"{origin[key]} (compared case-insensitively); one table, one owner per spelling"
+                    f"{path}:{row['_line']}: unit spelling {spelling!r} is {ucum!r} here and "
+                    f"{previous!r} in {origin[key]} (compared case-insensitively); one "
+                    "spelling means one unit, so one of the two is wrong"
                 )
-            by_spelling[key] = ucum
-            origin[key] = f"{path.name}"
-    return UnitTable(by_spelling)
+            if previous is None:
+                by_spelling[key] = ucum
+                origin[key] = f"{path.name}"
+    # A spelling listed as a unit somewhere outranks a table that calls it none: the
+    # code is the more specific statement, and the disagreement is visible in the files.
+    return UnitTable(by_spelling, frozenset(not_units - set(by_spelling)))
 
 
 def _fraction(cell: str, path: Path, line: str, column: str) -> Fraction:
