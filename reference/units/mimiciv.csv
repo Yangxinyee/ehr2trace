@@ -334,8 +334,8 @@ ng,ng,nanogram
 NG/,,a fragment of the nasogastric route written where a unit belongs
 ng/dL,ng/dL,nanogram per decilitre
 ng/mL,ng/mL,nanogram per millilitre
-ng/mL DDU,ng/mL,nanogram per millilitre; the DDU basis is carried by the split code (D-R10)
-ng/mL FEU,ng/mL,nanogram per millilitre; the FEU basis is carried by the split code (D-R10)
+ng/mL DDU,ng/mL{DDU},"nanogram per millilitre against D-dimer units; see ng/mL FEU; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+ng/mL FEU,ng/mL{FEU},"nanogram per millilitre against fibrinogen-equivalent units. The annotation keeps FEU and DDU apart in the normalized unit as well as in the split code (D-R10): normalizing both spellings to a bare ng/mL would make the two readings identical again, which is the pooling that decision exists to prevent; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
 nmol/L,nmol/L,nanomole per litre
 Notify,,a workflow instruction written where a unit belongs
 OINT,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
