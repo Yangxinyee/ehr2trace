@@ -204,17 +204,39 @@ def _skip(reason: str) -> CheckResult:
 
 @check("INPUT_MANIFEST_COMPLETE")
 def _manifest_complete(l: Layers) -> CheckResult:
+    """Every input the conversion read is recorded with a content hash, preparation steps included.
+
+    A preparation step reads the delivery before ingest does, so an input it read without
+    a hash is an input nobody can later prove was the one converted (P-CU11: a preparation
+    manifest recorded every raw input's sha256 as null). Reads the ingest manifest and every
+    ``prepare_manifest.json`` beside a source root or a partition directory. Skips without
+    an ingest manifest.
+    """
     if l.manifest is None:
         return _skip("no ingest manifest")
     inputs = l.manifest["inputs"]
     missing_hash = [i["file_path"] for i in inputs if not i.get("file_sha256")]
+    manifests = preparation_manifests(l.cfg)
+    prepared = [(path, name, sha) for path, payload in manifests for name, sha in preparation_inputs(payload)]
+    prepared_missing = [name for _path, name, sha in prepared if not sha]
+    problems = []
+    if missing_hash:
+        problems.append(f"{len(missing_hash)} units missing a content hash")
+    if prepared_missing:
+        problems.append(
+            f"{len(prepared_missing)} of {len(prepared)} inputs a preparation step read are recorded without a "
+            f"content hash, e.g. {[reportable_path(Path(n).name) for n in prepared_missing[:3]]}"
+        )
     return CheckResult(
         "",
-        not missing_hash,
+        not problems,
         f"{len(inputs)} logical units recorded, all hashed"
-        if not missing_hash
-        else f"{len(missing_hash)} units missing a content hash",
-        {"units": len(inputs), "files": len({i["file_path"] for i in inputs})},
+        + (f"; {len(prepared)} preparation inputs across {len(manifests)} manifest(s), all hashed" if manifests else "")
+        if not problems
+        else "; ".join(problems),
+        {"units": len(inputs), "files": len({i["file_path"] for i in inputs}),
+         "preparation_manifests": len(manifests), "preparation_inputs": len(prepared),
+         "preparation_inputs_without_hash": len(prepared_missing)},
     )
 
 
@@ -2241,35 +2263,102 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
             for name in pq.read_schema(path).names:
                 if name not in columns:
                     columns.append(name)
-        ruled = set()
-        for key in spec.merge_rules:
-            ruled.add(FIELD_TO_ROLE.get(key, key))
-            ruled.add(key)
+        role_columns = _role_columns(spec, columns)
+        lowered = {c[len("col__"):].strip().lower(): c for c in columns if c.startswith("col__")}
+        null_literals = cfg.time.null_literals
+
+        def cell(cols: Sequence[str]) -> str:
+            return "coalesce(" + ", ".join(_normalized_cell_sql(c, null_literals) for c in cols) + ")"
+
+        # A field under a declared rule is compared too -- not to fail on the disagreement,
+        # which the rule settles, but to confirm the build settled it. A rule declared after
+        # a build was made changes nothing in that build, and the flag a rule writes when it
+        # fires (or, for a priority, the value it keeps) is how its application shows.
+        ruled: dict[str, tuple[str, Any]] = {}
+        ruled_names: set[str] = set()
+        unverifiable: list[str] = []
+        for key, rule in spec.merge_rules.items():
+            role = FIELD_TO_ROLE.get(key, key)
+            ruled_names |= {key.strip().lower(), role.strip().lower()}
+            if role in role_columns:
+                ruled[key] = (cell(role_columns[role]), rule)
+            elif key.strip().lower() in lowered:
+                ruled[key] = (cell([lowered[key.strip().lower()]]), rule)
+            else:
+                unverifiable.append(key)
         # A dataset's identity extras and its encounter id are compared, not assumed to
         # agree: a build made with today's identity agrees on them by construction, so
         # comparing costs nothing there, and a build made before a field joined the
         # identity is exactly the build whose rows collapsed on it.
-        excluded = IDENTITY_ROLES | REPEATING_ROLES | ruled
+        excluded = IDENTITY_ROLES | REPEATING_ROLES
         expressions: dict[str, str] = {}
-        for role, cols in _role_columns(spec, columns).items():
-            if role in excluded or role not in FIELD_ROLES:
+        for role, cols in role_columns.items():
+            if role in excluded or role not in FIELD_ROLES or role.lower() in ruled_names:
                 continue
-            expressions[role] = "coalesce(" + ", ".join(
-                _normalized_cell_sql(c, cfg.time.null_literals) for c in cols) + ")"
-        lowered = {c[len("col__"):].strip().lower(): c for c in columns if c.startswith("col__")}
+            expressions[role] = cell(cols)
         for kept in spec.keep_columns:
             column = lowered.get(kept.strip().lower())
-            if column is None or kept in ruled or kept.strip().lower() in {k.lower() for k in ruled}:
+            if column is None or kept.strip().lower() in ruled_names:
                 continue
-            expressions[f"column:{kept}"] = _normalized_cell_sql(column, cfg.time.null_literals)
+            expressions[f"column:{kept}"] = _normalized_cell_sql(column, null_literals)
         entry["compared"] = sorted(k for k in expressions if k != "available_time")
-        if not expressions:
+        entry["ruled"] = sorted(ruled)
+        if not expressions and not ruled:
             entry["skipped"] = "no mapped field outside the identity to compare"
+            if unverifiable:
+                entry["rules_unverifiable"] = sorted(unverifiable)
             continue
-        names = list(expressions)
-        select = ", ".join(f"{expr} AS {_sql_ident(f'f{i}')}" for i, expr in enumerate(expressions.values()))
+        names = list(expressions) + [f"rule:{key}" for key in ruled]
+        sqls = list(expressions.values()) + [sql for sql, _rule in ruled.values()]
+        select = ", ".join(f"{expr} AS {_sql_ident(f'f{i}')}" for i, expr in enumerate(sqls))
         distinct = ", ".join(f"count(DISTINCT {_sql_ident(f'f{i}')}) AS {_sql_ident(f'd{i}')}" for i in range(len(names)))
         flagged = ", ".join(f"count(*) FILTER (WHERE {_sql_ident(f'd{i}')} > 1) AS {_sql_ident(f'n{i}')}" for i in range(len(names)))
+
+        # How each rule's application is verified, as SQL over the grouped rows (g) and the
+        # event the group became (e).
+        try:
+            event_columns = {d[0] for d in con.execute("SELECT * FROM evt LIMIT 0").description}
+        except Exception:
+            event_columns = set()
+        # A rule is asked about only on events of the kind its source declares. The rows of
+        # one table can feed events of several kinds -- a visit table's rows also carry a
+        # death -- and a length of stay they disagree on is the visit's business, which the
+        # merge of the death, rightly, never touches.
+        own_kind = (f" AND e.event_kind = {_sql_str(spec.event_kind)}"
+                    if spec.event_kind and "event_kind" in event_columns else "")
+        minimums: list[str] = []
+        verifications: list[tuple[str, str]] = []
+        for offset, (key, (_sql, rule)) in enumerate(ruled.items()):
+            i = len(expressions) + offset
+            d = _sql_ident(f"d{i}")
+            conflict = f"coalesce(list_contains(e.quality_flags, '{QualityFlag.MERGE_CONFLICT}'), false)"
+            if not event_columns:
+                unverifiable.append(key)
+                continue
+            if rule.rule == "priority":
+                if key not in event_columns or not rule.order:
+                    unverifiable.append(key)
+                    continue
+                ranks = " ".join(
+                    f"WHEN {_sql_str(' '.join(value.split()).lower())} THEN {rank}" for rank, value in enumerate(rule.order)
+                )
+                minimums.append(f"min(CASE {_sql_ident(f'f{i}')} {ranks} END) AS {_sql_ident(f'm{i}')}")
+                kept_rank = (f"CASE lower(regexp_replace(trim(CAST(e.{_sql_ident(key)} AS VARCHAR)), '\\s+', ' ', 'g')) "
+                             f"{ranks} END")
+                m = _sql_ident(f"m{i}")
+                verifications.append((key, f"{d} > 1{own_kind} AND {m} IS NOT NULL AND ({kept_rank} IS NULL OR {kept_rank} > {m}) "
+                                           f"AND NOT {conflict}"))
+                continue
+            accepted = [rule.flag_name] + ([str(QualityFlag.ENCOUNTER_FROM_LINKED_ROW)] if rule.rule == "prefer_linked" else [])
+            carried = " OR ".join(f"coalesce(list_contains(e.quality_flags, {_sql_str(f)}), false)" for f in accepted)
+            verifications.append((key, f"{d} > 1{own_kind} AND NOT ({carried}) AND NOT {conflict}"))
+        if unverifiable:
+            entry["rules_unverifiable"] = sorted(set(unverifiable))
+        checks = "".join(f", count(*) FILTER (WHERE {sql}) AS {_sql_ident(f'u{j}')}" for j, (_k, sql) in enumerate(verifications))
+        join = ("LEFT JOIN (SELECT event_id, quality_flags" + (", event_kind" if own_kind else "")
+                + "".join(f", {_sql_ident(k)}" for k, (_sql, r) in ruled.items() if r.rule == "priority" and k in event_columns)
+                + f" FROM evt WHERE source_id = {_sql_str(source_id)}) e USING (event_id)") if verifications else ""
+
         file_list = "[" + ", ".join(_sql_str(f) for f in files) + "]"
         con.execute(
             f"CREATE OR REPLACE TEMP TABLE src AS SELECT source_row_id, {select} "
@@ -2282,20 +2371,25 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
             row = con.execute(
                 f"""
                 WITH g AS (
-                    SELECT k.event_id{extra}, count(*) AS n_rows, {distinct}
+                    SELECT k.event_id{extra}, count(*) AS n_rows, {distinct}{''.join(', ' + x for x in minimums)}
                     FROM read_parquet('{links_path}') k JOIN src s USING (source_row_id)
                     GROUP BY k.event_id{extra}
                 )
-                SELECT count(*), count(*) FILTER (WHERE n_rows > 1), {flagged} FROM g
+                SELECT count(*), count(*) FILTER (WHERE n_rows > 1), {flagged}{checks} FROM g {join}
                 """
             ).fetchone()
             counts = {names[i]: int(row[2 + i] or 0) for i in range(len(names))}
-            availability = counts.pop("available_time", 0)
+            ruled_counts = {k[len("rule:"):]: v for k, v in counts.items() if k.startswith("rule:")}
+            plain = {k: v for k, v in counts.items() if not k.startswith("rule:")}
+            availability = plain.pop("available_time", 0)
+            not_applied = {key: int(row[2 + len(names) + j] or 0) for j, (key, _sql) in enumerate(verifications)}
             block = {
                 "events": int(row[0] or 0),
                 "merged_events": int(row[1] or 0),
-                "disagreements": {k: v for k, v in sorted(counts.items()) if v},
+                "disagreements": {k: v for k, v in sorted(plain.items()) if v},
                 "availability_disagreements": availability,
+                "ruled_disagreements": {k: v for k, v in sorted(ruled_counts.items()) if v},
+                "rules_not_applied": {k: v for k, v in sorted(not_applied.items()) if v},
             }
             if label == "all":
                 entry.update(block)
@@ -2303,6 +2397,170 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
                 entry[label] = block
         con.execute("DROP TABLE IF EXISTS src")
     return report
+
+
+def resolvable_roots(cfg: DatasetConfig) -> tuple[list[Path], dict[str, str]]:
+    """Every root a source lives under that resolves, and why each of the others did not.
+
+    Every root that resolves is walked; a root whose variable is unset or wrong skips only
+    the files under it, and says so. One prepared root missing from an environment once
+    meant no file of the whole delivery was examined.
+    """
+    from ehr2trace.errors import ConfigError
+
+    roots: list[Path] = []
+    not_examined: dict[str, str] = {}
+    try:
+        roots.append(cfg.data_root())
+    except ConfigError as exc:
+        not_examined[cfg.root_env] = str(exc)
+    for spec in cfg.sources.values():
+        if spec.root_env is None or spec.root_env in not_examined:
+            continue
+        try:
+            root = cfg.source_root(spec)
+        except ConfigError as exc:
+            not_examined[spec.root_env] = str(exc)
+            continue
+        if root not in roots:
+            roots.append(root)
+    return roots, not_examined
+
+
+def out_of_scope_matcher(cfg: DatasetConfig) -> Callable[..., bool]:
+    """Whether an ``out_of_scope`` entry names a delivered file, or a sheet of one.
+
+    The rule for one pattern of ``matches`` (shell-style: ``*`` matches any run of
+    characters, ``/`` included, and ``?`` any one character):
+
+    * a pattern containing ``/`` matches any trailing sub-path of the file's path. It may
+      be written from whatever directory its author thought of as the delivery's top,
+      without knowing where the delivery is mounted: ``.idea/*`` matches
+      ``.../project/.idea/workspace.xml``, and ``volumes_nii/*`` matches every file below
+      any directory of that name, at any depth;
+    * a pattern without ``/`` matches the file's base name only: ``*.py`` names every
+      script wherever it sits, and ``volumes*`` does not reach into a directory called
+      ``volumes_nii``.
+
+    A sheet of a workbook is ``<file>::<sheet>`` (``#`` is accepted as the separator too),
+    matched by the same two rules with the sheet appended to the path or the base name.
+    """
+    import fnmatch
+    import re
+
+    compiled = [("/" in pattern, re.compile(fnmatch.translate(pattern)))
+                for entry in cfg.out_of_scope.values() for pattern in entry.matches]
+
+    def declared(path: str, sheet: str | None = None) -> bool:
+        parts = [part for part in re.split(r"[\\/]+", str(path)) if part]
+        if not compiled or not parts:
+            return False
+        suffixes = ["/".join(parts[i:]) for i in range(len(parts))]
+        base = [parts[-1]]
+        if sheet is not None:
+            suffixes = [f"{name}{sep}{sheet}" for name in suffixes for sep in ("::", "#")]
+            base = [f"{parts[-1]}{sep}{sheet}" for sep in ("::", "#")]
+        return any(regex.match(name) for nested, regex in compiled for name in (suffixes if nested else base))
+
+    return declared
+
+
+def _is_delivered_file(path: Path, ignored_names) -> bool:
+    """A file of the delivery rather than an editor's lock file, an OS artefact, or a
+    preparation step's own record of what it did."""
+    return not (path.name in ignored_names or path.name.startswith("~$") or path.name == PREPARE_MANIFEST_NAME)
+
+
+def preparation_manifests(cfg: DatasetConfig, roots: Sequence[Path] | None = None) -> list[tuple[Path, dict[str, Any]]]:
+    """Every ``prepare_manifest.json`` beside a source root or one of its partition directories."""
+    import json
+
+    if roots is None:
+        roots, _not_examined = resolvable_roots(cfg)
+    seen: set[str] = set()
+    found: list[tuple[Path, dict[str, Any]]] = []
+    for root in roots:
+        for candidate in [root / PREPARE_MANIFEST_NAME] + [root / part.dir / PREPARE_MANIFEST_NAME for part in cfg.partitions]:
+            if str(candidate) in seen or not candidate.is_file():
+                continue
+            seen.add(str(candidate))
+            try:
+                payload = json.loads(candidate.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(payload, dict):
+                found.append((candidate, payload))
+    return found
+
+
+def _manifest_bases(payload: dict[str, Any], manifest_path: Path) -> list[Path]:
+    """The directories a preparation manifest's relative paths are relative to.
+
+    Every top-level ``*_root`` entry that names a directory -- the trees the step says it
+    read from -- and then the manifest's own directory.
+    """
+    bases = [Path(value) for key, value in payload.items()
+             if isinstance(key, str) and key.endswith("_root") and isinstance(value, str) and Path(value).is_dir()]
+    bases.append(manifest_path.parent)
+    return bases
+
+
+def _located(name: str, bases: Sequence[Path]) -> str:
+    """A relative unread path joined to the first base it exists under, sheet suffix kept.
+
+    A step that writes ``Cardiac Cath/report.xlsx`` means that file under the tree it read,
+    and an ``out_of_scope`` pattern written from the top of that tree (``All/Cardiac
+    Cath/**``) has to see the tree's name to match. Only existence is asked; nothing is
+    opened. An absolute path, or one found under no base, is returned as given.
+    """
+    file_part, separator, sheet = name.partition("::")
+    if Path(file_part).is_absolute():
+        return name
+    for base in bases:
+        if (base / file_part).exists():
+            return str(base / file_part) + (separator + sheet if separator else "")
+    return name
+
+
+def preparation_inputs(payload: dict[str, Any]) -> list[tuple[str, str | None]]:
+    """The inputs one preparation manifest records, as ``(path or name, sha256 or None)``.
+
+    Preparation steps were written one dataset at a time and record their inputs three
+    ways -- a list of ``{path, sha256}``, a mapping of path to a record holding ``sha256``,
+    and a mapping of file name to the hash itself -- and all three are read here.
+    """
+    raw = payload.get("inputs")
+    found: list[tuple[str, str | None]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, dict):
+                found.append((str(item.get("path") or item.get("name") or ""), item.get("sha256") or None))
+            elif item:
+                found.append((str(item), None))
+    elif isinstance(raw, dict):
+        for name, value in raw.items():
+            if isinstance(value, dict):
+                found.append((str(name), value.get("sha256") or None))
+            else:
+                found.append((str(name), str(value) if value else None))
+    return [(name, sha) for name, sha in found if name]
+
+
+def reportable_path(path: str) -> str:
+    """A delivered file's path as a report may carry it.
+
+    Delivery file names are named by whoever cut the export, and a component holding a run
+    of six or more digits has the shape of a record number, so it is replaced by a hash.
+    Everything else -- table names, directory names, sheet names -- is kept.
+    """
+    import hashlib
+    import re
+
+    pieces = re.split(r"([\\/])", str(path))
+    return "".join(
+        f"name#{hashlib.sha256(piece.encode('utf-8')).hexdigest()[:12]}" if re.search(r"\d{6,}", piece) else piece
+        for piece in pieces
+    )
 
 
 def raw_coverage(cfg: DatasetConfig, manifest: dict[str, Any] | None) -> dict[str, Any]:
@@ -2315,9 +2573,6 @@ def raw_coverage(cfg: DatasetConfig, manifest: dict[str, Any] | None) -> dict[st
     ``out_of_scope`` entry matches its name. An ``unread_inputs`` list in a preparation
     manifest is held to the same declaration.
     """
-    import fnmatch
-    import json
-
     from ehr2trace.adapters import list_sheets
     from ehr2trace.discover import IGNORED_NAMES, resolve_source_units
     from ehr2trace.errors import ConfigError
@@ -2357,35 +2612,14 @@ def raw_coverage(cfg: DatasetConfig, manifest: dict[str, Any] | None) -> dict[st
         }
 
     # (b) files and sheets under every partition directory of every source root
-    patterns = [m for entry in cfg.out_of_scope.values() for m in entry.matches]
-
-    def declared(*names: str) -> bool:
-        return any(fnmatch.fnmatch(n, p) for n in names for p in patterns)
-
+    declared = out_of_scope_matcher(cfg)
+    roots, not_examined = resolvable_roots(cfg)
+    if not_examined:
+        out["files"]["not_examined"] = not_examined
     unclaimed: list[str] = []
     examined: list[str] = []
     claimed_count = 0
-    # Every root that resolves is walked; a root whose variable is unset or wrong skips
-    # only the files under it, and says so. One prepared root missing from an
-    # environment once meant no file of the whole delivery was examined.
-    roots: list[Path] = []
-    not_examined: dict[str, str] = {}
-    try:
-        roots.append(cfg.data_root())
-    except ConfigError as exc:
-        not_examined[cfg.root_env] = str(exc)
-    for spec in cfg.sources.values():
-        if spec.root_env is None or spec.root_env in not_examined:
-            continue
-        try:
-            root = cfg.source_root(spec)
-        except ConfigError as exc:
-            not_examined[spec.root_env] = str(exc)
-            continue
-        if root not in roots:
-            roots.append(root)
-    if not_examined:
-        out["files"]["not_examined"] = not_examined
+    read_files: set[Path] = set()
     for root in roots:
         for part in cfg.partitions:
             pdir = root / part.dir
@@ -2400,16 +2634,17 @@ def raw_coverage(cfg: DatasetConfig, manifest: dict[str, Any] | None) -> dict[st
                     continue
                 for unit in units:
                     claimed.setdefault(Path(unit.path).resolve(), set()).add(unit.sheet)
+            read_files |= set(claimed)
             for path in sorted(p for p in pdir.rglob("*") if p.is_file()):
-                if path.name in IGNORED_NAMES or path.name.startswith("~$") or path.name == PREPARE_MANIFEST_NAME:
+                if not _is_delivered_file(path, IGNORED_NAMES):
                     continue
                 relative = str(path.relative_to(root))
                 sheets = claimed.get(path.resolve())
                 if sheets is None:
-                    if declared(relative, path.name):
+                    if declared(str(path)):
                         claimed_count += 1
                     else:
-                        unclaimed.append(relative)
+                        unclaimed.append(reportable_path(relative))
                     continue
                 claimed_count += 1
                 if None in sheets:
@@ -2419,34 +2654,91 @@ def raw_coverage(cfg: DatasetConfig, manifest: dict[str, Any] | None) -> dict[st
                 except Exception:
                     every_sheet = []
                 for sheet in every_sheet:
-                    if sheet in sheets:
+                    if sheet in sheets or declared(str(path), sheet):
                         continue
-                    if declared(sheet, f"{relative}#{sheet}", f"{path.name}#{sheet}"):
-                        continue
-                    unclaimed.append(f"{relative}#{sheet}")
+                    unclaimed.append(f"{reportable_path(relative)}::{reportable_path(sheet)}")
     out["files"].update({"partitions_examined": examined, "claimed_or_declared": claimed_count, "unclaimed": unclaimed})
 
-    # (c) inputs a preparation step recorded as unread
+    # (c) what the preparation steps read, and what they left
+    #
+    # A preparation step that says what it left unread (``unread_inputs``) is held to its
+    # list. One that predates such a list is held to its inputs instead: the directories it
+    # read from, and the directories beside them, are the delivery it was handed, and every
+    # file there that it did not read, that no source reads and no ``out_of_scope`` entry
+    # names, is a table nobody converted (P-M4, P-M18). File names are listed; nothing is
+    # opened, and a name holding a run of digits is hashed, since that is how a record
+    # number would reach a file name.
+    manifests = preparation_manifests(cfg, roots)
+    if not manifests:
+        out["prepare_manifest"] = {
+            "manifests": 0, "found": [],
+            "skipped": "no prepare_manifest.json at any source root or partition directory; nothing records "
+                       "what a preparation step read or left",
+        }
+        return out
+    found: list[dict[str, Any]] = []
+    listed_total = 0
     undeclared_unread: list[str] = []
-    seen_manifests: list[str] = []
-    candidates: list[Path] = []
-    for root in roots:
-        candidates.append(root / PREPARE_MANIFEST_NAME)
-        for part in cfg.partitions:
-            candidates.append(root / part.dir / PREPARE_MANIFEST_NAME)
-    for candidate in candidates:
-        if not candidate.exists() or str(candidate) in seen_manifests:
-            continue
-        seen_manifests.append(str(candidate))
-        try:
-            payload = json.loads(candidate.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        for item in payload.get("unread_inputs", []) or []:
+    beside_inputs: list[str] = []
+    declared_beside = 0
+    directories_examined = 0
+    without_location = 0
+    for manifest_path, payload in manifests:
+        listed = payload.get("unread_inputs")
+        found.append({"manifest": str(manifest_path), "inputs": len(preparation_inputs(payload)),
+                      "unread_inputs_listed": len(listed) if isinstance(listed, list) else None})
+        listed_total += len(listed) if isinstance(listed, list) else 0
+        bases = _manifest_bases(payload, manifest_path)
+        for item in listed or []:
             name = str(item.get("path", "")) if isinstance(item, dict) else str(item)
-            if name and not declared(name, Path(name).name):
-                undeclared_unread.append(name)
-    out["prepare_manifest"] = {"manifests": len(seen_manifests), "undeclared_unread_inputs": undeclared_unread}
+            if name and not declared(_located(name, bases)):
+                undeclared_unread.append(reportable_path(name))
+        if listed is not None:
+            continue
+        inputs = preparation_inputs(payload)
+        located: set[Path] = set()
+        for name, _sha in inputs:
+            candidate = Path(name)
+            if not candidate.is_absolute():
+                without_location += 1
+            elif candidate.exists():
+                located.add(candidate.resolve())
+        directories = {path.parent for path in located}
+        beside = set()
+        for parent in {d.parent for d in directories}:
+            try:
+                beside |= {d.resolve() for d in parent.iterdir() if d.is_dir()}
+            except OSError:
+                continue
+        walks = [(d, False) for d in sorted(directories)] + [(d, True) for d in sorted(beside - directories)]
+        for directory, recursive in walks:
+            directories_examined += 1
+            try:
+                files = sorted(p for p in (directory.rglob("*") if recursive else directory.iterdir()) if p.is_file())
+            except OSError:
+                continue
+            for path in files:
+                if not _is_delivered_file(path, IGNORED_NAMES):
+                    continue
+                resolved = path.resolve()
+                if resolved in located or resolved in read_files:
+                    continue
+                if declared(str(path)):
+                    declared_beside += 1
+                    continue
+                beside_inputs.append(reportable_path(str(path.relative_to(directory.parent))))
+    out["prepare_manifest"] = {
+        "manifests": len(manifests),
+        "found": found,
+        "unread_inputs_listed": listed_total,
+        "undeclared_unread_inputs": sorted(undeclared_unread)[:200],
+        "undeclared_unread_inputs_count": len(undeclared_unread),
+        "directories_examined": directories_examined,
+        "unread_beside_inputs": sorted(beside_inputs)[:200],
+        "unread_beside_inputs_count": len(beside_inputs),
+        "declared_beside_inputs": declared_beside,
+        "inputs_without_location": without_location,
+    }
     return out
 
 
@@ -2492,6 +2784,58 @@ def encounter_reference(cfg: DatasetConfig) -> str:
         if (spec.shape == "visit" or spec.event_kind in VISIT_KINDS) and "encounter_id" in spec.fields:
             return "visits"
     return "sources"
+
+
+def encounter_aliases(cfg: DatasetConfig) -> dict[str, set[str]]:
+    """Per source that maps an encounter id, the column names it reads one from, lower-cased."""
+    return {
+        sid: {alias.strip().lower() for alias in spec.fields["encounter_id"].from_}
+        for sid, spec in cfg.sources.items() if "encounter_id" in spec.fields
+    }
+
+
+def unread_encounter_columns(cfg: DatasetConfig, manifest: dict[str, Any] | None) -> dict[str, list[str]]:
+    """Per source, delivered columns this dataset reads encounter ids from elsewhere, which it does not read.
+
+    A column is an encounter column when any source maps an ``encounter_id`` from it or it
+    is the identity's encounter key. A source that delivers one, maps no encounter id, and
+    does not list the column in ``ignored_columns`` publishes events that cannot be put in
+    any encounter although its delivery says which encounter each belongs to (P-M14,
+    P-M15). Columns come from the ingest manifest; nothing is read from the data.
+    """
+    encounter_columns = set().union(*encounter_aliases(cfg).values()) if cfg.sources else set()
+    if cfg.identity.encounter_key:
+        encounter_columns.add(cfg.identity.encounter_key.strip().lower())
+    delivered: dict[str, set[str]] = {}
+    for unit in (manifest or {}).get("inputs", []):
+        delivered.setdefault(unit["source_id"], set()).update(unit.get("columns", []))
+    found: dict[str, list[str]] = {}
+    for sid, columns in sorted(delivered.items()):
+        spec = cfg.sources.get(sid)
+        if spec is None or "encounter_id" in spec.fields:
+            continue
+        ignored = {c.strip().lower() for c in spec.ignored_columns}
+        hits = sorted(c for c in columns if c.strip().lower() in encounter_columns and c.strip().lower() not in ignored)
+        if hits:
+            found[sid] = hits
+    return found
+
+
+def mismatched_encounter_keys(cfg: DatasetConfig) -> dict[str, list[str]]:
+    """Sources whose encounter id comes only from columns no visit source reads one from.
+
+    Reported, not failed: two tables may name one key differently. But where a visit is
+    keyed on one identifier and a table's events on another, the ids cannot meet, and the
+    measured rate is where that shows once the events exist.
+    """
+    aliases = encounter_aliases(cfg)
+    visit_sources = {sid for sid, spec in cfg.sources.items()
+                     if (spec.shape == "visit" or spec.event_kind in VISIT_KINDS) and sid in aliases}
+    visit_columns = set().union(*(aliases[sid] for sid in visit_sources)) if visit_sources else set()
+    if not visit_columns:
+        return {}
+    return {sid: sorted(cols) for sid, cols in sorted(aliases.items())
+            if sid not in visit_sources and not (cols & visit_columns)}
 
 
 def encounter_link_rates(con, against: str = "visits") -> dict[str, dict[str, Any]]:
@@ -2614,8 +2958,15 @@ def _duplicates_agree(l: Layers) -> CheckResult:
     Reads each source's parquet (the files the ingest manifest names), the lineage
     table, the configuration's roles, merge rules and kept columns, and the quality
     issues. Fails on any disagreement outside a declared rule, or on any MERGE_CONFLICT
-    issue the build itself recorded. Skips without a manifest, lineage or events. Slow:
-    every source is joined to the whole lineage table.
+    issue the build itself recorded. A field under a declared rule is compared as well, and
+    fails when its rows disagree on an event the rule evidently never touched: the event
+    carries neither the flag the rule writes nor a MERGE_CONFLICT, or, for a priority, it
+    kept a value the order ranks below one its rows hold. That is how a rule declared after
+    a build was made shows on that build (P-CU7, P-J2, P-J3). Only events of the kind the
+    source declares are asked, since one table's rows can also feed an event of another
+    kind that the rule does not concern. A rule whose application leaves no trace to read
+    is reported as unverifiable. Skips without a manifest, lineage
+    or events. Slow: every source is joined to the whole lineage table.
     """
     if l.manifest is None or l.links_path is None or l.events_path is None:
         return _skip("canonical layer not built")
@@ -2625,24 +2976,33 @@ def _duplicates_agree(l: Layers) -> CheckResult:
         sid: entry["disagreements"]
         for sid, entry in report.items() if entry.get("disagreements")
     }
+    not_applied = {sid: entry["rules_not_applied"] for sid, entry in report.items() if entry.get("rules_not_applied")}
     conflicts = 0
     if l.issues is not None and "issue_type" in l.issues.columns:
         conflicts = int(l.issues.filter(pl.col("issue_type") == str(QualityFlag.MERGE_CONFLICT)).height)
     compared = sum(1 for e in report.values() if not e.get("skipped"))
     merged = sum(int(e.get("merged_events", 0)) for e in report.values())
     availability = sum(int(e.get("availability_disagreements", 0)) for e in report.values())
-    ok = not disagreeing and not conflicts
+    settled = sum(sum(e.get("ruled_disagreements", {}).values()) for e in report.values())
+    problems: list[str] = []
+    if disagreeing:
+        problems.append("rows merged into one event disagree on fields nobody declared a rule for: " + "; ".join(
+            f"{sid}: " + ", ".join(f"{k}={v:,}" for k, v in sorted(d.items())) for sid, d in sorted(disagreeing.items())[:5]))
+    if not_applied:
+        problems.append("declared merge rules the build did not apply: " + "; ".join(
+            f"{sid}: " + ", ".join(f"{k}={v:,}" for k, v in sorted(d.items())) for sid, d in sorted(not_applied.items())[:5]))
+    if conflicts:
+        problems.append(f"{conflicts:,} MERGE_CONFLICT issues recorded")
     return CheckResult(
         "",
-        ok,
+        not problems,
         f"{merged:,} events merged more than one source row across {compared} sources; every "
-        f"mapped field agrees or falls under a declared rule ({availability:,} availability "
-        f"disagreements resolved by the default rule)"
-        if ok
-        else "rows merged into one event disagree on fields nobody declared a rule for: "
-        + "; ".join(f"{sid}: " + ", ".join(f"{k}={v:,}" for k, v in sorted(d.items())) for sid, d in sorted(disagreeing.items())[:5])
-        + (f"; {conflicts:,} MERGE_CONFLICT issues recorded" if conflicts else ""),
-        {"per_source": report, "merge_conflict_issues": conflicts, "sources_disagreeing": sorted(disagreeing)},
+        f"mapped field agrees or falls under a declared rule the build applied ({settled:,} disagreements "
+        f"settled by rule, {availability:,} availability disagreements resolved by the default rule)"
+        if not problems
+        else "; ".join(problems),
+        {"per_source": report, "merge_conflict_issues": conflicts, "sources_disagreeing": sorted(disagreeing),
+         "sources_with_rules_not_applied": sorted(not_applied)},
     )
 
 
@@ -3421,7 +3781,7 @@ def _encounter_resolves(l: Layers) -> CheckResult:
 
     From the audit (P-CU12, P-M14, P-M15): a note table whose encounter ids matched
     other tables 2.6% of the time; emergency visits keyed on one identifier while their
-    vital signs used another and their medications none, so nothing linked.
+    vital signs used another and their medications and diagnoses none, so nothing linked.
 
     Where a visit-shaped source maps an encounter id, an event's encounter must name a
     visit or visit detail of the same subject, and each source's linked share must reach
@@ -3432,19 +3792,29 @@ def _encounter_resolves(l: Layers) -> CheckResult:
     also carries is reported, and judged only where the source declares the rate it
     expects, because the default was set for resolving against visits.
 
-    Reads the events' source, subject, kind and encounter id, and the configuration.
-    Skips when no event carries an encounter id, or when visits are the reference and
-    none was built.
+    A rate only measures the events that carry an encounter id, so two things it cannot see
+    are read from the configuration and the manifest instead. A source that delivers an
+    encounter column and maps no encounter id fails (``unread_encounter_columns``), unless
+    it lists the column in ``ignored_columns``. A source keyed on a column no visit is keyed
+    on is reported (``mismatched_encounter_keys``).
+
+    Reads the events' source, subject, kind and encounter id, the ingest manifest's columns
+    and the configuration. Skips when nothing carries or delivers an encounter id.
     """
     if l.events_path is None:
         return _skip("canonical layer not built")
     against = encounter_reference(l.cfg)
-    if against == "visits" and l.events is not None and l.events.filter(pl.col("event_kind").is_in(list(VISIT_KINDS))).height == 0:
-        return _skip("no visit events to resolve encounters against")
-    with _engine(l) as con:
-        rates = encounter_link_rates(con, against)
-    if not rates:
-        return _skip("no event carries an encounter id")
+    unread = unread_encounter_columns(l.cfg, l.manifest)
+    mismatched = mismatched_encounter_keys(l.cfg) if against == "visits" else {}
+    no_visits = (against == "visits" and l.events is not None
+                 and l.events.filter(pl.col("event_kind").is_in(list(VISIT_KINDS))).height == 0)
+    rates: dict[str, dict[str, Any]] = {}
+    if not no_visits:
+        with _engine(l) as con:
+            rates = encounter_link_rates(con, against)
+    if not rates and not unread:
+        return _skip_with("no visit events to resolve encounters against" if no_visits else "no event carries an encounter id",
+                          {"resolved_against": against, "mismatched_keys": mismatched})
     default = l.cfg.validation.encounter_link_rate_min
     failing: list[str] = []
     judged = 0
@@ -3460,16 +3830,20 @@ def _encounter_resolves(l: Layers) -> CheckResult:
         judged += 1
         if r["rate"] < minimum:
             failing.append(f"{sid} {r['rate']:.1%} < {minimum:.1%}")
+    failing += [f"{sid} delivers {cols} and maps no encounter id" for sid, cols in sorted(unread.items())]
     where = ("a visit of the same subject" if against == "visits"
              else "another source's events, since no visit carries an encounter id")
+    reported = ("; keyed on columns no visit is keyed on (reported): "
+                + ", ".join(f"{sid} {cols}" for sid, cols in sorted(mismatched.items()))) if mismatched else ""
     return CheckResult(
         "",
         not failing,
         f"{len(rates)} sources carry encounter ids, resolved against {where}; {judged} judged and none "
-        "falls short: " + ", ".join(f"{sid} {r['rate']:.1%}" for sid, r in sorted(rates.items()))
+        "falls short: " + ", ".join(f"{sid} {r['rate']:.1%}" for sid, r in sorted(rates.items())) + reported
         if not failing
-        else f"encounter ids that do not resolve to {where}: {failing[:6]}",
-        {"resolved_against": against, "per_source": rates, "judged": judged, "default_min_rate": default},
+        else f"encounters that cannot be resolved to {where}: {failing[:8]}" + reported,
+        {"resolved_against": against, "per_source": rates, "judged": judged, "default_min_rate": default,
+         "unread_encounter_columns": unread, "mismatched_keys": mismatched},
     )
 
 
@@ -3605,7 +3979,15 @@ def _raw_coverage_declared(l: Layers) -> CheckResult:
     filters, kept columns, untimed values, flags, merge rules, identity keys and
     ``ignored_columns``), every file and workbook sheet under the partition directories
     of every source root against the sources' resolved units and ``out_of_scope``, and
-    any preparation manifest's ``unread_inputs``. Fails on anything undeclared; reports
+    each preparation manifest: its ``unread_inputs`` where it keeps that list, otherwise
+    the files in and beside the directories its inputs came from. A manifest is looked for
+    at every source root and in every partition directory under it, and the ones found are
+    named in the report.
+
+    An ``out_of_scope`` pattern containing ``/`` matches any trailing sub-path of a file's
+    path, at any depth (``.idea/*`` matches ``.../x/.idea/workspace.xml``); a pattern without
+    ``/`` matches the base name only (``*.py``); a sheet is ``<file>::<sheet>``. See
+    ``out_of_scope_matcher``. Fails on anything undeclared; reports
     counts per source. Skips without a manifest; the file walk is skipped, with its
     reason, when a root is not reachable.
     """
@@ -3615,6 +3997,8 @@ def _raw_coverage_declared(l: Layers) -> CheckResult:
     undeclared_columns = {sid: c["undeclared"] for sid, c in report["columns"].items() if c["undeclared"]}
     unclaimed = report["files"].get("unclaimed", [])
     unread = report["prepare_manifest"].get("undeclared_unread_inputs", [])
+    beside = report["prepare_manifest"].get("unread_beside_inputs", [])
+    beside_count = report["prepare_manifest"].get("unread_beside_inputs_count", 0)
     problems: list[str] = []
     if undeclared_columns:
         problems.append(
@@ -3623,8 +4007,12 @@ def _raw_coverage_declared(l: Layers) -> CheckResult:
         )
     if unclaimed:
         problems.append(f"{len(unclaimed)} delivered files or sheets no source reads and no out_of_scope entry names: {unclaimed[:4]}")
-    if unread:
-        problems.append(f"{len(unread)} inputs a preparation step left unread without an out_of_scope entry: {unread[:4]}")
+    unread_count = report["prepare_manifest"].get("undeclared_unread_inputs_count", len(unread))
+    if unread_count:
+        problems.append(f"{unread_count} inputs a preparation step left unread without an out_of_scope entry: {unread[:4]}")
+    if beside_count:
+        problems.append(f"{beside_count} delivered files beside a preparation step's inputs that it did not read, no "
+                        f"source reads and no out_of_scope entry names: {beside[:6]}")
     columns_total = sum(c.get("columns", 0) for c in report["columns"].values())
     not_examined = report["files"].get("not_examined")
     return CheckResult(
@@ -3633,6 +4021,9 @@ def _raw_coverage_declared(l: Layers) -> CheckResult:
         f"{columns_total} delivered columns across {len(report['columns'])} sources are read, kept or declared; "
         f"{report['files'].get('claimed_or_declared', 0)} files claimed or declared"
         + (f" (files not examined: {not_examined})" if not_examined else "")
+        + (f"; {report['prepare_manifest']['manifests']} preparation manifest(s) read"
+           if report["prepare_manifest"].get("manifests")
+           else "; no preparation manifest found, so nothing a preparation step left unread was examined")
         if not problems
         else "; ".join(problems),
         report,

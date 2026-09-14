@@ -184,3 +184,36 @@ def test_an_unset_prepared_root_skips_only_the_files_under_it(clean_build, monke
     report = raw_coverage(moved, manifest)
     assert variable in report["files"]["not_examined"]
     assert report["files"]["partitions_examined"], "the dataset's own root is still walked"
+
+
+def test_a_declared_merge_rule_the_build_never_applied_fails(clean_build, tmp_path):
+    """A rule written after a build was made must not make that build look settled.
+
+    The clean build's outcome sheet merges two extracts of one admission under declared
+    rules, and the flag those rules write is on the event. Take the flag away -- the state
+    of a build made before the rules existed -- and the same rows must fail.
+    """
+    import polars as pl
+
+    from ehr2trace.faults import clone_work_tree
+    from ehr2trace.paths import WorkLayout
+    from ehr2trace.validate import run_checks
+
+    cfg, source_layout, baseline = clean_build
+    assert baseline["DUPLICATES_AGREE"]
+    clone_work_tree(source_layout.root, tmp_path / "unapplied")
+    layout = WorkLayout(root=tmp_path / "unapplied", dataset_id=cfg.dataset_id)
+    path = layout.canonical_path("events")
+    events = pl.read_parquet(path)
+    ruled_flags = {rule.flag_name for spec in cfg.sources.values() for rule in spec.merge_rules.values()}
+    stripped = events.with_columns(
+        pl.col("quality_flags").list.eval(pl.element().filter(~pl.element().is_in(sorted(ruled_flags))))
+    )
+    mutating = path.with_suffix(".parquet.mutating")
+    stripped.write_parquet(mutating)
+    mutating.replace(path)
+
+    (result,) = [r for r in run_checks(cfg, layout, include_slow=True) if r.check_id == "DUPLICATES_AGREE"]
+    assert not result.passed
+    assert "declared merge rules the build did not apply" in result.detail
+    assert result.metrics["sources_with_rules_not_applied"]

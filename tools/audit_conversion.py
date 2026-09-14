@@ -402,6 +402,13 @@ def _headlines(report: dict[str, Any]) -> list[str]:
     if disagreeing:
         lines.append("merged rows disagree: " + "; ".join(
             f"{sid} " + ", ".join(f"{k}={v:,}" for k, v in sorted(d.items())) for sid, d in sorted(disagreeing.items())))
+    not_applied = {
+        sid: entry["rules_not_applied"]
+        for sid, entry in (report.get("merge_disagreements") or {}).items() if entry.get("rules_not_applied")
+    }
+    if not_applied:
+        lines.append("declared merge rules the build did not apply: " + "; ".join(
+            f"{sid} " + ", ".join(f"{k}={v:,}" for k, v in sorted(d.items())) for sid, d in sorted(not_applied.items())))
     units = (report.get("units") or {}).get("omop_measurement") or {}
     if units.get("coverage") is not None:
         lines.append(f"unit concept coverage {units['coverage']:.1%} of {units['with_unit_source_value']:,} rows")
@@ -421,7 +428,13 @@ def _headlines(report: dict[str, Any]) -> list[str]:
     coverage = report.get("raw_coverage") or {}
     undeclared = sum(len(c.get("undeclared", [])) for c in (coverage.get("columns") or {}).values())
     unclaimed = len((coverage.get("files") or {}).get("unclaimed", []))
-    lines.append(f"{undeclared} delivered columns and {unclaimed} files nothing reads or declares")
+    prepared = coverage.get("prepare_manifest") or {}
+    left = prepared.get("unread_beside_inputs_count", 0) + prepared.get(
+        "undeclared_unread_inputs_count", len(prepared.get("undeclared_unread_inputs", [])))
+    lines.append(f"{undeclared} delivered columns and {unclaimed} files nothing reads or declares; "
+                 + (f"{left} files a preparation step left unread without a declaration "
+                    f"({prepared.get('manifests', 0)} manifest(s))" if prepared.get("manifests")
+                    else "no preparation manifest found"))
     return lines
 
 

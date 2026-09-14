@@ -70,3 +70,34 @@ def test_against_sources_an_encounter_must_be_known_to_another_source():
     assert rates["notes"] == {"with_encounter": 3, "linked": 2, "rate": 0.6667}
     assert rates["diagnoses"] == {"with_encounter": 2, "linked": 1, "rate": 0.5}
     assert "stays" not in rates
+
+
+def test_a_source_that_delivers_an_encounter_column_and_maps_none_is_named():
+    """The rate only measures events that carry an encounter; these carry none by omission."""
+    from ehr2trace.validate import unread_encounter_columns
+
+    cfg = load_dataset_config(CONFIG)
+    key = cfg.identity.encounter_key
+    manifest = {"inputs": [
+        {"source_id": "problem_list", "columns": ["person", "code", key]},   # maps no encounter id
+        {"source_id": "labs", "columns": ["person", key, "code"]},           # maps one
+    ]}
+    assert unread_encounter_columns(cfg, manifest) == {"problem_list": [key]}
+
+    # Ignoring the column on purpose, with a reason, is a decision rather than an omission.
+    spec = cfg.sources["problem_list"]
+    decided = cfg.model_copy(update={"sources": {**cfg.sources, "problem_list": spec.model_copy(
+        update={"ignored_columns": {key: "entries are made outside any encounter"}})}})
+    assert unread_encounter_columns(decided, manifest) == {}
+
+
+def test_a_source_keyed_on_a_column_no_visit_is_keyed_on_is_reported():
+    from ehr2trace.validate import mismatched_encounter_keys
+
+    cfg = load_dataset_config(CONFIG)
+    assert mismatched_encounter_keys(cfg) == {}
+    spec = cfg.sources["labs"]
+    fields = dict(spec.fields)
+    fields["encounter_id"] = spec.fields["encounter_id"].model_copy(update={"from_": ["STAY"]})
+    rekeyed = cfg.model_copy(update={"sources": {**cfg.sources, "labs": spec.model_copy(update={"fields": fields})}})
+    assert mismatched_encounter_keys(rekeyed) == {"labs": ["stay"]}
