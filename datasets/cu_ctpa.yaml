@@ -468,6 +468,21 @@ validation:
 # tools/prepare_cu.py lists the raw delivery's unread files one by one in
 # prepare_manifest.json (unread_inputs) with the same reasons.
 out_of_scope:
+  # The images themselves: NIfTI and DICOM for the 2016 and 2017 scans, 553 GB. The full
+  # prepare lists 14,972 NIfTI files and 48 DICOM-side files under CU_Images/Images as
+  # unread, which a 1-in-200 sample never showed because it lists only its own patients'
+  # images (measured 2026-09-14). They are catalogued, not ignored: imaging_series.parquet
+  # records each series with its de-identified path (D-R16), and no image becomes an event.
+  imaging_payload:
+    matches: ["CTPA_nii/*", "CTPA_Dicom/*"]
+    reason: >-
+      image files, catalogued per series with their de-identified path in
+      imaging_series.parquet (D-R16); pixels are not a table and nothing in them is an event
+  imaging_copy_scripts:
+    matches: ["Images/*.py"]
+    reason: >-
+      the imaging team's scripts that selected, copied and converted series; code that
+      produced the image tree, not records about a patient
   flowsheets_undated:
     matches: ["flowsheets_undated.parquet"]
     reason: >-
