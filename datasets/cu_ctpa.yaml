@@ -204,6 +204,14 @@ sources:
     merge_rules:
       procedure_name:     {rule: keep_all_flag, flag: BILLING_DUPLICATE}
       procedure_category: {rule: keep_all_flag, flag: BILLING_DUPLICATE}
+      # The two bills also disagree about when the service ended -- 20 groups in a
+      # 1-in-200 sample, about 4,000 across the export, which the merge reported as
+      # MERGE_CONFLICT on the first rebuild (2026-09-14). One service ended once, and a
+      # facility charge and a professional charge disagreeing about when is a
+      # contradiction neither settles, so the end time is dropped and both values are
+      # quarantined -- the rule D-R4 gives MIMIC-IV's transfers for the same reason.
+      # The start, which they agree on, is what the event keeps.
+      end_time:           {rule: null_and_flag}
     fields:
       person_id:    {from: [arb_person_id], required: true}
       encounter_id: {from: [arb_encounter_id]}
@@ -221,6 +229,14 @@ sources:
     code_system: ICD10PCS
     required: false
     row_filter: {column: code_type, keep: [ICD10PCS]}
+    # The same physical table read under the other code system, so the same billing
+    # duplication reaches it and the same rules answer it (D-R3, D-R4). The counts in
+    # the CPT source's note are that source's; 1,162 of this export's 816,628
+    # procedure rows carry a PCS code.
+    merge_rules:
+      procedure_name:     {rule: keep_all_flag, flag: BILLING_DUPLICATE}
+      procedure_category: {rule: keep_all_flag, flag: BILLING_DUPLICATE}
+      end_time:           {rule: null_and_flag}
     fields:
       person_id:    {from: [arb_person_id], required: true}
       encounter_id: {from: [arb_encounter_id]}

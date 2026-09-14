@@ -35,6 +35,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PYTHON = sys.executable
 
 STAGES: tuple[tuple[str, list[str]], ...] = (
+    # `inspect` computes a hash of every input; on a multi-terabyte export that is the
+    # slowest stage of the run and says nothing the manifest will not.
     ("inspect", ["inspect", "--no-hashes"]),
     ("ingest", ["ingest"]),
     ("identity", ["identity"]),
@@ -115,7 +117,9 @@ def main() -> int:
         if failed and not (args.continue_on_failure and name == "validate"):
             record["stages"].append({"stage": name, "skipped": "an earlier stage failed"})
             continue
-        stage_argv = ["--dataset", args.dataset, *argv]
+        # The subcommand first, then its options: typer parses `ehr2trace ingest
+        # --dataset x`, and the other order is a parse error every stage fails on.
+        stage_argv = [*argv, "--dataset", args.dataset]
         if args.workers and name in ("ingest", "canonical"):
             stage_argv += ["--workers", str(args.workers)]
         print(f"[{datetime.now().strftime('%H:%M:%S')}] {name} ...", flush=True)

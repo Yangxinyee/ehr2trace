@@ -509,7 +509,13 @@ def normalize_units(ctx: ShapeContext, code: str | None, value: ParsedValue) -> 
     else:
         ucum = ctx.reference.units.lookup(resolving)
         if ucum is None:
-            flags.append(str(QualityFlag.UNIT_UNKNOWN))
+            # A spelling the unit table lists with no code is one somebody has already
+            # read and decided is not a unit -- an order screen's `*Unspecified` where
+            # the prescriber left the box empty. Nothing normalizes either way, but only
+            # the spelling nobody has seen is worth a reviewer's attention, and that is
+            # what UNIT_UNKNOWN is for.
+            if not ctx.reference.units.declared(resolving):
+                flags.append(str(QualityFlag.UNIT_UNKNOWN))
             unit_normalized, value_normalized = None, None
         else:
             unit_normalized, value_normalized = ctx.reference.normalize(ucum, value.number)

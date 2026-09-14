@@ -228,3 +228,18 @@ def test_a_spelling_with_no_code_and_no_reason_is_refused(tmp_path: Path):
     root = make_reference(tmp_path, extra_units="source_unit,ucum,basis\nwhatsit,,\n")
     with pytest.raises(ConfigError, match="not a unit"):
         load_reference(root, "any")
+
+
+def test_a_declared_non_unit_is_not_reported_as_unknown(tmp_path: Path):
+    """The distinction the declaration exists to make, checked where it is acted on.
+
+    `*Unspecified` and a spelling nobody has ever seen both fail to normalize. Only the
+    second is a question for a reviewer, and a check that reported both would bury it.
+    """
+    root = make_reference(
+        tmp_path,
+        extra_units="source_unit,ucum,basis\n*Unspecified,,the order screen's blank; not a unit\n",
+    )
+    units = load_reference(root, "any").units
+    assert units.declared("*Unspecified") and not units.known("*Unspecified")
+    assert not units.declared("furlongs") and not units.known("furlongs")
