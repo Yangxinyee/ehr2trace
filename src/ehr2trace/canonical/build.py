@@ -414,11 +414,13 @@ def run_canonical_task(task: CanonicalTask) -> CanonicalResult:
     all_issues.extend(death_issues)
     # A death that collapsed onto a more precise one takes its source rows with it:
     # every row that recorded the death still points at the death that survived.
+    # Rewritten in place -- a bucket's link list is the largest thing here, and a copy
+    # of it to change a handful of rows is a copy this stage cannot afford.
     if merged_deaths:
-        all_links = [
-            {**link, "event_id": merged_deaths.get(link["event_id"], link["event_id"])}
-            for link in all_links
-        ]
+        for link in all_links:
+            survivor = merged_deaths.get(link["event_id"])
+            if survivor is not None:
+                link["event_id"] = survivor
 
     links, partitions = merge_links(all_links)
     events = apply_duplicate_flags(events, partitions)

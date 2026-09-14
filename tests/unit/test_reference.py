@@ -17,6 +17,7 @@ from ehr2trace.reference import (
     DEFAULT_REFERENCE_DIR,
     ReferenceTables,
     load_reference,
+    load_units,
     parsing_spec,
     reference_digest,
 )
@@ -142,6 +143,20 @@ def test_the_parsing_spec_helper_carries_the_unit_table_into_value_parsing(tmp_p
     spec = parsing_spec(("NULL",), root=make_reference(tmp_path))
     assert parse_value("10 mg", spec=spec).form == "number_unit"
     assert parse_value("10 SINUS TACHYCARDIA", spec=spec).form == "text"
+
+
+def test_the_publishers_view_of_the_table_is_a_mapping_that_ignores_capitalization(tmp_path: Path):
+    """``load_units`` is the whole interface the OMOP publisher has to this module.
+
+    It holds the result as a plain mapping and reads it with whatever spelling the
+    source wrote, which is the one thing it must not have to think about.
+    """
+    units = load_units(make_reference(tmp_path))
+    assert units["MG"] == units["mg"] == units[" Mg "] == "mg"
+    assert units.get("K/CU MM") == "10*3/mm3"
+    assert units.get("furlongs") is None and units.get("furlongs", "?") == "?"
+    assert "DEGF" in units and "furlongs" not in units
+    assert dict(units)["mmol/l"] == "mmol/L", "the keys themselves are lower-cased"
 
 
 # -- the shipped tables -------------------------------------------------------------
