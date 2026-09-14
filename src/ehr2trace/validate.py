@@ -2203,22 +2203,38 @@ def _role_columns(spec, columns: Sequence[str]) -> dict[str, list[str]]:
 
 
 def _normalized_cell_sql(column: str, null_literals: Sequence[str]) -> str:
-    """One source cell in the form two extracts of the same record agree in.
+    """One source cell in the canonical form the event identity hashes it in.
 
-    A workbook that types a date as text and one that types it as a date store
-    different strings for one value; a length of stay is `5` in one and `5.0` in
-    another. Rows that differ only in that are the same record, so a time renders as a
-    time, a number as a number, and the rest compares lower-cased with its whitespace
-    collapsed -- the same rules the row hash applies.
+    ``hashing.canonical_cell`` decides whether two rows can share an event, so two cells
+    disagree only when that form differs. The cell is stripped; a null literal is nothing;
+    a timestamp-shaped text is its ISO instant to the second (a date alone is its midnight,
+    a fraction of a second is dropped); and an integral number written with a zero fraction
+    is that integer, since a workbook that types a column as a float in one extract and an
+    integer in another stores `123.0` and `123` for one value. Everything else compares as
+    written, case and inner spacing included, because the identity and the merge keep both.
     """
-    c = _sql_ident(column)
+    c = "trim(CAST(" + _sql_ident(column) + " AS VARCHAR))"
     literals = ", ".join(_sql_str(v) for v in null_literals) or "''"
+    time_part = "regexp_extract(" + c + r", '^\d{4}-\d{2}-\d{2}[ T](\d{2}:\d{2}(:\d{2})?)', 1)"
     return (
-        f"CASE WHEN nullif(trim({c}), '') IS NULL OR trim({c}) IN ({literals}) THEN NULL "
-        f"ELSE coalesce(strftime(try_cast({c} AS TIMESTAMP), '%Y-%m-%dT%H:%M:%S'), "
-        f"CAST(try_cast({c} AS DOUBLE) AS VARCHAR), "
-        f"lower(regexp_replace(trim({c}), '\\s+', ' ', 'g'))) END"
+        "CASE WHEN " + c + " IS NULL OR " + c + " = '' OR " + c + " IN (" + literals + ") THEN NULL "
+        + "WHEN regexp_full_match(" + c + r", '\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?(\.\d+)?)?') THEN "
+        + "substr(" + c + ", 1, 10) || 'T' || CASE WHEN " + time_part + " = '' THEN '00:00:00' "
+        + "WHEN length(" + time_part + ") = 5 THEN " + time_part + " || ':00' ELSE " + time_part + " END "
+        + "WHEN regexp_full_match(" + c + r", '-?\d+\.0+') THEN regexp_replace(" + c + r", '\.0+$', '') "
+        + "ELSE " + c + " END"
     )
+
+
+def source_event_kinds(spec) -> set[str]:
+    """The event kinds a source declares its rows become: its kind, or every kind its switch can name."""
+    kinds: set[str] = set()
+    if spec.event_kind:
+        kinds.add(str(spec.event_kind))
+    if spec.event_kind_from is not None:
+        kinds |= {str(v) for v in spec.event_kind_from.map.values()}
+        kinds.add(str(spec.event_kind_from.default))
+    return kinds
 
 
 def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path: Path, con,
@@ -2231,9 +2247,17 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
     of every build's identity nor allowed to vary, and every kept column -- including a
     dataset's identity extras, which a build predating them may have merged on. Excluded:
     roles under a declared merge rule (the disagreement is resolved by rule and flagged).
-    ``available_time`` falls under the default rule and is counted apart. With ``per_partition`` the grouping also splits by the partition a row came
-    from, which separates a merge inside one extract from the true duplicate between
-    two.
+    ``available_time`` falls under the default rule and is counted apart.
+
+    Cells compare in the identity's canonical form (``_normalized_cell_sql``). A source's
+    rows are compared only on events of the kinds the source declares: a row that also
+    feeds an event of another kind -- the death one patient's visit rows all name -- was
+    merged into that event by the other event's identity, and what those rows disagree on
+    is not this source's disagreement. Such events are counted in
+    ``other_kind_events_excluded``; finding them costs a scan of the events only for the
+    sources whose rows feed more than one event. With ``per_partition`` the grouping also
+    splits by the partition a row came from, which separates a merge inside one extract
+    from the true duplicate between two.
     """
     import pyarrow.parquet as pq
 
@@ -2320,12 +2344,8 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
             event_columns = {d[0] for d in con.execute("SELECT * FROM evt LIMIT 0").description}
         except Exception:
             event_columns = set()
-        # A rule is asked about only on events of the kind its source declares. The rows of
-        # one table can feed events of several kinds -- a visit table's rows also carry a
-        # death -- and a length of stay they disagree on is the visit's business, which the
-        # merge of the death, rightly, never touches.
-        own_kind = (f" AND e.event_kind = {_sql_str(spec.event_kind)}"
-                    if spec.event_kind and "event_kind" in event_columns else "")
+        own_kinds = source_event_kinds(spec)
+        restrict_kinds = bool(own_kinds) and "event_kind" in event_columns
         minimums: list[str] = []
         verifications: list[tuple[str, str]] = []
         for offset, (key, (_sql, rule)) in enumerate(ruled.items()):
@@ -2342,20 +2362,22 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
                 ranks = " ".join(
                     f"WHEN {_sql_str(' '.join(value.split()).lower())} THEN {rank}" for rank, value in enumerate(rule.order)
                 )
-                minimums.append(f"min(CASE {_sql_ident(f'f{i}')} {ranks} END) AS {_sql_ident(f'm{i}')}")
+                minimums.append(f"min(CASE lower(regexp_replace({_sql_ident(f'f{i}')}, '\\s+', ' ', 'g')) {ranks} END) "
+                                f"AS {_sql_ident(f'm{i}')}")
                 kept_rank = (f"CASE lower(regexp_replace(trim(CAST(e.{_sql_ident(key)} AS VARCHAR)), '\\s+', ' ', 'g')) "
                              f"{ranks} END")
                 m = _sql_ident(f"m{i}")
-                verifications.append((key, f"{d} > 1{own_kind} AND {m} IS NOT NULL AND ({kept_rank} IS NULL OR {kept_rank} > {m}) "
+                verifications.append((key, f"{d} > 1 AND e.event_id IS NOT NULL AND {m} IS NOT NULL "
+                                           f"AND ({kept_rank} IS NULL OR {kept_rank} > {m}) "
                                            f"AND NOT {conflict}"))
                 continue
             accepted = [rule.flag_name] + ([str(QualityFlag.ENCOUNTER_FROM_LINKED_ROW)] if rule.rule == "prefer_linked" else [])
             carried = " OR ".join(f"coalesce(list_contains(e.quality_flags, {_sql_str(f)}), false)" for f in accepted)
-            verifications.append((key, f"{d} > 1{own_kind} AND NOT ({carried}) AND NOT {conflict}"))
+            verifications.append((key, f"{d} > 1 AND e.event_id IS NOT NULL AND NOT ({carried}) AND NOT {conflict}"))
         if unverifiable:
             entry["rules_unverifiable"] = sorted(set(unverifiable))
         checks = "".join(f", count(*) FILTER (WHERE {sql}) AS {_sql_ident(f'u{j}')}" for j, (_k, sql) in enumerate(verifications))
-        join = ("LEFT JOIN (SELECT event_id, quality_flags" + (", event_kind" if own_kind else "")
+        join = ("LEFT JOIN (SELECT event_id, quality_flags"
                 + "".join(f", {_sql_ident(k)}" for k, (_sql, r) in ruled.items() if r.rule == "priority" and k in event_columns)
                 + f" FROM evt WHERE source_id = {_sql_str(source_id)}) e USING (event_id)") if verifications else ""
 
@@ -2364,6 +2386,30 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
             f"CREATE OR REPLACE TEMP TABLE src AS SELECT source_row_id, {select} "
             f"FROM read_parquet({file_list}, union_by_name=true)"
         )
+        # Events of another kind that share this source's rows. Most sources' rows each feed
+        # one event, and for them this is one aggregate over the lineage and no scan of the
+        # events at all.
+        foreign = 0
+        if restrict_kinds:
+            con.execute(
+                f"CREATE OR REPLACE TEMP TABLE shared_rows AS SELECT source_row_id "
+                f"FROM read_parquet('{links_path}') k SEMI JOIN src USING (source_row_id) "
+                f"GROUP BY 1 HAVING count(*) > 1"
+            )
+            if con.execute("SELECT count(*) FROM shared_rows").fetchone()[0]:
+                kinds = ", ".join(_sql_str(k) for k in sorted(own_kinds))
+                con.execute(
+                    f"""
+                    CREATE OR REPLACE TEMP TABLE foreign_kind AS
+                    SELECT e.event_id FROM evt e
+                    SEMI JOIN (SELECT DISTINCT k.event_id FROM read_parquet('{links_path}') k
+                               SEMI JOIN shared_rows USING (source_row_id)) c USING (event_id)
+                    WHERE e.event_kind NOT IN ({kinds})
+                    """
+                )
+                foreign = int(con.execute("SELECT count(*) FROM foreign_kind").fetchone()[0])
+        entry["other_kind_events_excluded"] = foreign
+        exclude = "ANTI JOIN foreign_kind USING (event_id)" if foreign else ""
         groupings = [("all", "")]
         if per_partition and len(cfg.partitions) > 1:
             groupings.append(("within_partition", ", k.partition_id"))
@@ -2375,7 +2421,7 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
                     FROM read_parquet('{links_path}') k JOIN src s USING (source_row_id)
                     GROUP BY k.event_id{extra}
                 )
-                SELECT count(*), count(*) FILTER (WHERE n_rows > 1), {flagged}{checks} FROM g {join}
+                SELECT count(*), count(*) FILTER (WHERE n_rows > 1), {flagged}{checks} FROM g {exclude} {join}
                 """
             ).fetchone()
             counts = {names[i]: int(row[2 + i] or 0) for i in range(len(names))}
@@ -2395,7 +2441,8 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
                 entry.update(block)
             else:
                 entry[label] = block
-        con.execute("DROP TABLE IF EXISTS src")
+        for table in ("src", "shared_rows", "foreign_kind"):
+            con.execute(f"DROP TABLE IF EXISTS {table}")
     return report
 
 
@@ -2745,29 +2792,51 @@ def raw_coverage(cfg: DatasetConfig, manifest: dict[str, Any] | None) -> dict[st
 # -- aggregate summaries shared with tools/audit_conversion.py ----------------------------
 
 
-def note_duplicate_groups(con, zone: str | None) -> dict[str, int]:
-    """Notes repeated within one subject: same local date, code and text (exact), and
-    the same text on another date (near). Texts are hashed, never carried."""
+def note_duplicate_groups(con, zone: str | None) -> dict[str, Any]:
+    """Notes repeated within one subject, per source: the same local date, code and full
+    text (exact), and the same text on another date (near). Texts are hashed, never carried.
+
+    ``surplus_note_events`` counts the copies beyond the first of each exact group, and a
+    source's ``share`` is that count over its notes with text. A text repeated under two
+    sources on one day is counted apart, in ``cross_source_same_day_groups``.
+    """
     local = _local_date_sql("event_time", zone)
-    row = con.execute(
+    con.execute(
         f"""
-        WITH n AS (
-            SELECT subject_id, source_code, hash(value_text) AS h, {local} AS d, count(*) AS c
-            FROM evt WHERE event_kind = '{EventKind.note}' AND value_text IS NOT NULL
-            GROUP BY 1, 2, 3, 4
-        )
-        SELECT count(*) FILTER (WHERE c > 1),
-               coalesce(sum(c - 1) FILTER (WHERE c > 1), 0),
-               (SELECT count(*) FROM (SELECT subject_id, source_code, h FROM n GROUP BY 1, 2, 3 HAVING count(*) > 1)),
-               coalesce(sum(c), 0)
-        FROM n
+        CREATE OR REPLACE TEMP TABLE note_groups AS
+        SELECT source_id, subject_id, source_code, hash(value_text) AS h, {local} AS d, count(*) AS c
+        FROM evt WHERE event_kind = '{EventKind.note}' AND value_text IS NOT NULL
+        GROUP BY 1, 2, 3, 4, 5
         """
-    ).fetchone()
+    )
+    per_source: dict[str, dict[str, Any]] = {}
+    for source_id, notes, groups, surplus in con.execute(
+        "SELECT source_id, sum(c), count(*) FILTER (WHERE c > 1), coalesce(sum(c - 1) FILTER (WHERE c > 1), 0) "
+        "FROM note_groups GROUP BY 1 ORDER BY 1"
+    ).fetchall():
+        notes = int(notes or 0)
+        per_source[str(source_id)] = {
+            "notes_with_text": notes, "exact_duplicate_groups": int(groups or 0),
+            "surplus_note_events": int(surplus or 0),
+            "share": round(int(surplus or 0) / notes, 6) if notes else 0.0,
+        }
+    for source_id, groups in con.execute(
+        "SELECT source_id, count(*) FROM (SELECT source_id, subject_id, source_code, h FROM note_groups "
+        "GROUP BY 1, 2, 3, 4 HAVING count(*) > 1) GROUP BY 1"
+    ).fetchall():
+        per_source.setdefault(str(source_id), {})["same_text_other_date_groups"] = int(groups or 0)
+    cross_source = int(con.execute(
+        "SELECT count(*) FROM (SELECT subject_id, source_code, h, d FROM note_groups "
+        "GROUP BY 1, 2, 3, 4 HAVING count(DISTINCT source_id) > 1)"
+    ).fetchone()[0])
+    con.execute("DROP TABLE IF EXISTS note_groups")
     return {
-        "exact_duplicate_groups": int(row[0] or 0),
-        "surplus_note_events": int(row[1] or 0),
-        "same_text_other_date_groups": int(row[2] or 0),
-        "notes_with_text": int(row[3] or 0),
+        "exact_duplicate_groups": sum(s.get("exact_duplicate_groups", 0) for s in per_source.values()),
+        "surplus_note_events": sum(s.get("surplus_note_events", 0) for s in per_source.values()),
+        "same_text_other_date_groups": sum(s.get("same_text_other_date_groups", 0) for s in per_source.values()),
+        "notes_with_text": sum(s.get("notes_with_text", 0) for s in per_source.values()),
+        "cross_source_same_day_groups": cross_source,
+        "per_source": per_source,
     }
 
 
@@ -2973,10 +3042,14 @@ def _duplicates_agree(l: Layers) -> CheckResult:
     fails when its rows disagree on an event the rule evidently never touched: the event
     carries neither the flag the rule writes nor a MERGE_CONFLICT, or, for a priority, it
     kept a value the order ranks below one its rows hold. That is how a rule declared after
-    a build was made shows on that build (P-CU7, P-J2, P-J3). Only events of the kind the
-    source declares are asked, since one table's rows can also feed an event of another
-    kind that the rule does not concern. A rule whose application leaves no trace to read
-    is reported as unverifiable. Skips without a manifest, lineage
+    a build was made shows on that build (P-CU7, P-J2, P-J3). A rule whose application
+    leaves no trace to read is reported as unverifiable.
+
+    Cells compare in the canonical form the identity hashes them in, so a CSN typed as an
+    integer in one workbook and a float in another is one value, while case is a
+    difference, as it is to the identity and the merge. A source's rows are compared only
+    on events of the kinds it declares: rows that also feed another kind of event -- the
+    death one patient's visit rows all name -- disagree on that event by construction. Skips without a manifest, lineage
     or events. Slow: every source is joined to the whole lineage table.
     """
     if l.manifest is None or l.links_path is None or l.events_path is None:
@@ -3756,16 +3829,20 @@ def _visit_concept_coverage(l: Layers) -> CheckResult:
 
 @check("NOTE_TEXT_UNIQUE")
 def _note_text_unique(l: Layers) -> CheckResult:
-    """One subject does not carry the same note text twice on one day under one code.
+    """One subject does not carry the same note text twice on one day under one code, beyond a declared share.
 
     From the audit (P-CU4, W6, D-R2): 491,192 groups of notes identical in patient, day,
     type and full text differed only in an encounter id that matched no other table, and
-    each became its own event; another export repeats 8,237 report texts on other dates,
-    which is reported and left alone.
+    each became its own event; another export writes separate reports of one examination
+    in identical words, each with its own sequence number and time (W6).
 
-    Reads the note events' subject, local date (dataset zone), code and a hash of the
-    text -- the text itself is never held. Fails on any exact group of more than one;
-    reports groups that share text across dates. Skips without note events.
+    Reads the note events' source, subject, local date (dataset zone), code and a hash of
+    the text -- the text itself is never held. Per source, the share of notes that repeat
+    a same-day note's full text (the copies beyond the first of each group) must not exceed
+    the source's ``expected_note_repeats.max_share``; a source that declares nothing may
+    carry no repeat at all. Every share is reported. The same text on another date, and
+    the same text under two sources on one day, are reported only. Skips without note
+    events carrying text.
     """
     if l.events_path is None:
         return _skip("canonical layer not built")
@@ -3773,15 +3850,30 @@ def _note_text_unique(l: Layers) -> CheckResult:
         summary = note_duplicate_groups(con, l.cfg.time.timezone_assumption)
     if not summary["notes_with_text"]:
         return _skip("no note carries text")
-    exact = summary["exact_duplicate_groups"]
+    failing: list[str] = []
+    declared_within: list[str] = []
+    for sid, s in sorted(summary["per_source"].items()):
+        spec = l.cfg.sources.get(sid)
+        expected = spec.expected_note_repeats if spec is not None else None
+        s["max_share"] = expected.max_share if expected is not None else None
+        if not s.get("exact_duplicate_groups"):
+            continue
+        if expected is None:
+            failing.append(f"{sid}: {s['exact_duplicate_groups']:,} groups, {s['surplus_note_events']:,} copies "
+                           f"({s['share']:.3%} of its notes), none declared")
+        elif s["share"] > expected.max_share:
+            failing.append(f"{sid}: {s['share']:.3%} of its notes repeat a same-day text, declared up to {expected.max_share:.3%}")
+        else:
+            declared_within.append(f"{sid} {s['share']:.3%} (declared up to {expected.max_share:.3%})")
+    reported = (f"; {summary['same_text_other_date_groups']:,} texts recur on another date and "
+                f"{summary['cross_source_same_day_groups']:,} under two sources on one day (reported)")
     return CheckResult(
         "",
-        exact == 0,
-        f"{summary['notes_with_text']:,} notes with text; no subject carries one text twice on a day "
-        f"({summary['same_text_other_date_groups']:,} texts recur on another date, reported)"
-        if exact == 0
-        else f"{exact:,} groups of notes share subject, day, code and full text; {summary['surplus_note_events']:,} "
-        "events are copies that differ only in what the identity still keys on",
+        not failing,
+        f"{summary['notes_with_text']:,} notes with text; no source repeats a same-day text beyond what it declares"
+        + (f" ({'; '.join(declared_within)})" if declared_within else "") + reported
+        if not failing
+        else "notes that repeat one text for one patient on one day under one code: " + "; ".join(failing[:6]) + reported,
         summary,
     )
 

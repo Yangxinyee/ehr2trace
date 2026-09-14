@@ -247,6 +247,24 @@ class ExpectedLinkRateSpec(BaseModel):
     reason: str
 
 
+class ExpectedRepeatSpec(BaseModel):
+    """A share of same-day note repeats this source is known to carry, and why.
+
+    NOTE_TEXT_UNIQUE fails a source whose notes repeat one full text for one patient on
+    one day under one code. Where that is the delivery rather than the converter -- two
+    reports of one examination written separately and worded identically, each with its
+    own sequence number and time -- the share is declared here, and the check reports it
+    and fails only above it.
+    """
+
+    model_config = Strict
+
+    #: upper bound on the share of this source's notes with text that repeat another
+    #: note's full text for the same patient, day and code (the copies beyond the first)
+    max_share: float = Field(gt=0.0, le=1.0)
+    reason: str
+
+
 class OutOfScopeSpec(BaseModel):
     """A delivered table this conversion deliberately does not read, and why.
 
@@ -392,6 +410,8 @@ class SourceSpec(BaseModel):
     expected_empty: str | None = None
     #: how many of this source's encounter ids are expected to resolve to a visit
     expected_encounter_link_rate: ExpectedLinkRateSpec | None = None
+    #: the share of this source's notes expected to repeat a same-day note's full text
+    expected_note_repeats: ExpectedRepeatSpec | None = None
     #: column -> reason it is neither mapped nor kept. Every delivered column is either
     #: mapped, kept, used by a filter, or listed here; anything else is undeclared.
     ignored_columns: dict[str, str] = Field(default_factory=dict)
@@ -813,7 +833,8 @@ class DatasetConfig(BaseModel):
     #: delivered columns are deliberately unread. Hashing them would make every such
     #: declaration cost a full re-ingest, which is how declarations stop being written.
     DECLARATION_ONLY_SOURCE_FIELDS: ClassVar[tuple[str, ...]] = (
-        "expected_quarantine", "expected_empty", "expected_encounter_link_rate", "ignored_columns",
+        "expected_quarantine", "expected_empty", "expected_encounter_link_rate", "expected_note_repeats",
+        "ignored_columns",
     )
 
     def canonical_json(self) -> str:

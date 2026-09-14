@@ -121,7 +121,8 @@ def test_an_event_of_another_kind_built_from_the_same_rows_is_not_asked(tmp_path
         ("e4", "death", None, []),
     ])
     report = merge_disagreements(config(), manifest, links, con)["orders"]
-    assert report["ruled_disagreements"] == {"end_time": 3, "status_source": 3}
+    # The death is left out entirely: its rows' disagreements are not the orders' to settle.
+    assert report["ruled_disagreements"] == {"end_time": 2, "status_source": 2}
     assert report["rules_not_applied"] == {"end_time": 1, "status_source": 1}
 
 
