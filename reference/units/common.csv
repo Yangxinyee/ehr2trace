@@ -78,8 +78,8 @@ IU,[iU],UCUM case-sensitive code: international unit ([IU] is the case-insensiti
 international unit,[iU],UCUM case-sensitive code: international unit ([IU] is the case-insensitive form)
 international units,[iU],UCUM case-sensitive code: international unit ([IU] is the case-insensitive form)
 intl units,[iU],UCUM case-sensitive code: international unit ([IU] is the case-insensitive form)
-mIU,m[iU],UCUM case-sensitive code: milli-international unit
-milli-international unit,m[iU],UCUM case-sensitive code: milli-international unit
+mIU,10*-3.[iU],"UCUM case-sensitive code: milli-international unit; code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+milli-international unit,10*-3.[iU],"UCUM case-sensitive code: milli-international unit; code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
 U/L,[U]/L,UCUM case-sensitive code: unit per litre (enzyme activity)
 units/L,[U]/L,UCUM case-sensitive code: unit per litre (enzyme activity)
 unit/L,[U]/L,UCUM case-sensitive code: unit per litre (enzyme activity)
@@ -97,16 +97,16 @@ milliunits/L,m[U]/L,UCUM case-sensitive code: milliunit per litre
 uU/mL,u[U]/mL,UCUM case-sensitive code: microunit per millilitre
 µU/mL,u[U]/mL,UCUM case-sensitive code: microunit per millilitre
 mcU/mL,u[U]/mL,UCUM case-sensitive code: microunit per millilitre
-mIU/mL,m[iU]/mL,UCUM case-sensitive code: milli-international unit per millilitre
-m[IU]/mL,m[iU]/mL,UCUM case-sensitive code: milli-international unit per millilitre
-mIU/L,m[iU]/L,UCUM case-sensitive code: milli-international unit per litre
-m[IU]/L,m[iU]/L,UCUM case-sensitive code: milli-international unit per litre
-uIU/mL,u[iU]/mL,UCUM case-sensitive code: micro-international unit per millilitre
-µIU/mL,u[iU]/mL,UCUM case-sensitive code: micro-international unit per millilitre
-mcIU/mL,u[iU]/mL,UCUM case-sensitive code: micro-international unit per millilitre
-u[IU]/mL,u[iU]/mL,UCUM case-sensitive code: micro-international unit per millilitre
-kIU/L,k[iU]/L,UCUM case-sensitive code: kilo-international unit per litre
-kU/L,k[iU]/L,UCUM case-sensitive code: kilo-international unit per litre
+mIU/mL,10*-3.[iU]/mL,"UCUM case-sensitive code: milli-international unit per millilitre; code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+m[IU]/mL,10*-3.[iU]/mL,"UCUM case-sensitive code: milli-international unit per millilitre; code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+mIU/L,10*-3.[iU]/L,"UCUM case-sensitive code: milli-international unit per litre; code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+m[IU]/L,10*-3.[iU]/L,"UCUM case-sensitive code: milli-international unit per litre; code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+uIU/mL,10*-6.[iU]/mL,"UCUM case-sensitive code: micro-international unit per millilitre; code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+µIU/mL,10*-6.[iU]/mL,"UCUM case-sensitive code: micro-international unit per millilitre; code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+mcIU/mL,10*-6.[iU]/mL,"UCUM case-sensitive code: micro-international unit per millilitre; code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+u[IU]/mL,10*-6.[iU]/mL,"UCUM case-sensitive code: micro-international unit per millilitre; code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+kIU/L,10*3.[iU]/L,"UCUM case-sensitive code: kilo-international unit per litre; code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+kU/L,10*3.[iU]/L,"UCUM case-sensitive code: kilo-international unit per litre; code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
 units/hr,[U]/h,"UCUM case-sensitive code: unit per hour (heparin, insulin infusions)"
 U/hr,[U]/h,"UCUM case-sensitive code: unit per hour (heparin, insulin infusions)"
 units/h,[U]/h,"UCUM case-sensitive code: unit per hour (heparin, insulin infusions)"
@@ -579,16 +579,16 @@ cc/kg/h,mL/kg/h,UCUM case-sensitive code: millilitre per kilogram per hour
 mL/kg/min,mL/kg/min,UCUM case-sensitive code: millilitre per kilogram per minute
 mL/kg/minute,mL/kg/min,UCUM case-sensitive code: millilitre per kilogram per minute
 cc/kg/min,mL/kg/min,UCUM case-sensitive code: millilitre per kilogram per minute
-mL/min/1.73m2,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
-mL/min/1.73 m2,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
-mL/min/1.73m^2,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
-mL/min/1.73 m^2,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
-mL/min/1.73sqm,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
-mL/min/1.73,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
-mL/min/{1.73_m2},mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
-mL/min/1.73m²,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
-ml/min/1.73sq m,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
-mL/min/BSA,mL/min/{1.73_m2},UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2)
+mL/min/1.73m2,mL/min/(173.10*-2.m2),"UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2); code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+mL/min/1.73 m2,mL/min/(173.10*-2.m2),"UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2); code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+mL/min/1.73m^2,mL/min/(173.10*-2.m2),"UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2); code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+mL/min/1.73 m^2,mL/min/(173.10*-2.m2),"UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2); code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+mL/min/1.73sqm,mL/min/(173.10*-2.m2),"UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2); code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+mL/min/1.73,mL/min/(173.10*-2.m2),"UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2); code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+mL/min/{1.73_m2},mL/min/(173.10*-2.m2),"UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2); code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+mL/min/1.73m²,mL/min/(173.10*-2.m2),"UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2); code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+ml/min/1.73sq m,mL/min/(173.10*-2.m2),"UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2); code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
+mL/min/BSA,mL/min/(173.10*-2.m2),"UCUM case-sensitive code: millilitre per minute per 1.73 square metre (eGFR); OMOP's UCUM vocabulary spells it mL/min/(173.10*-2.m2); code spelled as OMOP's UCUM vocabulary carries it, so it resolves to a unit concept (2026-09-14)"
 mg/h,mg/h,UCUM case-sensitive code: milligram per hour
 mg/hr,mg/h,UCUM case-sensitive code: milligram per hour
 mg/hour,mg/h,UCUM case-sensitive code: milligram per hour
