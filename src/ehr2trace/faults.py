@@ -664,10 +664,10 @@ def _unit_parquet(layout: WorkLayout, unit: dict) -> Path | None:
 
 def _role_column(spec, columns: list[str], role: str) -> str | None:
     """The parquet column one field role reads, matched the way the loader matches it."""
-    field = spec.fields.get(role)
-    if field is None:
+    declared = spec.fields.get(role)
+    if declared is None:
         return None
-    for alias in field.from_:
+    for alias in declared.from_:
         for column in columns:
             if column.startswith("col__") and column[len("col__"):].strip().lower() == alias.strip().lower():
                 return column
@@ -836,7 +836,7 @@ def _drop_dose_unit(layout: WorkLayout, cfg: DatasetConfig) -> str:
     expect=("DEATH_PUBLISHED",),
 )
 def _death_date_beside_time(layout: WorkLayout, cfg: DatasetConfig) -> str:
-    from datetime import datetime, timedelta
+    from datetime import datetime
     from zoneinfo import ZoneInfo
 
     epath, events = _canonical(layout, "events")
