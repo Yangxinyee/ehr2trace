@@ -2083,7 +2083,7 @@ _UCUM_PREFIXES = ("da", "y", "z", "a", "f", "p", "n", "u", "m", "c", "d", "h", "
 _UCUM_ALIASES = {"eq": "mol", "iu": "u", "[iu]": "u", "hr": "h", "hrs": "h", "hour": "h", "hours": "h", "sec": "s", "day": "d", "days": "d"}
 
 
-def unit_family(unit: str, table: UnitTable | None = None) -> str:
+def unit_family(unit: str, table: UnitTable | None = None, use_dimension: bool = True) -> str:
     """The dimension a unit spelling belongs to, approximately.
 
     The unit table's ``dimension`` column is the answer when it has one. Otherwise the
@@ -2091,13 +2091,18 @@ def unit_family(unit: str, table: UnitTable | None = None) -> str:
     metric prefixes are dropped, so `mmol/L` and `umol/L` share a family while `mmol/L`
     and `mg/dL` do not, and an annotation stays part of the family, so a code whose
     rows mix `ng/mL` with `ng/mL FEU` is reported as mixing two.
+
+    With ``use_dimension`` false the declared column is ignored and the atoms are always
+    the answer. ``unit_families`` asks for both: a table that names the dimension of one
+    spelling and not of another would otherwise put two spellings of one quantity in
+    two families and report a code as mixing units it does not mix.
     """
     import re
 
     spelling = _normalize_unit_spelling(unit)
     ucum = table.ucum(spelling) if table is not None else None
     key = (ucum or spelling).lower()
-    if table is not None and key in table.dimension_of:
+    if use_dimension and table is not None and key in table.dimension_of:
         return table.dimension_of[key]
     parts = []
     for part in key.split("/"):
@@ -2125,12 +2130,10 @@ def unit_families(counts: dict[str, int], table: UnitTable | None, conversions: 
     """Rows per family for one code, given its rows per unit spelling.
 
     Units the conversion table links are one family whatever their spelling: a value
-    in one is exactly a value in the other.
+    in one is exactly a value in the other. So is a spelling whose dimension the table
+    declares and one of the same atoms whose dimension it does not, which is what keeps
+    a half-filled ``dimension`` column from inventing a second family.
     """
-    family_of: dict[str, str] = {}
-    for spelling in counts:
-        family_of[spelling] = unit_family(spelling, table)
-    # Union the families a conversion connects.
     parent: dict[str, str] = {}
 
     def find(x: str) -> str:
@@ -2138,9 +2141,17 @@ def unit_families(counts: dict[str, int], table: UnitTable | None, conversions: 
             x = parent[x]
         return x
 
+    def union(a: str, b: str) -> None:
+        parent[find(a)] = find(b)
+
+    family_of: dict[str, str] = {}
+    for spelling in counts:
+        declared = unit_family(spelling, table)
+        family_of[spelling] = declared
+        union(declared, unit_family(spelling, table, use_dimension=False))
     for a, b in conversions:
-        fa, fb = unit_family(a, table), unit_family(b, table)
-        parent[find(fa)] = find(fb)
+        union(unit_family(a, table), unit_family(b, table))
+        union(unit_family(a, table, use_dimension=False), unit_family(b, table, use_dimension=False))
     out: dict[str, int] = {}
     for spelling, n in counts.items():
         root = find(family_of[spelling])
