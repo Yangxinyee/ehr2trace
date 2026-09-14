@@ -1,4 +1,4 @@
-# Dataset contract for MIMIC-IV v3.1 (hosp + ed + note).
+# Dataset contract for MIMIC-IV v3.1 (hosp + icu + ed + note).
 #
 # This file exists to answer a question a reader of the paper should ask: does the
 # converter work on anything other than the export it was written against? MIMIC-IV is
@@ -10,14 +10,21 @@
 # and lookup joins only and records a manifest of input and output hashes. Everything
 # downstream of that script is the ordinary pipeline with no MIMIC-specific code.
 #
+# Revised 2026-09-14 for the conversion remediation plan (docs/CONVERSION_REMEDIATION_PLAN.md):
+# tasks T2.M1-T2.M13 and T4.1-T4.4, decisions D-R4, D-R5, D-R7, D-R8, D-R9, D-R10,
+# D-R13, D-R14, D-R15, D-R17, D-R18. Each declaration below names the problem (P-M*)
+# and the decision it carries out, so a reader can go from a published row back to the
+# judgement behind it without reading code.
+#
 # MIMIC redistribution: the prepared parquet files derive from PhysioNet credentialed
 # data and must not be redistributed. This file is a recipe, not data.
 
 dataset_id: mimiciv
 root_env: MIMICIV_DATA_ROOT
 description: >-
-  MIMIC-IV v3.1 hospital and emergency modules plus v2.2 notes, denormalized into flat
-  per-source parquet by tools/prepare_mimiciv.py. 21 sources, 304,123,813 source rows.
+  MIMIC-IV v3.1 hospital, intensive care and emergency modules plus v2.2 notes,
+  denormalized into flat per-source parquet by tools/prepare_mimiciv.py. Thirty-three
+  sources over twenty-nine prepared tables.
 
 identity:
   person_key: subject_id
@@ -48,6 +55,63 @@ partitions:
     membership_label: null
     batch: "v3.1"
 
+validation:
+  # Defaults everywhere. The one number worth stating out loud is the visit concept
+  # coverage, which this dataset does not yet meet for VISIT_DETAIL and is left at 0.95
+  # so the check reports the gap rather than being tuned around it: MIMIC's ward names
+  # are hospital-local specialty labels (`Medicine`, `Med/Surg/GYN`, `Vascular`) and the
+  # service codes are specialties too (`MED`, `CSURG`). Neither names a kind of visit,
+  # and the OMOP Visit domain has no concept for a specialty. Only the units whose name
+  # states a level of care are mapped (intensive care, emergency, observation,
+  # psychiatric, nursery); the rest are open items in `review/pending.csv` for a
+  # reviewer, not guesses made here (P-M8, D-R14).
+  note: >-
+    VISIT_DETAIL concept coverage is expected to fall short of 0.95 until the ward and
+    service names in review/pending.csv are decided. Every other threshold is the
+    remediation plan's default.
+
+out_of_scope:
+  # T2.M11, T4.4: the delivered files this conversion deliberately does not read. The
+  # same list, with the same reasons, is in tools/prepare_mimiciv.py (UNREAD_REASONS)
+  # and in the preparation manifest, so "deliberately unread" is distinguishable from
+  # "forgotten" on both sides of the preparation boundary.
+  drgcodes:
+    matches: ["drgcodes.csv.gz"]
+    reason: >-
+      Diagnosis-related groups: a payment classification assigned after discharge from
+      the coded diagnoses, not an observation about the patient (P-M18).
+  hcpcsevents:
+    matches: ["hcpcsevents.csv.gz", "d_hcpcs.csv.gz"]
+    reason: >-
+      HCPCS billing codes per admission, and the dimension behind them. Whether these
+      are procedures or billing artefacts is a review question; until it is answered
+      publishing them would assert procedures the record does not claim (P-M18).
+  poe_detail:
+    matches: ["poe_detail.csv.gz"]
+    reason: >-
+      Free-form key/value fields hung off an order (admit-to, code status, consult
+      service). The order itself is published from poe; these fields have no event
+      shape of their own (P-M18).
+  provider:
+    matches: ["provider.csv.gz"]
+    reason: "Provider identifiers only, no clinical content (P-M18)."
+  caregiver:
+    matches: ["caregiver.csv.gz"]
+    reason: >-
+      Caregiver identifiers. D-R13 keeps caregiver identity out of the conversion: who
+      charted a value is not a fact about the patient (T4.4).
+  medrecon:
+    matches: ["medrecon.csv.gz"]
+    reason: >-
+      Medication reconciliation: what the patient reported taking before arrival.
+      Neither an order nor an administration, and there is no reported-history event
+      kind to publish it honestly under (P-M18).
+  note_detail:
+    matches: ["discharge_detail.csv.gz", "radiology_detail.csv.gz"]
+    reason: >-
+      Metadata fields of the notes (author, service, exam name, addenda). The note text
+      is published; the fields are not events (P-M18).
+
 sources:
 
   # -- person ---------------------------------------------------------------------
@@ -67,6 +131,22 @@ sources:
       gender:       {from: [gender]}
       vital_status: {from: [vital_status]}
       death_time:   {from: [dod]}
+    expected_quarantine:
+      UNTIMED_VITAL_STATUS:
+        max_share: 0.95
+        reason: >-
+          A living patient has a vital status and no time at which it was true. MIMIC
+          records a date of death for 38,301 of 364,627 patients, so 89.5% of these rows
+          carry `Alive` with nothing to time it by. Quarantining them is correct: the
+          absence of a death is not an event.
+    ignored_columns:
+      anchor_year: >-
+        The calendar year anchor_age was current in. tools/prepare_mimiciv.py uses it to
+        derive birth_date exactly; nothing downstream needs the anchor itself.
+      anchor_year_group: >-
+        The three-year band the anchor falls in, published by MIMIC so that a shifted
+        date can be placed roughly in real time. Provenance about the de-identification,
+        not a fact about the patient.
 
   # -- visits ---------------------------------------------------------------------
   admissions:
@@ -84,49 +164,158 @@ sources:
       length_of_stay: {from: [los_days]}
       race:           {from: [race]}
       death_time:     {from: [deathtime]}
+      # T2.M8 (P-M13, D-R15): where the admission sent the patient. Non-empty on
+      # 396,210 rows and never published before, although it is the single field that
+      # says whether a stay ended at home, in another facility, or in hospice.
+      discharged_to:  {from: [discharge_location]}
+    ignored_columns:
+      admission_location: >-
+        Where the patient came from. The mirror image of discharge_location, and the
+        canonical event has no role for it; an arrival route is not a visit attribute
+        the OMOP visit tables record.
+      insurance: "Payer, not a clinical fact."
+      language: "Administrative attribute of the encounter, not an observation."
+      marital_status: >-
+        A social observation about the person, recorded per admission. Publishing it
+        would need an observation source of its own with a decision about which
+        admission's answer is current; it is not one of this remediation's tasks.
+      edregtime: >-
+        When the emergency registration for this admission began. The ED stay itself is
+        published from edstays with its own times; this copy would duplicate it.
+      edouttime: "The same, for the end of the emergency registration."
+      hospital_expire_flag: >-
+        T2.M11 (W7): a derived yes/no saying the admission ended in death. The death
+        itself is published from deathtime and from patients.dod, merged by D-R11; a
+        third, weaker restatement of the same fact would be a second source of truth.
 
   transfers:
+    # T2.M5 (P-M7, D-R8) and T2.M6 (P-M20, D-R14). Two changes, both judgements:
+    #
+    #  * the `discharge` rows are dropped. 546,024 of them have careunit UNKNOWN and no
+    #    outtime, and 91.3% fall within an hour of the admission's own dischtime: they
+    #    are the discharge event of the stay, not a stay somewhere. Published as visits
+    #    they were 546,196 zero-length UNKNOWN encounters.
+    #  * a transfer is a stay *inside* an admission, so it is a visit_detail, not a
+    #    visit of its own. 86% of visit_occurrence rows carried concept 0 because this
+    #    table and services were filling it.
     adapter: parquet
     file_glob: "transfers.parquet"
     shape: visit
-    event_kind: visit
+    event_kind: visit_detail
     required: false
+    row_filter: {column: eventtype, drop: ["discharge"]}
     fields:
       person_id:    {from: [subject_id], required: true}
       encounter_id: {from: [hadm_id]}
       event_time:   {from: [intime], required: true}
       end_time:     {from: [outtime]}
       visit_type:   {from: [careunit]}
-
-  edstays:
-    adapter: parquet
-    file_glob: "edstays.parquet"
-    shape: visit
-    event_kind: visit
-    required: false
-    fields:
-      person_id:    {from: [subject_id], required: true}
-      encounter_id: {from: [hadm_id]}
-      event_time:   {from: [intime], required: true}
-      end_time:     {from: [outtime]}
-      visit_type:   {from: [disposition]}
-      race:         {from: [race]}
+    merge_rules:
+      # T2.M12 (P-M19, D-R4). 25 groups of transfers share a subject, a unit and an
+      # intime to the second and disagree on outtime by 0 to 473 minutes. A start time
+      # that precise is the same stay recorded twice, not two stays, so the rows merge;
+      # and with no reason to prefer either end time, neither is kept. The refused
+      # values go to quarantine so the disagreement is still readable.
+      end_time: {rule: null_and_flag}
+    ignored_columns:
+      transfer_id: >-
+        The row's own identifier. Deliberately not a discriminator: D-R4 says two rows
+        that agree on subject, unit and a to-the-second start time are one stay, and
+        carrying transfer_id into the identity would keep exactly the duplicates that
+        decision exists to collapse.
 
   services:
-    # A service transfer is a change of care context, which is what visit_occurrence
-    # records. `observation` would be the closer OMOP domain, but the canonical event
-    # kinds are a closed set with a publisher behind each one, and inventing a kind for
-    # this would mean an OMOP table nothing writes to.
+    # T2.M6 (P-M20, D-R14). A change of service is a change of care context inside an
+    # admission: VISIT_DETAIL, which the remediation added, is what OMOP has for it.
+    # Before that existed this source published a visit of its own, which is why the
+    # visit table had three million encounters nobody was admitted to.
     adapter: parquet
     file_glob: "services.parquet"
     shape: visit
-    event_kind: visit
+    event_kind: visit_detail
     required: false
     fields:
       person_id:    {from: [subject_id], required: true}
       encounter_id: {from: [hadm_id]}
       event_time:   {from: [transfertime], required: true}
       visit_type:   {from: [curr_service]}
+    ignored_columns:
+      prev_service: >-
+        The service the patient was under before this row. It is the previous row's
+        curr_service; publishing it would state the same transfer twice, once forwards
+        and once backwards.
+
+  edstays:
+    # T2.M6 (P-M8, D-R9) and T2.M9 (P-M15). The visit type of an ED stay is fixed by
+    # the table it is in, so prepare_mimiciv.py projects the constant and it is mapped
+    # here like any other column; the disposition it used to be read from is where the
+    # stay discharged to, which is a different fact and now says so.
+    #
+    # The encounter id is the ED stay id, not the admission. Every other ED table is
+    # keyed on stay_id and none of them carries hadm_id, so keying the stay on hadm_id
+    # left every ED vital sign, dispensation and diagnosis attached to nothing.
+    adapter: parquet
+    file_glob: "edstays.parquet"
+    shape: visit
+    event_kind: visit
+    required: false
+    fields:
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [stay_id]}
+      event_time:     {from: [intime], required: true}
+      end_time:       {from: [outtime]}
+      visit_type:     {from: [visit_type_constant]}
+      race:           {from: [race]}
+      discharged_to:  {from: [disposition]}
+    merge_rules:
+      # T2.M12 (P-M19, D-R4): 4 groups, same subject and to-the-second intime,
+      # disagreeing outtime. Same reading as transfers.
+      end_time: {rule: null_and_flag}
+    ignored_columns:
+      hadm_id: >-
+        The admission this ED stay led to, where there was one. The admission publishes
+        itself from admissions with its own times, and an encounter id has to be one
+        thing: making it hadm_id here is what detached every ED event from its stay
+        (P-M15). The link between the two is recoverable from the admission's edregtime.
+      gender: >-
+        The ED module's copy of the patient's gender. patients is the source of truth
+        for a person attribute; a second copy per stay could only disagree with it.
+      arrival_transport: >-
+        How the patient reached the emergency department (ambulance, walk-in,
+        helicopter). The mirror image of a discharge disposition, and the canonical
+        event has no role for an arrival route; reading it as the visit type is the
+        mistake D-R9 corrects on the other side of the stay.
+
+  # -- intensive care (D-R13, T4.1) ------------------------------------------------
+  icustays:
+    # T4.1. An ICU stay is a stay inside an admission, so it is a visit_detail hung
+    # under the hospital visit by hadm_id. The unit it began in is the type of the
+    # detail; the unit it ended in, when they differ, is a transfer and transfers
+    # already records it.
+    adapter: parquet
+    file_glob: "icustays.parquet"
+    shape: visit
+    event_kind: visit_detail
+    required: false
+    fields:
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [hadm_id]}
+      event_time:     {from: [intime], required: true}
+      end_time:       {from: [outtime]}
+      visit_type:     {from: [first_careunit]}
+      length_of_stay: {from: [los]}
+    expected_encounter_link_rate:
+      min_rate: 0.99
+      reason: "Every ICU stay belongs to an admission that admissions publishes."
+    ignored_columns:
+      stay_id: >-
+        The ICU stay's own identifier. The ICU event tables are attached to the
+        admission rather than to the stay, so nothing downstream resolves it, and a
+        stay is already identified by its admission, unit and start time.
+      last_careunit: >-
+        The unit the stay ended in. When it differs from first_careunit the move is a
+        transfers row, which is published as its own visit_detail; recording it here
+        as well would make one move into two.
 
   # -- conditions -----------------------------------------------------------------
   # Two sources rather than one because code_system is a property of the source: an
@@ -151,6 +340,14 @@ sources:
       source_code:     {from: [icd_code], required: true}
       source_name:     {from: [long_title]}
       sequence_number: {from: [seq_num]}
+    ignored_columns:
+      icd_version: >-
+        Constant within this source: the preparation splits the table by it and the
+        code system is declared above, where a lookup can key on it.
+      hadm_admittime: >-
+        Carried next to hadm_dischtime so that the choice of event time is auditable
+        from the prepared table. The discharge time is the one used, for the reason
+        stated above.
 
   diagnoses_icd10:
     adapter: parquet
@@ -167,6 +364,9 @@ sources:
       source_code:     {from: [icd_code], required: true}
       source_name:     {from: [long_title]}
       sequence_number: {from: [seq_num]}
+    ignored_columns:
+      icd_version: "Constant within this source; see diagnoses_icd9."
+      hadm_admittime: "Carried for audit; the discharge time is the event time."
 
   # One physical table, two code systems: `icd_version` says which. Declared as SOURCE,
   # 899,050 ED diagnoses resolved to nothing, because a code system is what a lookup is
@@ -181,10 +381,15 @@ sources:
     row_filter: {column: icd_version, keep: ["9"]}
     fields:
       person_id:       {from: [subject_id], required: true}
+      # T2.M9 (P-M14, P-M15): the ED stay, which is what edstays publishes.
+      encounter_id:    {from: [stay_id]}
       event_time:      {from: [stay_outtime], required: true}
       source_code:     {from: [icd_code], required: true}
       source_name:     {from: [icd_title]}
       sequence_number: {from: [seq_num]}
+    expected_encounter_link_rate:
+      min_rate: 0.99
+      reason: "stay_id comes from edstays, which publishes every ED stay as a visit."
 
   ed_diagnosis_icd10:
     adapter: parquet
@@ -196,10 +401,14 @@ sources:
     row_filter: {column: icd_version, keep: ["10"]}
     fields:
       person_id:       {from: [subject_id], required: true}
+      encounter_id:    {from: [stay_id]}
       event_time:      {from: [stay_outtime], required: true}
       source_code:     {from: [icd_code], required: true}
       source_name:     {from: [icd_title]}
       sequence_number: {from: [seq_num]}
+    expected_encounter_link_rate:
+      min_rate: 0.99
+      reason: "stay_id comes from edstays, which publishes every ED stay as a visit."
 
   # -- procedures -----------------------------------------------------------------
   procedures_icd9:
@@ -216,6 +425,8 @@ sources:
       source_code:     {from: [icd_code], required: true}
       source_name:     {from: [long_title]}
       sequence_number: {from: [seq_num]}
+    ignored_columns:
+      icd_version: "Constant within this source; the code system is declared above."
 
   procedures_icd10:
     adapter: parquet
@@ -231,6 +442,8 @@ sources:
       source_code:     {from: [icd_code], required: true}
       source_name:     {from: [long_title]}
       sequence_number: {from: [seq_num]}
+    ignored_columns:
+      icd_version: "Constant within this source; the code system is declared above."
 
   # -- measurements ---------------------------------------------------------------
   labevents:
@@ -256,6 +469,22 @@ sources:
     row_filter: {column: itemid, drop: ["50934", "51678", "50947",
                                          "50933", "50887", "50955", "50979", "51103",
                                          "51107", "50919", "51706", "52023", "52425"]}
+    # T2.M7 (P-M9, D-R10). Two D-dimer items report under two units that cannot be
+    # converted into each other, so the unit becomes part of the code and the two
+    # readings stop being pooled. Measured over every row on 2026-09-14 from the
+    # prepared table: 50915 `ng/mL` 18,426 rows median 505 and `ng/mL FEU` 5,128 rows
+    # median 529 -- the same distribution under two spellings, which is a relabelling;
+    # 51196 `ng/mL FEU` 18,070 rows median 983 against `ng/mL` 3,181 rows median 541,
+    # a 1.8-fold difference, which is the FEU-to-DDU ratio and two different bases.
+    # No conversion is applied: D-R10 says split, not convert. Rows with no unit at all
+    # keep the bare code (51196: 1,551 rows, none of them numeric).
+    split_code_by_unit: ["50915", "51196"]
+    merge_rules:
+      # T2.M12 (P-M16, D-R5). 328,120 groups of lab rows are one result reported twice
+      # with different storetimes: 270,415 within an hour, 233 more than a week apart.
+      # The earliest is when the result first became knowable, which is the only
+      # reading that cannot make a model see a value before anyone could.
+      available_time: {rule: earliest}
     # charttime is when the specimen was taken; storetime is when the result became
     # visible. Keeping them apart is the whole point of available_time: without it a
     # model reads a potassium result hours before the lab reported it.
@@ -271,10 +500,35 @@ sources:
       value_low:      {from: [ref_range_lower]}
       value_high:     {from: [ref_range_upper]}
       status:         {from: [flag]}
+    ignored_columns:
+      labevent_id: >-
+        The row's own identifier. Not a discriminator: two rows of one result that
+        differ only in storetime are the same measurement, which is what the
+        available_time merge rule above resolves.
+      valuenum: >-
+        MIMIC's own numeric parse of `value`. The converter parses `value` itself, with
+        its own record of comparators and ranges; trusting a second parse would mean
+        publishing a number whose derivation is not in this repository.
+      fluid: >-
+        The specimen the item is measured in (Blood, Urine). A property of the lab item
+        rather than of the result, and it is already inside lab_name for the items where
+        it distinguishes anything.
+      category: "The laboratory section (Chemistry, Hematology). Filing, not a result."
+      priority: >-
+        Whether the order was routine or stat. A property of the order, and the orders
+        this export publishes come from poe.
 
-  microbiologyevents:
+  micro_organisms:
+    # T2.M4 (P-M6). One physical table holds two kinds of fact. A culture result says
+    # what grew, or that nothing did; an antibiotic column says how an isolate answered
+    # one drug. Reading them as one event filed 1,344,018 susceptibility rows inside
+    # the organism events, where they were lost.
+    #
+    # Driven by every row: measured over the whole table, an isolate that was tested
+    # against antibiotics has no row of its own, so the organism has to be read from
+    # the susceptibility rows too, and the rows of one isolate collapse into one event.
     adapter: parquet
-    file_glob: "microbiologyevents.parquet"
+    file_glob: "micro_organisms.parquet"
     shape: point_event
     event_kind: measurement
     code_system: SOURCE
@@ -284,32 +538,90 @@ sources:
       person_id:      {from: [subject_id], required: true}
       encounter_id:   {from: [hadm_id]}
       event_time:     {from: [charttime, chartdate], required: true}
-      available_time: {from: [storetime]}
+      available_time: {from: [storetime, storedate]}
       source_code:    {from: [test_name], required: true}
       source_name:    {from: [spec_type_desc]}
-      # The organism first: what grew is the result of a culture, and the susceptibility
-      # interpretation is a fact about a different question. Mapping only the latter left
-      # 1,635,365 rows saying a culture was sent and nothing about what came back.
-      # Where nothing grew the interpretation answers instead, which conflates two facts
-      # in one field -- the cost of one column having to carry both.
-      value:          {from: [org_name, interpretation]}
+      # What grew. Where nothing grew the field is empty and the event says the culture
+      # was sent with no organism, which is the honest reading of a negative culture.
+      value:          {from: [org_name]}
+      # Two isolates of one species in one specimen, or one species in two specimens
+      # drawn the same minute, are different findings, and only specimen and isolate
+      # together tell them apart. Measured on the 1-in-100 sample of 2026-09-14: keyed
+      # on isolate_num alone, 636 organism rows from two different specimens drawn at
+      # the same minute merged into one finding; keyed on both, the only rows that
+      # merge are the 13,645 that belong to one isolate, which is the collapse intended.
+      sequence_number: {from: [specimen_isolate]}
+    ignored_columns:
+      microevent_id: >-
+        The row's own identifier. Rows of one isolate are meant to collapse into one
+        event, so this must not reach the identity.
+      micro_specimen_id: >-
+        Groups the tests of one specimen. Carried inside specimen_isolate, the
+        discriminator.
+      isolate_num: "Which isolate; carried inside specimen_isolate, the discriminator."
+      test_itemid: "The numeric id behind test_name, which is the code."
+      org_itemid: "The numeric id behind org_name, which is the value."
+      quantity: >-
+        How much grew, as free text on a minority of rows. A second value for an event
+        that already has one, with no unit and no scale.
+      comments: "Free-text laboratory comment; free text is not read here."
 
-  ed_vitalsign:
+  micro_susceptibility:
+    # T2.M4 (P-M6). The other half: one row, one antibiotic, one answer. 1,410,258 of
+    # these existed in the source and none of them was ever published.
     adapter: parquet
-    file_glob: "ed_vitalsign.parquet"
-    shape: component_measurements
+    file_glob: "micro_susceptibility.parquet"
+    shape: point_event
     event_kind: measurement
     code_system: SOURCE
+    value_expect: auto
     required: false
     fields:
-      person_id:    {from: [subject_id], required: true}
-      encounter_id: {from: [stay_id]}
-      display_name: {from: [stay_id], required: true}
-      event_time:   {from: [charttime], required: true}
-    untimed_values: []
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [hadm_id]}
+      event_time:     {from: [charttime, chartdate], required: true}
+      available_time: {from: [storetime, storedate]}
+      # The antibiotic is what was measured against; the answer is the value.
+      source_code:    {from: [ab_name], required: true}
+      source_name:    {from: [ab_name]}
+      # The minimum inhibitory concentration where the laboratory reported one, with
+      # the source's `=>` rewritten to the comparator form the converter reads, and the
+      # sensitivity interpretation where it did not.
+      value:          {from: [dilution_result, interpretation]}
+      status:         {from: [interpretation]}
+      # One antibiotic against one isolate of one organism in one specimen: the
+      # antibiotic is the code, and susceptibility_key -- prepared by
+      # tools/prepare_mimiciv.py -- is the rest. Measured on the 1-in-100 sample of
+      # 2026-09-14: keyed on the antibiotic alone 1,239 of 15,161 results merged, on
+      # specimen and isolate 386, on specimen, isolate and organism none.
+      sequence_number: {from: [susceptibility_key]}
+    ignored_columns:
+      microevent_id: >-
+        The row's own identifier. Not the discriminator: a result reported twice for
+        the same isolate and antibiotic is one result, and a row id would keep the
+        copies apart.
+      micro_specimen_id: "Carried inside susceptibility_key, the discriminator."
+      ab_itemid: "The numeric id behind ab_name, which is the code."
+      test_itemid: "The numeric id behind test_name."
+      test_name: >-
+        The culture this susceptibility came from. micro_organisms publishes it as its
+        own event; repeating it here would state the culture once per antibiotic.
+      spec_type_desc: "The specimen type, published by micro_organisms."
+      org_itemid: "The numeric id behind org_name."
+      org_name: >-
+        The organism the antibiotic was tested against. Published by micro_organisms as
+        the value of the culture event; the canonical event has one value field and this
+        event's value is the susceptibility answer.
+      isolate_num: "Carried inside susceptibility_key, the discriminator."
+      dilution_text: >-
+        The dilution exactly as the source spells it, `=>` and all. dilution_result is
+        the same string with the comparator rewritten, and the original stays in the
+        prepared table so the rewrite is auditable (normalization adds, never
+        overwrites).
+      dilution_comparison: "The comparator on its own; dilution_result carries it."
+      dilution_value: "The number on its own; dilution_result carries it."
 
-  # omr carries a date and no time; triage carries neither. Both go down the untimed
-  # path -- quarantined with a reason rather than dated by guesswork.
+  # omr carries a date and no time.
   # Outpatient vitals and anthropometrics. `Blood Pressure` arrives as one `120/80`
   # cell and is divided into the two measurements OMOP records by prepare_mimiciv.py,
   # the same way and for the same reason as the CU export; the unit the result name
@@ -329,26 +641,347 @@ sources:
       value:           {from: [result_value]}
       unit:            {from: [unit]}
       sequence_number: {from: [seq_num]}
+    # T2.M10 (P-M17). Four result names state no unit at all. The unit is declared
+    # here, not written into the prepared table, because a unit the source never wrote
+    # is a judgement: declaring it flags every event UNIT_DECLARED, which a projection
+    # would not. The evidence, measured over every row on 2026-09-14: the generic name
+    # and the name that states its unit have the same distribution --
+    # `Weight` 15,108 rows median 170.0 against `Weight (Lbs)` 2,145,353 median 170.5;
+    # `Height` 2,365 median 65.5 against `Height (Inches)` 814,964 median 65.3;
+    # `BMI` 29,021 median 28.0 against `BMI (kg/m2)` 1,901,496 median 28.0.
+    # `eGFR` (279 rows, median 58.3, 2nd-98th percentile 4.5-124.4) is reported in the
+    # only unit an estimated glomerular filtration rate is reported in.
+    declared_units:
+      Weight: "lb"
+      Height: "in"
+      BMI: "kg/m2"
+      eGFR: "mL/min/1.73m2"
 
-  ed_triage:
+  # -- emergency department vitals (T2.M2, T2.M3) ----------------------------------
+  # A wide row of vital signs is one row per sign after preparation, with the unit the
+  # ED module documents for each column. Declared as `component_measurements` against
+  # the wide table and with no value columns mapped, all 1,564,610 rows were
+  # quarantined as "component has no name" and the ED had no vital signs at all.
+  ed_vitalsign:
     adapter: parquet
-    file_glob: "ed_triage.parquet"
-    shape: person_attributes
-    event_kind: demographic
+    file_glob: "ed_vitalsign.parquet"
+    shape: point_event
+    event_kind: measurement
+    code_system: SOURCE
+    value_expect: auto
     required: false
     fields:
-      person_id: {from: [subject_id], required: true}
-    # A wide row of real vital signs with no time anywhere on it. The ED stay's intime
-    # is on the row and would be a plausible guess; guessing is exactly what the
-    # untimed path exists to prevent.
-    untimed_values:
-      - {column: temperature, code: ED_TRIAGE_TEMPERATURE, unit: "[degF]"}
-      - {column: heartrate,   code: ED_TRIAGE_HEARTRATE,   unit: "/min"}
-      - {column: resprate,    code: ED_TRIAGE_RESPRATE,    unit: "/min"}
-      - {column: o2sat,       code: ED_TRIAGE_O2SAT,       unit: "%"}
-      - {column: sbp,         code: ED_TRIAGE_SBP,         unit: "mm[Hg]"}
-      - {column: dbp,         code: ED_TRIAGE_DBP,         unit: "mm[Hg]"}
-      - {column: acuity,      code: ED_TRIAGE_ACUITY,      unit: null}
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [stay_id]}
+      event_time:     {from: [charttime], required: true}
+      available_time: {from: [charttime]}
+      source_code:    {from: [vital_name], required: true}
+      source_name:    {from: [vital_name]}
+      value:          {from: [value]}
+      unit:           {from: [unit]}
+    expected_encounter_link_rate:
+      min_rate: 0.99
+      reason: "stay_id comes from edstays, which publishes every ED stay as a visit."
+
+  ed_triage:
+    # T2.M3 (P-M3, D-R7). Triage carries no time of its own and 2,849,786 values were
+    # quarantined for it. The ED stay's arrival time is on the row, the first ED vital
+    # sign follows it by a median of three minutes, and 61% of triages are within
+    # thirty; so the arrival time is used, and `time_is_fallback` -- a constant the
+    # preparation writes -- turns into TIME_FALLBACK on every event that uses it. The
+    # flag is the point: the time is a stand-in and every consumer is told so.
+    adapter: parquet
+    file_glob: "ed_triage.parquet"
+    shape: point_event
+    event_kind: measurement
+    code_system: SOURCE
+    value_expect: auto
+    required: false
+    # The chief complaint is in the same prepared table and is not a measurement; it is
+    # published by ed_chiefcomplaint below.
+    row_filter: {column: vital_name, drop: ["ED_CHIEF_COMPLAINT"]}
+    fields:
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [stay_id]}
+      event_time:     {from: [stay_intime], required: true}
+      available_time: {from: [stay_intime]}
+      source_code:    {from: [vital_name], required: true}
+      source_name:    {from: [vital_name]}
+      value:          {from: [value]}
+      unit:           {from: [unit]}
+    flag_when:
+      TIME_FALLBACK: time_is_fallback
+    expected_encounter_link_rate:
+      min_rate: 0.99
+      reason: "stay_id comes from edstays, which publishes every ED stay as a visit."
+
+  ed_chiefcomplaint:
+    # D-R7 says the chief complaint is a text event. It is not a measurement: nothing
+    # was measured, there is no unit and no scale, and publishing it into MEASUREMENT
+    # would put free text where a value belongs. `observation` is the kind the
+    # remediation added for exactly this, and the OMOP publisher routes it to
+    # OBSERVATION whether or not the string maps to a concept -- which matters here,
+    # because a chief complaint is a phrase a triage nurse typed and most of them will
+    # never map.
+    adapter: parquet
+    file_glob: "ed_triage.parquet"
+    shape: point_event
+    event_kind: observation
+    code_system: SOURCE
+    value_expect: text
+    required: false
+    row_filter: {column: vital_name, keep: ["ED_CHIEF_COMPLAINT"]}
+    fields:
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [stay_id]}
+      event_time:     {from: [stay_intime], required: true}
+      available_time: {from: [stay_intime]}
+      source_code:    {from: [vital_name], required: true}
+      source_name:    {from: [vital_name]}
+      value:          {from: [value]}
+    flag_when:
+      TIME_FALLBACK: time_is_fallback
+    expected_encounter_link_rate:
+      min_rate: 0.99
+      reason: "stay_id comes from edstays, which publishes every ED stay as a visit."
+    ignored_columns:
+      unit: >-
+        Null on every chief-complaint row by construction: the preparation writes a
+        unit only for the columns the ED module documents one for.
+
+  # -- intensive care events (D-R13, T4.2, T4.3) -----------------------------------
+  # d_items supplies the label behind each itemid the way d_labitems does for the labs,
+  # so the code is the itemid and the name is the label. The caregiver id is the one
+  # column the preparation does not carry (D-R13).
+  inputevents:
+    # T4.2. What was put into the patient in the ICU, with the rate it went in at --
+    # the fact D-R15 added `rate` and `rate_unit` to the canonical event for.
+    adapter: parquet
+    file_glob: "inputevents.parquet"
+    shape: point_event
+    event_kind: drug_admin
+    code_system: SOURCE
+    value_expect: auto
+    required: false
+    fields:
+      person_id:       {from: [subject_id], required: true}
+      encounter_id:    {from: [hadm_id]}
+      event_time:      {from: [starttime], required: true}
+      end_time:        {from: [endtime]}
+      available_time:  {from: [storetime]}
+      source_code:     {from: [itemid], required: true}
+      source_name:     {from: [item_label]}
+      dose:            {from: [amount]}
+      unit:            {from: [amountuom]}
+      rate:            {from: [rate]}
+      rate_unit:       {from: [rateuom]}
+      status:          {from: [statusdescription]}
+      # Two administrations of one drug that begin at the same minute under two orders
+      # are two administrations. The order id is what says so.
+      sequence_number: {from: [orderid]}
+    expected_encounter_link_rate:
+      min_rate: 0.99
+      reason: "Every ICU input belongs to an admission that admissions publishes."
+    ignored_columns:
+      stay_id: >-
+        The ICU stay. The event hangs on the admission, which is the encounter this
+        dataset keys on; icustays publishes the stay as a visit_detail under the same
+        admission, so the stay is recoverable by time.
+      linkorderid: >-
+        Links a continuation to the order it continues. Nothing publishes the ICU
+        orders themselves -- there is no ICU order table in the delivery -- so a
+        caused_by declared on it would point at an action that does not exist.
+      ordercategoryname: "How the order was classified in the ordering system."
+      secondaryordercategoryname: "A second classification of the same."
+      ordercomponenttypedescription: >-
+        Which component of a compounded order this row is (main, additive, solution).
+        The substance itself is the itemid, which is what is published.
+      ordercategorydescription: "Free-text description of the order category."
+      patientweight: >-
+        The weight the dose was calculated from. A measurement of the patient recorded
+        on a medication row; chartevents publishes weights as measurements with their
+        own times, and this copy has none.
+      totalamount: >-
+        The volume of the bag the dose came from, not the dose. Publishing it as a
+        second amount would double the exposure.
+      totalamountuom: "Unit of totalamount."
+      isopenbag: "Whether the bag was open; a workflow property of the container."
+      continueinnextdept: "Whether the infusion continued after transfer; workflow."
+      originalamount: >-
+        The amount as first ordered, before any change. `amount` is what was given.
+      originalrate: "The rate as first ordered; `rate` is what it ran at."
+
+  ingredientevents:
+    # T4.2. The same administrations broken into their ingredients -- the sodium in the
+    # saline, the calories in the feed. Published alongside inputevents rather than
+    # instead of it: one says what was hung, the other what was in it, and a model that
+    # wants either should not have to reconstruct it.
+    adapter: parquet
+    file_glob: "ingredientevents.parquet"
+    shape: point_event
+    event_kind: drug_admin
+    code_system: SOURCE
+    value_expect: auto
+    required: false
+    fields:
+      person_id:       {from: [subject_id], required: true}
+      encounter_id:    {from: [hadm_id]}
+      event_time:      {from: [starttime], required: true}
+      end_time:        {from: [endtime]}
+      available_time:  {from: [storetime]}
+      source_code:     {from: [itemid], required: true}
+      source_name:     {from: [item_label]}
+      dose:            {from: [amount]}
+      unit:            {from: [amountuom]}
+      rate:            {from: [rate]}
+      rate_unit:       {from: [rateuom]}
+      status:          {from: [statusdescription]}
+      sequence_number: {from: [orderid]}
+    expected_encounter_link_rate:
+      min_rate: 0.99
+      reason: "Every ICU ingredient row belongs to an admission admissions publishes."
+    ignored_columns:
+      stay_id: "The ICU stay; see inputevents."
+      linkorderid: "Links a continuation to its order; see inputevents."
+      originalamount: "The amount as first ordered; `amount` is what was given."
+      originalrate: "The rate as first ordered; `rate` is what it ran at."
+
+  outputevents:
+    # T4.3. Urine, drains, blood loss: a measured volume with a time.
+    adapter: parquet
+    file_glob: "outputevents.parquet"
+    shape: point_event
+    event_kind: measurement
+    code_system: SOURCE
+    value_expect: auto
+    required: false
+    fields:
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [hadm_id]}
+      event_time:     {from: [charttime], required: true}
+      available_time: {from: [storetime]}
+      source_code:    {from: [itemid], required: true}
+      source_name:    {from: [item_label]}
+      value:          {from: [value]}
+      unit:           {from: [valueuom]}
+    expected_encounter_link_rate:
+      min_rate: 0.99
+      reason: "Every ICU output belongs to an admission that admissions publishes."
+    ignored_columns:
+      stay_id: "The ICU stay; see inputevents."
+
+  chartevents:
+    # T4.3. The bedside chart: the largest table in MIMIC-IV and the one that carries
+    # the vital signs an ICU model is built on. The value is read from `value` rather
+    # than from MIMIC's own `valuenum` for the same reason as the labs.
+    adapter: parquet
+    file_glob: "chartevents.parquet"
+    shape: point_event
+    event_kind: measurement
+    code_system: SOURCE
+    value_expect: auto
+    required: false
+    fields:
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [hadm_id]}
+      event_time:     {from: [charttime], required: true}
+      available_time: {from: [storetime]}
+      source_code:    {from: [itemid], required: true}
+      source_name:    {from: [item_label]}
+      value:          {from: [value]}
+      unit:           {from: [valueuom]}
+    # T1.7. One item states its unit in its name and in no column: 226531 is
+    # `Admission Weight (lbs.)` and every row of it has an empty valueuom. Measured on
+    # the sample of 2026-09-14: 1,315 rows, median 178.6, first to ninety-ninth
+    # percentile 97.2 to 365.2, against 226512 `Admission Weight (Kg)` at median 79.6.
+    # Declared here rather than written into the prepared table so that the event
+    # carries UNIT_DECLARED and a reader is told the unit was supplied.
+    declared_units:
+      "226531": "lb"
+    expected_encounter_link_rate:
+      min_rate: 0.99
+      reason: "Every charted value belongs to an admission that admissions publishes."
+    ignored_columns:
+      stay_id: "The ICU stay; see inputevents."
+      valuenum: >-
+        MIMIC's own numeric parse of `value`; the converter parses `value` itself, as
+        it does for labevents.
+      warning: >-
+        A flag the monitor set when the value was outside the item's alarm limits. It
+        says something about the alarm configuration, not about whether the value is
+        credible; the plausibility judgement this conversion makes is the declared one
+        in reference/plausible_ranges/mimiciv.csv (D-R17), which has a basis written
+        next to every bound.
+
+  procedureevents:
+    # T4.3. An ICU procedure with a start and an end -- a line placed, a ventilator
+    # begun, an imaging study done at the bedside.
+    adapter: parquet
+    file_glob: "procedureevents.parquet"
+    shape: point_event
+    event_kind: procedure
+    code_system: SOURCE
+    required: false
+    fields:
+      person_id:       {from: [subject_id], required: true}
+      encounter_id:    {from: [hadm_id]}
+      event_time:      {from: [starttime], required: true}
+      end_time:        {from: [endtime]}
+      available_time:  {from: [storetime]}
+      source_code:     {from: [itemid], required: true}
+      source_name:     {from: [item_label]}
+      status:          {from: [statusdescription]}
+      sequence_number: {from: [orderid]}
+    expected_encounter_link_rate:
+      min_rate: 0.99
+      reason: "Every ICU procedure belongs to an admission that admissions publishes."
+    ignored_columns:
+      stay_id: "The ICU stay; see inputevents."
+      value: >-
+        The duration of the procedure, in the unit below. The start and end times carry
+        the same fact, and PROCEDURE_OCCURRENCE has nowhere to put a second copy of it.
+      valueuom: "Unit of the duration; almost always minutes."
+      location: "Where on the body a line or device was placed."
+      locationcategory: "The coarser grouping of location."
+      linkorderid: "Links a continuation to its order; see inputevents."
+      ordercategoryname: "How the order was classified in the ordering system."
+      ordercategorydescription: "Free-text description of the order category."
+      patientweight: "The weight the order was calculated from; see inputevents."
+      isopenbag: "A workflow property of a container, on a procedure row."
+      continueinnextdept: "Whether it continued after transfer; workflow."
+      originalamount: "The amount as first ordered."
+      originalrate: "The rate as first ordered."
+
+  datetimeevents:
+    # T4.3. Charted dates: when a line was last changed, when dialysis is next due.
+    # The value is a timestamp, which is not a quantity and not a condition; it is an
+    # observation whose value happens to be a date, and `observation` is the kind the
+    # remediation added so that such a fact has somewhere to go.
+    adapter: parquet
+    file_glob: "datetimeevents.parquet"
+    shape: point_event
+    event_kind: observation
+    code_system: SOURCE
+    value_expect: text
+    required: false
+    fields:
+      person_id:      {from: [subject_id], required: true}
+      encounter_id:   {from: [hadm_id]}
+      event_time:     {from: [charttime], required: true}
+      available_time: {from: [storetime]}
+      source_code:    {from: [itemid], required: true}
+      source_name:    {from: [item_label]}
+      value:          {from: [value]}
+    expected_encounter_link_rate:
+      min_rate: 0.99
+      reason: "Every charted date belongs to an admission that admissions publishes."
+    ignored_columns:
+      stay_id: "The ICU stay; see inputevents."
+      valueuom: >-
+        The unit column of a table whose values are timestamps. It names the precision
+        of the date, not a unit of measure, and a unit on a text value would only be
+        noise.
+      warning: "The monitor's alarm flag; see chartevents."
 
   # -- medications ----------------------------------------------------------------
   # Orders and administrations stay separate, as in the reference export: a prescribed
@@ -378,6 +1011,30 @@ sources:
       unit:         {from: [dose_unit_rx]}
       route:        {from: [route]}
       caused_by:    {from: [poe_id]}
+      # T2.M1 (P-M1). Two prescription rows that agree on subject, drug, code and start
+      # time but belong to different pharmacy orders are two orders. Without this
+      # 1,064,318 rows collapsed, 803,922 of the groups spanning different pharmacy_ids
+      # and 370,486 different doses.
+      sequence_number: {from: [pharmacy_id]}
+    ignored_columns:
+      drug_type: >-
+        Whether the row is the MAIN substance of an order or a BASE or ADDITIVE of a
+        compounded one. Used by the preparation to choose the name an unnamed
+        administration borrows (D-R18); as an event attribute it says nothing about the
+        patient.
+      formulary_drug_cd: >-
+        The hospital's own formulary code. A third name for the same product, in a code
+        system nothing outside BIDMC can resolve.
+      gsn: >-
+        The Generic Sequence Number of the product. A fourth naming, in a proprietary
+        system this conversion has no vocabulary for.
+      prod_strength: >-
+        The strength as printed on the product. Already folded into drug_full, which is
+        the name published, so that `Potassium Chloride 10mEq ER Tablet` names one
+        concept where `Potassium Chloride` names none.
+      doses_per_24_hrs: >-
+        The intended frequency. A property of the schedule, not of any one order event;
+        the start and stop times are what this export can say.
 
   prescriptions_named:
     adapter: parquet
@@ -407,6 +1064,13 @@ sources:
       unit:         {from: [dose_unit_rx]}
       route:        {from: [route]}
       caused_by:    {from: [poe_id]}
+      sequence_number: {from: [pharmacy_id]}
+    ignored_columns:
+      drug_type: "See prescriptions."
+      formulary_drug_cd: "See prescriptions."
+      gsn: "See prescriptions."
+      prod_strength: "Folded into drug_full; see prescriptions."
+      doses_per_24_hrs: "See prescriptions."
 
   # The pharmacy's record of a medication order, and where a dispensation is
   # documented. MIMIC-IV on FHIR maps this table to MedicationDispense and that is the
@@ -427,11 +1091,49 @@ sources:
       event_time:     {from: [starttime], required: true}
       end_time:       {from: [stoptime]}
       available_time: {from: [entertime]}
-      source_code:    {from: [medication], required: true}
-      source_name:    {from: [medication]}
+      # T2.M13 (P-M21, D-R18). 1,137,574 rows name no medication and 1,069,122 of them
+      # (94%) can be named from the prescription their pharmacy_id points at -- mostly
+      # large-volume intravenous fluids and parenteral nutrition. The preparation looks
+      # the name up and marks the row; the flag below is what tells a reader the name
+      # was borrowed from the order rather than written here.
+      source_code:    {from: [medication, medication_recovered], required: true}
+      source_name:    {from: [medication, medication_recovered]}
       status:         {from: [status]}
       route:          {from: [route]}
       caused_by:      {from: [poe_id]}
+      # T2.M1 (P-M1): 1,866,580 pharmacy rows merged, every one of the 1,526,725 groups
+      # spanning different pharmacy_ids. A dispensation is per order.
+      sequence_number: {from: [pharmacy_id]}
+    flag_when:
+      NAME_FROM_LINKED_ORDER: name_from_linked_order
+    expected_quarantine:
+      UNPARSEABLE_VALUE:
+        max_share: 0.01
+        reason: >-
+          Rows with no medication name and no order to borrow one from. 1,137,574 of
+          17,847,567 rows (6.4%) carried no name before D-R18; the recovery names
+          1,069,122 of them, leaving about 68,452 (0.4%) that stay quarantined because
+          nothing in the delivery says what was dispensed.
+    ignored_columns:
+      proc_type: >-
+        How the pharmacy processed the order (unit dose, IV piggyback). A property of
+        the dispensing workflow.
+      verifiedtime: >-
+        When a pharmacist verified the order. entertime is used as the available time
+        because it is when the record existed; verification is a second workflow step
+        this export does not model.
+      frequency: "The dosing schedule as free text; see doses_per_24_hrs."
+      dispensation: >-
+        Where the dose was dispensed from (floor stock, satellite pharmacy). A property
+        of the pharmacy, not of the patient.
+      fill_quantity: >-
+        How many containers were filled. A count of packages rather than a dose, with no
+        unit of measure attached to it.
+      medication_recovered: >-
+        Read through source_code and source_name above; listed here because the
+        coverage check looks at columns, and a column consumed only as a fallback in a
+        `from` list is easy to mistake for one nobody reads.
+      name_from_linked_order: "Read by flag_when above."
 
   emar:
     adapter: parquet
@@ -459,18 +1161,65 @@ sources:
       encounter_id:   {from: [hadm_id]}
       event_time:     {from: [charttime], required: true}
       available_time: {from: [storetime]}
-      source_code:    {from: [medication], required: true}
-      source_name:    {from: [medication]}
+      # T2.M13 (P-M21, D-R18): 2,120,873 administrations name no drug and 1,463,157 of
+      # them (69%) can be named from the order their pharmacy_id points at.
+      source_code:    {from: [medication, medication_recovered], required: true}
+      source_name:    {from: [medication, medication_recovered]}
       status:         {from: [event_txt]}
       sequence_number: {from: [emar_seq]}
       # Present in emar_detail all along; the preparation step now collapses that
       # one-to-many table to one row per administration and brings them across.
       dose:           {from: [dose_given_text]}
+      unit:           {from: [dose_given_unit]}
       route:          {from: [route]}
+      # T2.M8 (P-M11, D-R15). 2,104,436 administrations state a rate and none of it was
+      # published: heparin at 346,875 units/hr, furosemide at 78,565 mg/hr, insulin,
+      # nitroglycerin in mcg/kg/min. A drug given by infusion is not described by its
+      # dose alone, and until the canonical event had a rate there was nowhere to put it.
+      rate:           {from: [infusion_rate]}
+      rate_unit:      {from: [infusion_rate_unit]}
       # The order this administration carried out. Without it there is no way to ask
       # whether an ordered drug was actually given, which is the question an action
       # stream exists to answer.
       caused_by:      {from: [poe_id]}
+    flag_when:
+      NAME_FROM_LINKED_ORDER: name_from_linked_order
+    expected_quarantine:
+      UNPARSEABLE_VALUE:
+        max_share: 0.02
+        reason: >-
+          Administrations with no medication name and no order to borrow one from.
+          2,120,873 of 42,808,593 rows (5.0%) carried no name before D-R18; the recovery
+          names 1,463,157 of them, leaving about 657,716 (1.5%) with nothing in the
+          delivery that says what was given.
+    ignored_columns:
+      emar_id: >-
+        The row's own identifier. emar_seq is the discriminator, because it is the
+        ordinal a reader can interpret; the opaque id would only make two identical
+        administrations look different for no stated reason.
+      pharmacy_id: >-
+        The pharmacy order this administration belongs to. Used by the preparation to
+        recover a missing drug name (D-R18); the order itself is published from poe and
+        linked through caused_by.
+      scheduletime: >-
+        When the dose was due. charttime is when it was given and storetime when it was
+        recorded; a third time saying when it should have happened is a property of the
+        schedule.
+      dose_given: >-
+        The dose without its unit. dose_given_text is the two joined, which is the form
+        the canonical dose field takes, and dose_given_unit is mapped as the unit.
+      product_amount_given: >-
+        How much of the product was given -- two tablets, one vial -- rather than how
+        much drug. A container count, not an exposure.
+      complete_dose_not_given: >-
+        A workflow answer recorded when part of a dose was withheld. The status in
+        event_txt already says whether the administration happened.
+      detail_rows: >-
+        How many emar_detail rows the preparation collapsed into this one. Lineage
+        about the preparation, recorded in the prepared table so the collapse is
+        auditable; not a fact about the patient.
+      medication_recovered: "Read through source_code and source_name; see pharmacy."
+      name_from_linked_order: "Read by flag_when above."
 
   # The ED dispensing cabinet. Taking a drug out of a cabinet is not giving it to a
   # patient: the official documentation calls this dispensation, and one record can
@@ -485,9 +1234,24 @@ sources:
     required: false
     fields:
       person_id:   {from: [subject_id], required: true}
+      # T2.M9 (P-M14, P-M15).
+      encounter_id: {from: [stay_id]}
       event_time:  {from: [charttime], required: true}
       source_code: {from: [name], required: true}
       source_name: {from: [name]}
+      # 9,183 groups of dispensations differing only in med_rn were merged into one.
+      # med_rn is the ordinal of the dispensation within the stay: two of them are two
+      # trips to the cabinet.
+      sequence_number: {from: [med_rn]}
+    expected_encounter_link_rate:
+      min_rate: 0.99
+      reason: "stay_id comes from edstays, which publishes every ED stay as a visit."
+    ignored_columns:
+      gsn: >-
+        The Generic Sequence Number of the product. One dispensation can list several,
+        which is why 337,258 groups differing only in gsn are correctly merged into one
+        event; carrying it into the identity would split one trip to the cabinet into
+        several dispensations.
 
   poe:
     adapter: parquet
@@ -517,6 +1281,10 @@ sources:
       source_name:     {from: [order_subtype]}
       status:          {from: [order_status]}
       sequence_number: {from: [poe_seq]}
+      # T2.M8 (P-M12, D-R15). What was done to the order: placed, changed,
+      # discontinued. 52,212,109 rows carry it and it was never read, so an order that
+      # was cancelled looked exactly like one that stood.
+      action:          {from: [transaction_type]}
       # Order entry is the hub of the medication chain: the prescription, the pharmacy
       # record and the administration all name this row rather than each other, so a
       # missing middle source costs a link instead of the whole chain.
@@ -542,6 +1310,10 @@ sources:
       source_name:    {from: [note_type]}
       text:           {from: [text]}
       sequence_number: {from: [note_seq]}
+    ignored_columns:
+      note_id: >-
+        The note's own identifier. note_seq is the discriminator; the opaque id adds
+        nothing a reader can interpret.
 
   note_discharge:
     adapter: parquet
@@ -560,6 +1332,8 @@ sources:
       source_name:    {from: [note_type]}
       text:           {from: [text]}
       sequence_number: {from: [note_seq]}
+    ignored_columns:
+      note_id: "The note's own identifier; see note_radiology."
 
 # No extraction anchors: MIMIC rows are not repeated per index study, so there is no
 # anchor column and nothing for the anchor checks to find.
