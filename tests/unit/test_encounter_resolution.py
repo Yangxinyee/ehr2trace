@@ -101,3 +101,19 @@ def test_a_source_keyed_on_a_column_no_visit_is_keyed_on_is_reported():
     fields["encounter_id"] = spec.fields["encounter_id"].model_copy(update={"from_": ["STAY"]})
     rekeyed = cfg.model_copy(update={"sources": {**cfg.sources, "labs": spec.model_copy(update={"fields": fields})}})
     assert mismatched_encounter_keys(rekeyed) == {"labs": ["stay"]}
+
+
+def test_events_carrying_an_encounter_are_counted_per_source_outside_the_visits():
+    from ehr2trace.validate import encounter_carried
+
+    con = engine([
+        ("labs", 1, "E1", "measurement"),
+        ("labs", 1, None, "measurement"),
+        ("pyxis", 1, None, "drug_dispense"),
+        ("pyxis", 2, None, "drug_dispense"),
+        ("visits", 1, "E1", "visit"),
+    ])
+    assert encounter_carried(con) == {
+        "labs": {"events": 2, "with_encounter": 1},
+        "pyxis": {"events": 2, "with_encounter": 0},
+    }

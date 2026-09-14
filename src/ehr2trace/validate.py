@@ -2838,6 +2838,17 @@ def mismatched_encounter_keys(cfg: DatasetConfig) -> dict[str, list[str]]:
             if sid not in visit_sources and not (cols & visit_columns)}
 
 
+def encounter_carried(con) -> dict[str, dict[str, int]]:
+    """Per source, its events outside the visit kinds and how many of them carry an encounter id."""
+    kinds = ", ".join(_sql_str(k) for k in VISIT_KINDS)
+    return {
+        str(s): {"events": int(n), "with_encounter": int(k)}
+        for s, n, k in con.execute(
+            f"SELECT source_id, count(*), count(encounter_id) FROM evt WHERE event_kind NOT IN ({kinds}) GROUP BY 1"
+        ).fetchall()
+    }
+
+
 def encounter_link_rates(con, against: str = "visits") -> dict[str, dict[str, Any]]:
     """Per source, the share of events with an encounter id that resolve.
 
@@ -3795,8 +3806,11 @@ def _encounter_resolves(l: Layers) -> CheckResult:
     A rate only measures the events that carry an encounter id, so two things it cannot see
     are read from the configuration and the manifest instead. A source that delivers an
     encounter column and maps no encounter id fails (``unread_encounter_columns``), unless
-    it lists the column in ``ignored_columns``. A source keyed on a column no visit is keyed
-    on is reported (``mismatched_encounter_keys``).
+    it lists the column in ``ignored_columns``. A source that maps an encounter id while
+    none of its events carries one fails as well: the mapping never reached the build, or
+    the column it names is empty -- which is how a configuration corrected after a build
+    was made reads on that build. A source keyed on a column no visit is keyed on is
+    reported (``mismatched_encounter_keys``).
 
     Reads the events' source, subject, kind and encounter id, the ingest manifest's columns
     and the configuration. Skips when nothing carries or delivers an encounter id.
@@ -3809,10 +3823,17 @@ def _encounter_resolves(l: Layers) -> CheckResult:
     no_visits = (against == "visits" and l.events is not None
                  and l.events.filter(pl.col("event_kind").is_in(list(VISIT_KINDS))).height == 0)
     rates: dict[str, dict[str, Any]] = {}
-    if not no_visits:
-        with _engine(l) as con:
+    with _engine(l) as con:
+        if not no_visits:
             rates = encounter_link_rates(con, against)
-    if not rates and not unread:
+        carried = encounter_carried(con)
+    # A visit-shaped source's encounter id is the visit's own, and the other events it
+    # emits -- a death read from an admissions table -- need not carry it.
+    mapping = {sid for sid in encounter_aliases(l.cfg)
+               if not (l.cfg.sources[sid].shape == "visit" or l.cfg.sources[sid].event_kind in VISIT_KINDS)}
+    never_carried = {sid: c["events"] for sid, c in sorted(carried.items())
+                     if sid in mapping and c["events"] and not c["with_encounter"]}
+    if not rates and not unread and not never_carried:
         return _skip_with("no visit events to resolve encounters against" if no_visits else "no event carries an encounter id",
                           {"resolved_against": against, "mismatched_keys": mismatched})
     default = l.cfg.validation.encounter_link_rate_min
@@ -3831,6 +3852,7 @@ def _encounter_resolves(l: Layers) -> CheckResult:
         if r["rate"] < minimum:
             failing.append(f"{sid} {r['rate']:.1%} < {minimum:.1%}")
     failing += [f"{sid} delivers {cols} and maps no encounter id" for sid, cols in sorted(unread.items())]
+    failing += [f"{sid} maps an encounter id and none of its {n:,} events carries one" for sid, n in never_carried.items()]
     where = ("a visit of the same subject" if against == "visits"
              else "another source's events, since no visit carries an encounter id")
     reported = ("; keyed on columns no visit is keyed on (reported): "
@@ -3843,7 +3865,7 @@ def _encounter_resolves(l: Layers) -> CheckResult:
         if not failing
         else f"encounters that cannot be resolved to {where}: {failing[:8]}" + reported,
         {"resolved_against": against, "per_source": rates, "judged": judged, "default_min_rate": default,
-         "unread_encounter_columns": unread, "mismatched_keys": mismatched},
+         "unread_encounter_columns": unread, "mismatched_keys": mismatched, "never_carried": never_carried},
     )
 
 

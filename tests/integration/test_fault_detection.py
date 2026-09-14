@@ -217,3 +217,36 @@ def test_a_declared_merge_rule_the_build_never_applied_fails(clean_build, tmp_pa
     assert not result.passed
     assert "declared merge rules the build did not apply" in result.detail
     assert result.metrics["sources_with_rules_not_applied"]
+
+
+def test_a_source_that_maps_an_encounter_and_carries_none_fails(clean_build, tmp_path):
+    """A configuration corrected after a build was made maps an encounter the build never carried.
+
+    The rate ENCOUNTER_RESOLVES measures counts only events that carry an encounter id, so
+    a source whose events carry none contributed nothing to it and passed.
+    """
+    import polars as pl
+
+    from ehr2trace.faults import clone_work_tree
+    from ehr2trace.paths import WorkLayout
+    from ehr2trace.validate import run_checks
+
+    cfg, source_layout, baseline = clean_build
+    assert baseline["ENCOUNTER_RESOLVES"]
+    clone_work_tree(source_layout.root, tmp_path / "uncarried")
+    layout = WorkLayout(root=tmp_path / "uncarried", dataset_id=cfg.dataset_id)
+    path = layout.canonical_path("events")
+    events = pl.read_parquet(path)
+    sid = next(sid for sid, spec in sorted(cfg.sources.items())
+               if "encounter_id" in spec.fields and spec.shape != "visit"
+               and events.filter(pl.col("source_id") == sid).height)
+    blanked = events.with_columns(
+        pl.when(pl.col("source_id") == sid).then(None).otherwise(pl.col("encounter_id")).alias("encounter_id")
+    )
+    mutating = path.with_suffix(".parquet.mutating")
+    blanked.write_parquet(mutating)
+    mutating.replace(path)
+
+    (result,) = [r for r in run_checks(cfg, layout) if r.check_id == "ENCOUNTER_RESOLVES"]
+    assert not result.passed
+    assert f"{sid} maps an encounter id and none of its" in result.detail
