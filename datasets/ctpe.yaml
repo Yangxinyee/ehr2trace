@@ -325,6 +325,19 @@ sources:
       - {column: BMI, code: BMI, unit: "kg/m2"}
       - {column: Pulse, code: PULSE, unit: "/min"}
       - {column: BP_Systolic, code: BP_SYSTOLIC, unit: "mm[Hg]"}
+    # Both of these are the export, not the converter, and both are far past the 5%
+    # the checks complain at, so both are declared (plan section 2.6, T0.2). The three
+    # untimed vital signs above produce up to three quarantined values per patient --
+    # 92,005 from 30,971 rows -- so no share below 1 can bound them. The vital status is
+    # the `Status` column, which says whether a patient is alive without saying when it
+    # was true: 23,979 of 30,971 rows, 77%. Neither is given a time by guesswork.
+    expected_quarantine:
+      UNTIMED_CLINICAL_VALUE:
+        max_share: 1.0
+        reason: "the BMI, pulse and systolic pressure this sheet carries have no measurement time anywhere in the export; 92,005 values from 30,971 rows, up to three per patient (measured on the build of 2026-09-11)"
+      UNTIMED_VITAL_STATUS:
+        max_share: 0.8
+        reason: "23,979 of 30,971 rows state a vital status with no date it was true as of; 77.4%"
 
   outcome:
     adapter: excel
