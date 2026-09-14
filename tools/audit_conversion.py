@@ -42,6 +42,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from ehr2trace.analytics import HEAVY_THREADS, analytic_connection  # noqa: E402
 from ehr2trace.config import load_dataset_config  # noqa: E402
 from ehr2trace.paths import WorkLayout  # noqa: E402
+from ehr2trace.reference import load_reference  # noqa: E402
 from ehr2trace.schema import EventKind  # noqa: E402
 from ehr2trace.validate import (  # noqa: E402
     DRUG_KINDS,
@@ -49,11 +50,11 @@ from ehr2trace.validate import (  # noqa: E402
     artifact_in_this_tree,
     death_local_dates,
     encounter_link_rates,
-    load_unit_table,
     merge_disagreements,
     note_duplicate_groups,
     raw_coverage,
     reference_root,
+    reportable_spelling,
     temperature_like_summary,
     unit_spellings_per_code,
     _local_date_sql,
@@ -146,7 +147,7 @@ def _sources(con, layout: WorkLayout, manifest: dict[str, Any] | None, has_event
     return out
 
 
-def _units(con, omop, columns: set[str]) -> dict[str, Any]:
+def _units(con, omop, columns: set[str], dataset_id: str) -> dict[str, Any]:
     """Unit concept coverage, the spellings each code carries, and unknown spellings."""
     out: dict[str, Any] = {}
     if omop is not None:
@@ -161,19 +162,21 @@ def _units(con, omop, columns: set[str]) -> dict[str, Any]:
         }
     out["per_code"] = unit_spellings_per_code(con, columns, top=TOP_CODES)
     out["temperature_like"] = temperature_like_summary(con, columns)
-    table = load_unit_table()
-    if table is None:
+    tables = load_reference(None, dataset_id)
+    units = tables.units
+    if not units.by_spelling and not units.not_units:
         out["unit_table"] = {"loaded": False, "directory": str(reference_root() / "units")}
         return out
     rows = con.execute(
-        "SELECT regexp_replace(trim(unit_source), '\\s+', ' ', 'g') AS u, count(*) FROM evt "
-        "WHERE unit_source IS NOT NULL GROUP BY 1 ORDER BY 2 DESC"
+        "SELECT trim(unit_source) AS u, count(*) FROM evt WHERE unit_source IS NOT NULL GROUP BY 1 ORDER BY 2 DESC"
     ).fetchall()
-    unknown = [(str(u), int(n)) for u, n in rows if table.ucum(str(u)) is None]
+    undeclared = [(str(u), int(n)) for u, n in rows if not units.declared(u)]
     out["unit_table"] = {
-        "loaded": True, "files": list(table.files), "distinct_spellings": len(rows),
-        "unknown_spellings": len(unknown), "unknown_events": sum(n for _, n in unknown),
-        "top_unknown": {u[:32]: n for u, n in unknown[:25]},
+        "loaded": True, "directory": str(reference_root() / "units"), "distinct_spellings": len(rows),
+        "undeclared_spellings": len(undeclared), "undeclared_events": sum(n for _, n in undeclared),
+        "declared_not_a_unit_events": sum(int(n) for u, n in rows if units.declared(u) and not units.known(u)),
+        "top_undeclared": {reportable_spelling(u): n for u, n in undeclared[:25]},
+        "plausible_ranges_declared": len(tables.ranges), "exact_conversions": len(tables.conversions),
     }
     return out
 
@@ -199,6 +202,14 @@ def _visits(omop, con, has_events: bool) -> dict[str, Any]:
                 "coverage": round(int(covered or 0) / int(rows), 4) if rows else None,
                 "zero_length": int(zero_length or 0),
             }
+    if omop is not None:
+        try:
+            out["visit_detail_unparented_issues"] = int(omop.execute(
+                "SELECT count(DISTINCT event_id) FROM etl_audit.quality_issue "
+                "WHERE issue_type = 'VISIT_DETAIL_UNPARENTED'"
+            ).fetchone()[0])
+        except Exception:
+            out["visit_detail_unparented_issues"] = None
     if has_events:
         kinds = ", ".join(_sql_str(k) for k in VISIT_KINDS)
         rows = con.execute(
@@ -336,7 +347,7 @@ def audit(dataset_id: str, work_root: Path) -> dict[str, Any]:
                 report["merge_disagreements"] = merge_disagreements(
                     cfg, manifest, links_path, con, per_partition=True, layout=layout)
             if has_events:
-                report["units"] = _units(con, omop, columns)
+                report["units"] = _units(con, omop, columns, dataset_id)
                 report["visits"] = _visits(omop, con, has_events)
                 report["doses"] = _doses(con, omop, meds_files, has_events)
                 report["death"] = _death(con, omop, zone, has_events)

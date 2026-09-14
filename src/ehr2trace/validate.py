@@ -1856,10 +1856,6 @@ def _undecided_not_published(l: Layers) -> CheckResult:
 # in memory: `READ_COLUMNS` above stays what the in-memory checks read, and the columns
 # named in SQL below are read by the engine with projection, out of core.
 
-#: Where the reference tables live: ``reference/`` in the repository unless this names
-#: another directory (the fixture tests point it at a table that covers their units).
-REFERENCE_DIR_ENV = "EHR2TRACE_REFERENCE_DIR"
-
 #: A unit whose share of a code's rows is below this is a stray spelling, not a
 #: second dimension. Above it, the code mixes units nothing converts between.
 MIN_SECOND_UNIT_FAMILY_SHARE = 0.01
@@ -1903,174 +1899,69 @@ def _skip_with(reason: str, metrics: dict[str, Any]) -> CheckResult:
 
 
 def reference_root() -> Path:
-    import os
+    """The reference directory the canonical layer reads (``EHR_REFERENCE_DIR``, else ``reference/``)."""
+    from ehr2trace.reference import reference_directory
 
-    raw = os.environ.get(REFERENCE_DIR_ENV)
-    return Path(raw).expanduser() if raw else Path(__file__).resolve().parents[2] / "reference"
+    return reference_directory()
+
+
+def reference_tables(l: Layers):
+    """The unit, conversion and range tables this dataset's canonical layer was built with.
+
+    Loaded through ``ehr2trace.reference``, the loader the canonical build itself uses, so
+    a check can never judge a build by a table the build did not read. Remembered for
+    the run, because four checks ask. A table that does not load raises, and the check
+    that asked fails with the loader's reason: a unit table that contradicts itself is
+    not one a build could have used either.
+    """
+    cached = l.cache.get("reference_tables")
+    if cached is None:
+        from ehr2trace.reference import load_reference
+
+        cached = load_reference(None, l.cfg.dataset_id)
+        l.cache["reference_tables"] = cached
+    return cached
+
+
+def conversion_pairs(tables) -> list[tuple[str, str]]:
+    """The ``(from, to)`` UCUM pairs the conversion table links exactly."""
+    return [(source, conversion.to_ucum) for source, conversion in tables.conversions.items()]
+
+
+def _declared_unit_spellings(l: Layers) -> frozenset[str] | None:
+    """What a dose's trailing word must be for the publisher to read it as the unit.
+
+    The publisher accepts a number followed by a word as a quantity only when the word
+    is a spelling the unit table lists; with no table at all, every tail counts, which
+    None says.
+    """
+    units = reference_tables(l).units
+    return units.spellings if units.by_spelling else None
+
+
+#: A unit spelling longer than this, or of more words, is reported by a hash of its text
+#: rather than verbatim. The audit found free text parsed into unit columns -- a report's
+#: closing line is text, and can carry a reader's name -- while every real unit spelling
+#: in three exports fits comfortably inside both limits.
+MAX_REPORTED_SPELLING_CHARS = 20
+MAX_REPORTED_SPELLING_WORDS = 2
+
+
+def reportable_spelling(spelling: object) -> str:
+    """A unit or status spelling as a report may carry it: verbatim when it is short and
+    unit-shaped, otherwise a hash and a length."""
+    import hashlib
+
+    text = str(spelling)
+    if len(text) <= MAX_REPORTED_SPELLING_CHARS and len(text.split()) <= MAX_REPORTED_SPELLING_WORDS and "," not in text:
+        return text
+    return f"text#{hashlib.sha256(text.encode('utf-8')).hexdigest()[:12]}({len(text)} chars)"
 
 
 def _normalize_unit_spelling(text: str) -> str:
     import re
 
     return re.sub(r"\s+", " ", text.strip()).lower()
-
-
-@dataclass(frozen=True)
-class UnitTable:
-    """The unit table under ``reference/units``: source spelling -> UCUM code.
-
-    A local reader for the phase-0 checks; the reference loaders of the core package
-    replace it once they exist. Spellings compare case-insensitively with whitespace
-    collapsed, and a table may carry a fourth ``dimension`` column naming the physical
-    dimension of a UCUM code, which is what decides whether two units are one family.
-    """
-
-    ucum_of: dict[str, str]
-    dimension_of: dict[str, str]
-    files: tuple[str, ...]
-
-    def ucum(self, spelling: str | None) -> str | None:
-        if spelling is None:
-            return None
-        return self.ucum_of.get(_normalize_unit_spelling(spelling))
-
-
-def _reference_loader(name: str):
-    """The core package's own reference loader of that name, when it has one.
-
-    These tables are loaded by the canonical layer too, and the two readings must be
-    the same reading. Until ``ehr2trace.reference`` exists the checks read the CSVs
-    themselves; once it does, it is the authority, and anything it cannot answer falls
-    back here rather than failing a check on an import.
-    """
-    try:
-        from ehr2trace import reference as module  # type: ignore[attr-defined]
-    except Exception:
-        return None
-    return getattr(module, name, None)
-
-
-def _adapt_unit_table(loaded: Any) -> UnitTable | None:
-    """Whatever the core loader returns, as the table these checks read.
-
-    Accepts a table of the same shape, a mapping of spelling to UCUM code, or rows
-    carrying ``source_unit``/``ucum`` (and optionally ``dimension``).
-    """
-    if loaded is None:
-        return None
-    if isinstance(loaded, UnitTable) or (hasattr(loaded, "ucum_of") and hasattr(loaded, "ucum")):
-        return loaded
-    ucum_of: dict[str, str] = {}
-    dimension_of: dict[str, str] = {}
-    rows: Any = loaded.items() if isinstance(loaded, dict) else loaded
-    for row in rows:
-        if isinstance(row, tuple) and len(row) == 2 and isinstance(row[1], str):
-            spelling, ucum, dimension = row[0], row[1], ""
-        elif isinstance(row, dict):
-            spelling, ucum = row.get("source_unit"), row.get("ucum")
-            dimension = str(row.get("dimension") or "")
-        else:
-            return None
-        if not spelling or not ucum:
-            continue
-        ucum_of[_normalize_unit_spelling(str(spelling))] = str(ucum)
-        ucum_of.setdefault(_normalize_unit_spelling(str(ucum)), str(ucum))
-        if dimension:
-            dimension_of[str(ucum).lower()] = dimension.lower()
-    return UnitTable(ucum_of, dimension_of, ("ehr2trace.reference",)) if ucum_of else None
-
-
-def load_unit_table(root: Path | None = None) -> UnitTable | None:
-    """Every ``reference/units/*.csv`` merged, or None when the directory holds none."""
-    import csv
-
-    loader = _reference_loader("load_units")
-    if loader is not None:
-        try:
-            adapted = _adapt_unit_table(loader())
-        except Exception:
-            adapted = None
-        if adapted is not None:
-            return adapted
-    directory = (root or reference_root()) / "units"
-    files = sorted(directory.glob("*.csv"))
-    if not files:
-        return None
-    ucum_of: dict[str, str] = {}
-    dimension_of: dict[str, str] = {}
-    for path in files:
-        with path.open(encoding="utf-8", newline="") as handle:
-            for row in csv.DictReader(handle):
-                spelling = (row.get("source_unit") or "").strip()
-                ucum = (row.get("ucum") or "").strip()
-                if not spelling or not ucum:
-                    continue
-                ucum_of[_normalize_unit_spelling(spelling)] = ucum
-                ucum_of.setdefault(_normalize_unit_spelling(ucum), ucum)
-                dimension = (row.get("dimension") or "").strip()
-                if dimension:
-                    dimension_of[ucum.lower()] = dimension.lower()
-    return UnitTable(ucum_of, dimension_of, tuple(str(p) for p in files))
-
-
-def load_unit_conversions(root: Path | None = None) -> list[tuple[str, str]]:
-    """``(from_ucum, to_ucum)`` pairs of ``reference/unit_conversions.csv``, or none."""
-    import csv
-
-    loader = _reference_loader("load_unit_conversions")
-    if loader is not None:
-        try:
-            loaded = loader()
-            pairs = [
-                (str(r["from_ucum"]).strip().lower(), str(r["to_ucum"]).strip().lower())
-                if isinstance(r, dict) else (str(r[0]).strip().lower(), str(r[1]).strip().lower())
-                for r in (loaded.keys() if isinstance(loaded, dict) else loaded)
-            ]
-        except Exception:
-            pairs = None
-        if pairs:
-            return pairs
-    path = (root or reference_root()) / "unit_conversions.csv"
-    if not path.exists():
-        return []
-    with path.open(encoding="utf-8", newline="") as handle:
-        return [
-            ((row.get("from_ucum") or "").strip().lower(), (row.get("to_ucum") or "").strip().lower())
-            for row in csv.DictReader(handle)
-            if (row.get("from_ucum") or "").strip() and (row.get("to_ucum") or "").strip()
-        ]
-
-
-def load_plausible_ranges(dataset_id: str, root: Path | None = None) -> dict[tuple[str, str, str], tuple[float, float]] | None:
-    """``reference/plausible_ranges/<dataset_id>.csv`` keyed on (system, code, ucum), or None."""
-    import csv
-
-    loader = _reference_loader("load_plausible_ranges")
-    if loader is not None:
-        try:
-            loaded = loader(dataset_id)
-            if isinstance(loaded, dict) and loaded:
-                return {
-                    (str(k[0]), str(k[1]), str(k[2]).lower()): (float(v[0]), float(v[1]))
-                    for k, v in loaded.items()
-                }
-        except Exception:
-            pass
-    path = (root or reference_root()) / "plausible_ranges" / f"{dataset_id}.csv"
-    if not path.exists():
-        return None
-    ranges: dict[tuple[str, str, str], tuple[float, float]] = {}
-    with path.open(encoding="utf-8", newline="") as handle:
-        for row in csv.DictReader(handle):
-            try:
-                low, high = float(row["low"]), float(row["high"])
-            except (KeyError, TypeError, ValueError):
-                continue
-            key = ((row.get("code_system") or "").strip(), (row.get("source_code") or "").strip(),
-                   (row.get("ucum") or "").strip().lower())
-            if key[1]:
-                ranges[key] = (low, high)
-    return ranges
 
 
 #: UCUM atoms a metric prefix can be stripped from, for the family heuristic below.
@@ -2083,27 +1974,21 @@ _UCUM_PREFIXES = ("da", "y", "z", "a", "f", "p", "n", "u", "m", "c", "d", "h", "
 _UCUM_ALIASES = {"eq": "mol", "iu": "u", "[iu]": "u", "hr": "h", "hrs": "h", "hour": "h", "hours": "h", "sec": "s", "day": "d", "days": "d"}
 
 
-def unit_family(unit: str, table: UnitTable | None = None, use_dimension: bool = True) -> str:
+def unit_family(unit: str, units=None) -> str:
     """The dimension a unit spelling belongs to, approximately.
 
-    The unit table's ``dimension`` column is the answer when it has one. Otherwise the
-    UCUM code (or the spelling itself) is reduced to its base atoms: multipliers and
-    metric prefixes are dropped, so `mmol/L` and `umol/L` share a family while `mmol/L`
-    and `mg/dL` do not, and an annotation stays part of the family, so a code whose
-    rows mix `ng/mL` with `ng/mL FEU` is reported as mixing two.
-
-    With ``use_dimension`` false the declared column is ignored and the atoms are always
-    the answer. ``unit_families`` asks for both: a table that names the dimension of one
-    spelling and not of another would otherwise put two spellings of one quantity in
-    two families and report a code as mixing units it does not mix.
+    The spelling is resolved to its UCUM code through the unit table where the table
+    lists it, and the code (or, for a spelling nobody listed, the spelling itself) is
+    reduced to its base atoms: multipliers and metric prefixes are dropped, so `mmol/L`
+    and `umol/L` share a family while `mmol/L` and `mg/dL` do not, and an annotation
+    stays part of the family, so a code whose rows mix `ng/mL` with `ng/mL{FEU}` is
+    reported as mixing two.
     """
     import re
 
     spelling = _normalize_unit_spelling(unit)
-    ucum = table.ucum(spelling) if table is not None else None
+    ucum = units.lookup(spelling) if units is not None else None
     key = (ucum or spelling).lower()
-    if use_dimension and table is not None and key in table.dimension_of:
-        return table.dimension_of[key]
     parts = []
     for part in key.split("/"):
         atoms = []
@@ -2126,13 +2011,11 @@ def unit_family(unit: str, table: UnitTable | None = None, use_dimension: bool =
     return "/".join(parts)
 
 
-def unit_families(counts: dict[str, int], table: UnitTable | None, conversions: list[tuple[str, str]]) -> dict[str, int]:
+def unit_families(counts: dict[str, int], units, conversions: Sequence[tuple[str, str]]) -> dict[str, int]:
     """Rows per family for one code, given its rows per unit spelling.
 
     Units the conversion table links are one family whatever their spelling: a value
-    in one is exactly a value in the other. So is a spelling whose dimension the table
-    declares and one of the same atoms whose dimension it does not, which is what keeps
-    a half-filled ``dimension`` column from inventing a second family.
+    in one is exactly a value in the other.
     """
     parent: dict[str, str] = {}
 
@@ -2141,20 +2024,11 @@ def unit_families(counts: dict[str, int], table: UnitTable | None, conversions: 
             x = parent[x]
         return x
 
-    def union(a: str, b: str) -> None:
-        parent[find(a)] = find(b)
-
-    family_of: dict[str, str] = {}
-    for spelling in counts:
-        declared = unit_family(spelling, table)
-        family_of[spelling] = declared
-        union(declared, unit_family(spelling, table, use_dimension=False))
     for a, b in conversions:
-        union(unit_family(a, table), unit_family(b, table))
-        union(unit_family(a, table, use_dimension=False), unit_family(b, table, use_dimension=False))
+        parent[find(unit_family(a, units))] = find(unit_family(b, units))
     out: dict[str, int] = {}
     for spelling, n in counts.items():
-        root = find(family_of[spelling])
+        root = find(unit_family(spelling, units))
         out[root] = out.get(root, 0) + n
     return out
 
@@ -2622,7 +2496,7 @@ def unit_spellings_per_code(con, columns: set[str], top: int = 50) -> list[dict[
     out: dict[tuple[str, str], dict[str, Any]] = {}
     for system, code, total, spelling, n in rows:
         entry = out.setdefault((system, code), {"code_system": system, "source_code": code, "rows": int(total), "units": {}})
-        entry["units"][str(spelling)[:32]] = int(n)
+        entry["units"][reportable_spelling(spelling)] = int(n)
     return list(out.values())
 
 
@@ -2643,7 +2517,7 @@ def temperature_like_summary(con, columns: set[str]) -> list[dict[str, Any]]:
         """
     ).fetchall()
     return [
-        {"code_system": s, "source_code": c, "unit": str(u)[:32], "rows": int(n),
+        {"code_system": s, "source_code": c, "unit": reportable_spelling(u), "rows": int(n),
          "min": lo, "p01": p1, "median": med, "p99": p99, "max": hi}
         for s, c, u, n, lo, p1, med, p99, hi in rows
     ]
@@ -2972,50 +2846,57 @@ def _unit_concept_coverage(l: Layers) -> CheckResult:
 
 @check("UNIT_KNOWN")
 def _unit_known(l: Layers) -> CheckResult:
-    """Every unit string on an event is in the unit table, or the event says it is not.
+    """Every unit spelling on an event is one a table declares, or the event says it is not.
 
     From the audit (P-C8, P-J8): the value parser read any text after a number as a
     unit, so an electrocardiogram diagnosis became a number with a diagnosis for its
-    unit. Once the parser accepts only spellings the table knows, an unknown spelling on
-    an event carries UNIT_UNKNOWN and nothing was normalized from it.
+    unit. Once the parser accepts only spellings the table declares, a spelling nobody
+    has declared carries UNIT_UNKNOWN on its event and nothing is normalized from it. A
+    spelling the table declares *not* to be a unit -- a row with an empty ``ucum`` -- has
+    been read by somebody, so it is not unknown, and is reported apart.
 
-    Reads the distinct unit spellings of the events (with their UNIT_UNKNOWN flags) and
-    ``reference/units/*.csv``. Fails on any spelling outside the table on an unflagged
-    event; reports the most frequent unknown spellings. Skips when no unit table exists
-    or no event carries a unit.
+    Reads the distinct unit spellings of the events with their UNIT_UNKNOWN flags, and
+    the unit table through ``ehr2trace.reference``. Fails on any undeclared spelling on
+    an unflagged event; reports the most frequent undeclared spellings (verbatim only
+    when unit-shaped, see ``reportable_spelling``). Skips when the reference directory
+    holds no unit table or no event carries a unit.
     """
-    table = load_unit_table()
-    if table is None:
-        return _skip(f"no unit table under {reference_root() / 'units'}")
     if l.events_path is None:
         return _skip("canonical layer not built")
+    units = reference_tables(l).units
+    if not units.by_spelling and not units.not_units:
+        return _skip(f"no unit table under {reference_root() / 'units'}")
     with _engine(l) as con:
         rows = con.execute(
             f"""
-            SELECT regexp_replace(trim(unit_source), '\\s+', ' ', 'g') AS u, count(*),
+            SELECT trim(unit_source) AS u, count(*),
                    count(*) FILTER (WHERE NOT list_contains(quality_flags, '{QualityFlag.UNIT_UNKNOWN}'))
             FROM evt WHERE unit_source IS NOT NULL GROUP BY 1
             """
         ).fetchall()
     if not rows:
         return _skip("no event carries a unit")
-    known = sum(int(n) for u, n, _ in rows if table.ucum(str(u)) is not None)
-    unknown = sorted(
-        ((int(unflagged), int(n), str(u)) for u, n, unflagged in rows if table.ucum(str(u)) is None),
+    undeclared = sorted(
+        ((int(unflagged), int(n), str(u)) for u, n, unflagged in rows if not units.declared(u)),
         reverse=True,
     )
-    unflagged_total = sum(u for u, _, _ in unknown)
-    top = {spelling[:32]: n for _, n, spelling in unknown[:10]}
+    not_a_unit = sum(int(n) for u, n, _ in rows if units.declared(u) and not units.known(u))
+    unflagged_total = sum(f for f, _, _ in undeclared)
+    events = sum(int(n) for _, n, _ in rows)
+    top = {reportable_spelling(s): n for _, n, s in sorted(undeclared, key=lambda t: -t[1])[:10]}
+    top_unflagged = {reportable_spelling(s): f for f, _, s in undeclared[:10] if f}
     return CheckResult(
         "",
         unflagged_total == 0,
-        f"{len(rows):,} distinct unit spellings on {known + sum(n for _, n, _ in unknown):,} events; "
-        f"{len(unknown):,} spellings are outside the unit table and every event carrying one says so"
+        f"{len(rows):,} distinct unit spellings on {events:,} events; {len(undeclared):,} spellings no "
+        "table declares, and every event carrying one says so"
+        + (f"; {not_a_unit:,} events carry a spelling declared not to be a unit" if not_a_unit else "")
         if unflagged_total == 0
-        else f"{unflagged_total:,} events carry a unit the table does not know, unflagged; "
-        f"most frequent: {top}",
-        {"distinct_spellings": len(rows), "unknown_spellings": len(unknown), "unknown_unflagged_events": unflagged_total,
-         "top_unknown": top, "unit_table_files": list(table.files)},
+        else f"{unflagged_total:,} events carry a unit spelling no table declares, without UNIT_UNKNOWN; "
+        f"most frequent: {top_unflagged}",
+        {"distinct_spellings": len(rows), "undeclared_spellings": len(undeclared),
+         "undeclared_unflagged_events": unflagged_total, "declared_not_a_unit_events": not_a_unit,
+         "top_undeclared": top, "unit_table": str(reference_root() / "units")},
     )
 
 
@@ -3029,50 +2910,66 @@ def _unit_value_plausible(l: Layers) -> CheckResult:
     decision is to keep the value, flag it IMPLAUSIBLE, and leave the normalized column
     empty; the ranges live in ``reference/plausible_ranges/<dataset>.csv``.
 
-    Reads the events' code, unit (the normalized unit where the column exists, else the
-    source spelling resolved through the unit table), value (normalized where present)
-    and flags, against the dataset's range table. Fails on any value outside its range
-    without the IMPLAUSIBLE flag. Always reports the value ranges of temperature-like
-    codes. Skips without a range table for this dataset.
+    Reads the events' code, unit, value and flags against the dataset's range table,
+    through ``ehr2trace.reference``. A build that normalized its units is judged on the
+    normalized unit and value. A build that predates normalization is judged on its
+    source spelling resolved through the unit table and converted by the conversion
+    table, so a temperature written in Fahrenheit is held to the Celsius range it would
+    have been normalized to, and one written as Celsius is held to that range whatever
+    its values say. A value with no unit meets a range declared with an empty unit.
+    Fails on any value outside its range without the IMPLAUSIBLE flag. Always reports
+    the value ranges of temperature-like codes. Skips without a range table.
     """
     if l.events_path is None:
         return _skip("canonical layer not built")
     columns = _events_columns(l)
-    ranges = load_plausible_ranges(l.cfg.dataset_id)
-    table = load_unit_table()
+    tables = reference_tables(l)
+    normalized = "unit_normalized" in columns and "value_number_normalized" in columns
     with _engine(l) as con:
         temperatures = temperature_like_summary(con, columns)
-        if ranges is None:
+        if not tables.ranges:
             return _skip_with(
                 f"no plausible-range table for {l.cfg.dataset_id} under {reference_root() / 'plausible_ranges'}; "
                 f"value ranges of {len(temperatures)} temperature-like codes reported",
                 {"temperature_like": temperatures},
             )
         con.execute("CREATE TEMP TABLE rng (code_system VARCHAR, source_code VARCHAR, ucum VARCHAR, low DOUBLE, high DOUBLE)")
-        con.executemany("INSERT INTO rng VALUES (?, ?, ?, ?, ?)", [(s, c, u, lo, hi) for (s, c, u), (lo, hi) in ranges.items()])
+        con.executemany("INSERT INTO rng VALUES (?, ?, ?, ?, ?)",
+                        [(s, c, u or "", r.low, r.high) for (s, c, u), r in tables.ranges.items()])
         con.execute("CREATE TEMP TABLE umap (spelling VARCHAR, ucum VARCHAR)")
-        if table is not None:
-            con.executemany("INSERT INTO umap VALUES (?, ?)", [(k, v.lower()) for k, v in table.ucum_of.items()])
-        normalized = "unit_normalized" in columns
-        value = "coalesce(value_number_normalized, value_number)" if "value_number_normalized" in columns else "value_number"
+        if tables.units.by_spelling:
+            con.executemany("INSERT INTO umap VALUES (?, ?)", list(tables.units.by_spelling.items()))
+        con.execute("CREATE TEMP TABLE conv (from_ucum VARCHAR, to_ucum VARCHAR, factor DOUBLE, shift DOUBLE)")
+        if tables.conversions:
+            con.executemany("INSERT INTO conv VALUES (?, ?, ?, ?)",
+                            [(k, c.to_ucum, float(c.factor), float(c.offset)) for k, c in tables.conversions.items()])
         rows = con.execute(
             f"""
             WITH spelled AS (
-                SELECT code_system, source_code, quality_flags, {value} AS v,
-                       lower(regexp_replace(trim(unit_source), '\\s+', ' ', 'g')) AS u,
-                       {"lower(unit_normalized)" if normalized else "CAST(NULL AS VARCHAR)"} AS un
+                SELECT code_system, source_code, quality_flags, value_number,
+                       {"value_number_normalized" if normalized else "CAST(NULL AS DOUBLE)"} AS vn,
+                       lower(trim(unit_source)) AS u,
+                       {"unit_normalized" if normalized else "CAST(NULL AS VARCHAR)"} AS un
                 FROM evt
-                WHERE (unit_source IS NOT NULL{" OR unit_normalized IS NOT NULL" if normalized else ""})
-                  AND {value} IS NOT NULL
+                WHERE value_number IS NOT NULL{" OR value_number_normalized IS NOT NULL" if normalized else ""}
             ), resolved AS (
-                SELECT s.code_system, s.source_code, s.quality_flags, s.v, coalesce(s.un, umap.ucum, s.u) AS ucum
-                FROM spelled s LEFT JOIN umap ON umap.spelling = s.u
+                SELECT s.code_system, s.source_code, s.quality_flags,
+                       CASE WHEN s.un IS NOT NULL THEN coalesce(s.vn, s.value_number)
+                            WHEN c.from_ucum IS NOT NULL THEN s.value_number * c.factor + c.shift
+                            ELSE s.value_number END AS v,
+                       CASE WHEN s.un IS NOT NULL THEN s.un
+                            WHEN s.u IS NULL OR s.u = '' THEN ''
+                            ELSE coalesce(c.to_ucum, m.ucum) END AS ucum
+                FROM spelled s
+                LEFT JOIN umap m ON m.spelling = s.u
+                LEFT JOIN conv c ON c.from_ucum = m.ucum AND s.un IS NULL
             )
             SELECT r.code_system, r.source_code, r.ucum, count(*),
                    count(*) FILTER (WHERE e.v < r.low OR e.v > r.high),
                    count(*) FILTER (WHERE (e.v < r.low OR e.v > r.high)
                                       AND NOT list_contains(e.quality_flags, '{QualityFlag.IMPLAUSIBLE}'))
             FROM resolved e JOIN rng r ON r.code_system = e.code_system AND r.source_code = e.source_code AND r.ucum = e.ucum
+            WHERE e.v IS NOT NULL
             GROUP BY 1, 2, 3 ORDER BY 6 DESC, 5 DESC, 4 DESC
             """
         ).fetchall()
@@ -3083,13 +2980,13 @@ def _unit_value_plausible(l: Layers) -> CheckResult:
     return CheckResult(
         "",
         unflagged == 0,
-        f"{sum(j['rows'] for j in judged):,} values judged against {len(ranges)} declared ranges; "
-        f"{outside:,} lie outside and every one is flagged"
+        f"{sum(j['rows'] for j in judged):,} values judged against {len(tables.ranges)} declared ranges "
+        f"({'normalized' if normalized else 'source'} units); {outside:,} lie outside and every one is flagged"
         if unflagged == 0
         else f"{unflagged:,} values lie outside their declared plausible range and are not flagged: "
         + "; ".join(f"{j['source_code']} [{j['unit']}] {j['unflagged']:,}" for j in judged[:5] if j["unflagged"]),
-        {"ranges_declared": len(ranges), "judged": judged[:20], "outside": outside, "unflagged": unflagged,
-         "temperature_like": temperatures},
+        {"ranges_declared": len(tables.ranges), "judged_on": "normalized" if normalized else "source",
+         "judged": judged[:20], "outside": outside, "unflagged": unflagged, "temperature_like": temperatures},
     )
 
 
@@ -3101,16 +2998,17 @@ def _unit_homogeneous_per_code(l: Layers) -> CheckResult:
     `ng/mL FEU`, quantities no factor converts between, under one code; the decision is
     to split such a code by its unit rather than convert.
 
-    Reads rows per (code, unit) over the measured events, the unit table's dimensions
-    and the conversion table. Reports every code whose units fall in more than one
-    family; fails when a code's second family exceeds MIN_SECOND_UNIT_FAMILY_SHARE of
-    its rows. Skips when no measured event carries a unit.
+    Reads rows per (code, unit) over the measured events -- the normalized unit where the
+    build has one, else the source spelling -- with the unit and conversion tables
+    through ``ehr2trace.reference``. Reports every code whose units fall in more than one
+    family; fails when a code's second family exceeds MIN_SECOND_UNIT_FAMILY_SHARE of its
+    rows. Skips when no measured event carries a unit.
     """
     if l.events_path is None:
         return _skip("canonical layer not built")
     columns = _events_columns(l)
-    table = load_unit_table()
-    conversions = load_unit_conversions()
+    tables = reference_tables(l)
+    conversions = conversion_pairs(tables)
     kinds = ", ".join(_sql_str(k) for k in (str(EventKind.measurement), str(EventKind.observation)))
     unit = _unit_expression(columns)
     with _engine(l) as con:
@@ -3127,7 +3025,7 @@ def _unit_homogeneous_per_code(l: Layers) -> CheckResult:
         per_code.setdefault((str(system), str(code)), {})[str(spelling)] = int(n)
     mixed: list[dict[str, Any]] = []
     for (system, code), spellings in per_code.items():
-        families = unit_families(spellings, table, conversions)
+        families = unit_families(spellings, tables.units, conversions)
         if len(families) < 2:
             continue
         total = sum(families.values())
@@ -3135,7 +3033,8 @@ def _unit_homogeneous_per_code(l: Layers) -> CheckResult:
         second_share = ordered[1][1] / total if total else 0.0
         mixed.append({
             "code_system": system, "source_code": code, "rows": total,
-            "families": {f: n for f, n in ordered[:6]}, "second_family_share": round(second_share, 4),
+            "families": {reportable_spelling(f): n for f, n in ordered[:6]},
+            "second_family_share": round(second_share, 4),
             "fails": second_share > MIN_SECOND_UNIT_FAMILY_SHARE,
         })
     mixed.sort(key=lambda m: (-m["fails"], -m["second_family_share"], -m["rows"]))
@@ -3149,7 +3048,7 @@ def _unit_homogeneous_per_code(l: Layers) -> CheckResult:
         else f"{len(failing)} code(s) mix units no conversion links: "
         + "; ".join(f"{m['source_code']} {list(m['families'])[:2]} ({m['second_family_share']:.1%})" for m in failing[:5]),
         {"codes_with_units": len(per_code), "mixed": mixed[:20], "failing": len(failing),
-         "unit_table": table is not None, "conversions": len(conversions)},
+         "unit_table": bool(tables.units.by_spelling), "conversions": len(conversions)},
     )
 
 
@@ -3182,13 +3081,17 @@ def _dose_unit_carried(l: Layers) -> CheckResult:
         doses = [r[0] for r in con.execute(
             f"SELECT DISTINCT dose_source FROM evt WHERE event_kind IN ({kinds}) AND dose_source IS NOT NULL"
         ).fetchall()]
+        known = _declared_unit_spellings(l)
         with_unit = []
         for dose in doses:
             try:
-                if parse_value(dose).unit:
-                    with_unit.append((dose,))
+                parsed = parse_value(dose)
             except QuarantineRow:
                 continue
+            # The publisher's rule: a number followed by a word is a quantity with a unit
+            # only when the word is a spelling the unit table lists.
+            if parsed.unit and (known is None or parsed.unit.strip().lower() in known):
+                with_unit.append((dose,))
         con.execute("CREATE TEMP TABLE dosed (dose_source VARCHAR)")
         if with_unit:
             con.executemany("INSERT INTO dosed VALUES (?)", with_unit)
@@ -3246,19 +3149,39 @@ def _dose_unit_carried(l: Layers) -> CheckResult:
 def _visit_concept_coverage(l: Layers) -> CheckResult:
     """Published visits carry a visit concept, and no zero-length visit names nothing.
 
-    From the audit (P-J5, P-M7, P-M8, P-M20, D-R8, D-R14): 34% of one export's visits
-    and 86% of another's had concept 0 -- unmapped visit types, transfers and service
-    changes published as visits, and 546,024 discharge markers with no unit and no end
-    time published as zero-length visits.
+    From the audit (P-C12, P-J5, P-M7, P-M8, P-M20, D-R8, D-R14): 34% of one export's
+    visits and 86% of another's had concept 0 -- unmapped visit types, transfers and
+    service changes published as visits, and 546,024 discharge markers with no unit and
+    no end time published as zero-length visits.
 
-    Reads OMOP VISIT_OCCURRENCE and, when it holds rows, VISIT_DETAIL (concept coverage
-    against ``validation.visit_concept_coverage_min``, judged only when the build had a
-    vocabulary), and the canonical visit events for zero-length visits whose type is
-    empty or a placeholder, which must number zero. Skips when OMOP is not built.
+    VISIT_OCCURRENCE is judged against ``validation.visit_concept_coverage_min``.
+    VISIT_DETAIL is judged against its own ``validation.visit_detail_concept_coverage_min``:
+    a detail names a place of care rather than a type of visit, places are mapped by
+    review one department at a time, and an export whose ward names are still being
+    reviewed has a queue, not a converter fault. Both are judged only when the build had
+    a vocabulary, and a dataset that lowers either says why in ``validation.note``.
+
+    A visit detail that no visit of its person carries or contains cannot be published
+    at all: CDM 5.4 declares ``visit_detail.visit_occurrence_id`` NOT NULL. The publisher
+    withholds it with a VISIT_DETAIL_UNPARENTED issue and the canonical layer and MEDS
+    keep it, so the gap between canonical details and published rows is reported with
+    that reason and never counted as loss -- on one export most ICU transfers name an
+    encounter that was never delivered as a visit.
+
+    Reads OMOP VISIT_OCCURRENCE, VISIT_DETAIL, the publisher's lineage and quality
+    issues, and the canonical visit and visit-detail events. Zero-length visits whose
+    type is empty or a placeholder must number zero. Skips when OMOP is not built.
     """
     con = _omop_connection(l)
     if con is None:
         return _skip("OMOP not built or empty")
+
+    def scalar(sql: str) -> int | None:
+        try:
+            return int(con.execute(sql).fetchone()[0])
+        except Exception:
+            return None  # a table or column this build's publisher did not write
+
     try:
         has_vocabulary = _omop_vocabulary_version(con) is not None
         coverage: dict[str, dict[str, Any]] = {}
@@ -3272,12 +3195,19 @@ def _visit_concept_coverage(l: Layers) -> CheckResult:
             if not total:
                 continue
             coverage[table] = {"rows": int(total), "with_concept": int(covered), "share": round(int(covered) / int(total), 4)}
-        zero_unmapped = int(con.execute(
+        zero_unmapped = scalar(
             "SELECT count(*) FROM visit_occurrence WHERE visit_start_datetime = visit_end_datetime AND visit_concept_id = 0"
-        ).fetchone()[0])
+        ) or 0
+        unparented = scalar(
+            "SELECT count(DISTINCT event_id) FROM etl_audit.quality_issue WHERE issue_type = 'VISIT_DETAIL_UNPARENTED'"
+        )
+        published_details = scalar(
+            "SELECT count(DISTINCT event_id) FROM etl_audit.lineage WHERE target_table = 'visit_detail'"
+        )
     finally:
         con.close()
     placeholders = 0
+    canonical_details = None
     if l.events is not None:
         visits = l.events.filter(pl.col("event_kind") == str(EventKind.visit))
         placeholders = int(visits.filter(
@@ -3285,26 +3215,44 @@ def _visit_concept_coverage(l: Layers) -> CheckResult:
             & (pl.col("source_code").is_null()
                | pl.col("source_code").str.strip_chars().str.to_lowercase().is_in(sorted(PLACEHOLDER_VALUES)))
         ).height)
-    minimum = l.cfg.validation.visit_concept_coverage_min
+        canonical_details = int(l.events.filter(
+            (pl.col("event_kind") == str(EventKind.visit_detail)) & pl.col("event_time").is_not_null()
+        ).height)
+    thresholds = {
+        "visit_occurrence": l.cfg.validation.visit_concept_coverage_min,
+        "visit_detail": l.cfg.validation.visit_detail_concept_coverage_min,
+    }
     problems: list[str] = []
-    if has_vocabulary:
-        for table, c in coverage.items():
-            if c["share"] < minimum:
-                problems.append(f"{table}: {c['with_concept']:,} of {c['rows']:,} rows carry a concept ({c['share']:.1%} < {minimum:.0%})")
+    for table, c in coverage.items():
+        c["threshold"] = thresholds[table]
+        if has_vocabulary and c["share"] < thresholds[table]:
+            problems.append(f"{table}: {c['with_concept']:,} of {c['rows']:,} rows carry a concept "
+                            f"({c['share']:.1%} < {thresholds[table]:.0%})")
     if placeholders:
         problems.append(f"{placeholders:,} zero-length visits whose type is empty or a placeholder were published")
+    withheld = {
+        "canonical_visit_details": canonical_details,
+        "published_visit_details": published_details,
+        "unparented_issues": unparented,
+        "reason": "CDM 5.4 declares visit_detail.visit_occurrence_id NOT NULL; a detail no visit of its person "
+                  "carries or contains is withheld from OMOP and kept in the canonical layer and MEDS",
+    }
+    metrics = {"coverage": coverage, "thresholds": thresholds, "judged": has_vocabulary, "note": l.cfg.validation.note,
+               "zero_length_unmapped_visits": zero_unmapped, "placeholder_zero_length_visits": placeholders,
+               "visit_detail_withheld": withheld}
     if not coverage:
-        return _skip_with("no visit published", {"placeholder_zero_length_visits": placeholders})
+        return _skip_with("no visit published", metrics)
+    reported = f"; {unparented:,} visit details withheld as unparented (reported, not a loss)" if unparented else ""
     return CheckResult(
         "",
         not problems,
-        ", ".join(f"{t} {c['share']:.1%} of {c['rows']:,} rows carry a concept" for t, c in coverage.items())
+        ", ".join(f"{t} {c['share']:.1%} of {c['rows']:,} rows carry a concept (threshold {c['threshold']:.0%})"
+                  for t, c in coverage.items())
         + ("" if has_vocabulary else " (built without a vocabulary, so not judged)")
-        + f"; {zero_unmapped:,} zero-length visits without a concept, none typed by a placeholder"
+        + f"; {zero_unmapped:,} zero-length visits without a concept, none typed by a placeholder" + reported
         if not problems
-        else "; ".join(problems),
-        {"coverage": coverage, "threshold": minimum, "judged": has_vocabulary,
-         "zero_length_unmapped_visits": zero_unmapped, "placeholder_zero_length_visits": placeholders},
+        else "; ".join(problems) + reported,
+        metrics,
     )
 
 
@@ -3577,7 +3525,7 @@ def _excluded_status_not_published(l: Layers) -> CheckResult:
             ).fetchall():
                 per = distribution.setdefault(str(sid), {})
                 if len(per) < 5:
-                    per[str(status)[:32]] = int(n)
+                    per[reportable_spelling(status)] = int(n)
         if not declaring:
             return _skip_with("no source declares an excluded status; status distributions reported",
                               {"status_values": distribution})

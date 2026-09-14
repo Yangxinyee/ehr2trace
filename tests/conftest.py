@@ -54,26 +54,6 @@ def isolated_mappings(tmp_path_factory: pytest.TempPathFactory):
         os.environ["EHR_MAPPINGS_DIR"] = previous
 
 
-@pytest.fixture(scope="session", autouse=True)
-def fixture_reference_tables():
-    """The unit and plausible-range tables the fixture builds are judged against.
-
-    The repository's own `reference/` describes the real datasets, and a fixture's
-    invented units and codes have no business in it -- while a check that finds no
-    table skips, which would quietly excuse the fixture from every unit check. So the
-    tests point the reference loaders at `tests/fixtures/reference/`, where the
-    fixtures' own tables live, unless the environment already names a directory.
-    """
-    from ehr2trace.validate import REFERENCE_DIR_ENV
-
-    if os.environ.get(REFERENCE_DIR_ENV):
-        yield
-        return
-    os.environ[REFERENCE_DIR_ENV] = str(REPO_ROOT / "tests" / "fixtures" / "reference")
-    yield
-    os.environ.pop(REFERENCE_DIR_ENV, None)
-
-
 @pytest.fixture()
 def work_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path / "work"

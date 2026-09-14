@@ -1,80 +1,77 @@
-"""The reference tables and the unit-family heuristic the remediation checks judge by.
+"""The unit-family heuristic and the artifact re-rooting the remediation checks rely on.
 
-Two of the fifteen checks added by the conversion audit turn on questions that look
-trivial and are not: are two unit spellings the same quantity, and which copy of an
-artifact is this build's? Both are answered by small pure functions, and both are the
-kind of thing that is wrong in a way nobody notices until a check reports a clean
-dataset. So they are pinned here rather than only through a pipeline run.
+Two of the checks added by the conversion audit turn on questions that look trivial and
+are not: are two unit spellings the same quantity, and which copy of an artifact is this
+build's? Both are answered by small pure functions, and both are the kind of thing that
+is wrong in a way nobody notices until a check reports a clean dataset. So they are
+pinned here rather than only through a pipeline run. The tables themselves are loaded by
+``ehr2trace.reference`` -- the loader the canonical build uses -- and tested beside it.
 """
 
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 
 from ehr2trace.paths import WorkLayout
+from ehr2trace.reference import load_reference
 from ehr2trace.validate import (
     artifact_in_this_tree,
-    load_plausible_ranges,
-    load_unit_table,
+    conversion_pairs,
+    reportable_spelling,
     unit_families,
     unit_family,
 )
 
-FIXTURE_REFERENCE = Path(__file__).resolve().parents[1] / "fixtures" / "reference"
+
+def make_reference(root: Path) -> Path:
+    (root / "units").mkdir(parents=True)
+    (root / "units" / "test.csv").write_text(
+        "source_unit,ucum,basis\n"
+        "mmol/L,mmol/L,test\n"
+        "umol/L,umol/L,test\n"
+        "mg/dL,mg/dL,test\n"
+        "ng/mL,ng/mL,test\n"
+        "ng/mL FEU,ng/mL{FEU},test: fibrinogen equivalent units are a different quantity\n"
+        "F,[degF],test\n"
+        "C,Cel,test\n"
+        "*Unspecified,,what an order screen writes when no unit was chosen\n",
+        encoding="utf-8",
+    )
+    (root / "unit_conversions.csv").write_text(
+        "from_ucum,to_ucum,factor,offset,basis\n[degF],Cel,5/9,-160/9,exact\n", encoding="utf-8"
+    )
+    return root
 
 
-def test_the_fixture_unit_table_declares_no_spelling_twice():
-    """Files merge at load, so one spelling in two files is a silent contradiction."""
-    seen: dict[str, str] = {}
-    for path in sorted((FIXTURE_REFERENCE / "units").glob("*.csv")):
-        with path.open(encoding="utf-8", newline="") as handle:
-            for row in csv.DictReader(handle):
-                key = " ".join(row["source_unit"].split()).lower()
-                assert key not in seen, f"{key!r} is declared in {seen[key]} and {path.name}"
-                assert row["ucum"].strip(), f"{key!r} has no UCUM code in {path.name}"
-                assert row["basis"].strip(), f"{key!r} has no basis in {path.name}"
-                seen[key] = path.name
-
-
-def test_a_spelling_resolves_case_insensitively_and_a_ucum_code_resolves_to_itself():
-    table = load_unit_table(FIXTURE_REFERENCE)
-    assert table is not None
-    assert table.ucum("MMOL/L") == table.ucum("mmol/L") == "mmol/L"
-    assert table.ucum(" mg/dL ") == "mg/dL"
-    # The normalized column already holds UCUM, so a check comparing it must find it.
-    assert table.ucum("mm[Hg]") == "mm[Hg]"
-    assert table.ucum("no such unit") is None
-
-
-def test_units_of_the_same_dimension_are_one_family_and_others_are_not():
-    table = load_unit_table(FIXTURE_REFERENCE)
+def test_units_of_one_dimension_are_one_family_and_others_are_not(tmp_path: Path):
+    units = load_reference(make_reference(tmp_path), "test").units
     # Prefixes are not dimensions: millimoles and micromoles per litre are one quantity.
-    assert unit_family("mmol/L", table, use_dimension=False) == unit_family("umol/L", table)
-    assert unit_family("mg/dL", table) != unit_family("mmol/L", table)
-    # An annotation is part of the quantity: fibrinogen equivalent units are not the
-    # same number as the same mass concentration without them (the D-dimer case).
-    assert unit_family("ug/mL FEU", table) != unit_family("mg/dL", table)
-    assert len(unit_families({"mmol/L": 90, "umol/L": 10}, table, [])) == 1
-    assert len(unit_families({"mmol/L": 90, "mg/dL": 10}, table, [])) == 2
-    assert len(unit_families({"ug/mL FEU": 90, "mg/dL": 10}, table, [])) == 2
+    assert unit_family("mmol/L", units) == unit_family("umol/L", units)
+    assert unit_family("mg/dL", units) != unit_family("mmol/L", units)
+    # An annotation is part of the quantity: a D-dimer in fibrinogen equivalent units is
+    # not the same number as the same sample without them.
+    assert unit_family("ng/mL FEU", units) != unit_family("ng/mL", units)
+    assert len(unit_families({"mmol/L": 90, "umol/L": 10}, units, [])) == 1
+    assert len(unit_families({"ng/mL FEU": 90, "ng/mL": 10}, units, [])) == 2
 
 
-def test_a_conversion_makes_two_families_one():
+def test_a_conversion_makes_two_families_one(tmp_path: Path):
     """Two spellings an exact factor links are one unit, however they are written."""
-    counts = {"[lb_av]": 90, "kg": 10}
-    table = load_unit_table(FIXTURE_REFERENCE)
-    assert len(unit_families(counts, table, [])) == 2
-    assert len(unit_families(counts, table, [("[lb_av]", "kg")])) == 1
+    tables = load_reference(make_reference(tmp_path), "test")
+    counts = {"F": 90, "C": 10}
+    assert len(unit_families(counts, tables.units, [])) == 2
+    assert conversion_pairs(tables) == [("[degF]", "Cel")]
+    assert len(unit_families(counts, tables.units, conversion_pairs(tables))) == 1
 
 
-def test_a_plausible_range_table_is_keyed_on_code_and_normalized_unit():
-    ranges = load_plausible_ranges("ctpe_shape", FIXTURE_REFERENCE)
-    assert ranges, "the fixture declares ranges"
-    for (system, code, ucum), (low, high) in ranges.items():
-        assert system and code and ucum == ucum.lower()
-        assert low < high
-    assert load_plausible_ranges("a dataset with no table", FIXTURE_REFERENCE) is None
+def test_a_report_carries_a_unit_spelling_but_never_a_line_of_text():
+    """Free text reached unit columns in the audit, and a report is written to disk."""
+    for unit in ("mg/dL", "K/cu mm", "ng/mL FEU", "mcg/kg/min", "*Unspecified"):
+        assert reportable_spelling(unit) == unit
+    line = "Confirmed by READER, SOMEONE on 2019-03-05"
+    shown = reportable_spelling(line)
+    assert shown.startswith("text#") and "READER" not in shown and str(len(line)) in shown
+    assert reportable_spelling("SMITH, J").startswith("text#"), "a comma is how a name is written"
 
 
 def test_an_artifact_is_read_from_the_tree_being_validated(tmp_path: Path):

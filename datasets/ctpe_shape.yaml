@@ -211,7 +211,10 @@ sources:
       # The same admission appears in two extracts with two lengths of stay, because
       # each extract measured it when it was taken. Neither is wrong and neither may
       # win by arrival order: the longer stay is the one that saw the admission end.
+      # The end time is derived from the length of stay, so it disagrees in the same
+      # rows and is settled by the same judgement.
       length_of_stay: latest
+      end_time: latest
 
   pft_narrative:
     adapter: excel

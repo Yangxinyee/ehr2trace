@@ -690,8 +690,17 @@ class ValidationSpec(BaseModel):
     #: share of numeric measurements with a source or declared unit that must carry a
     #: non-zero unit concept
     unit_concept_coverage_min: float = Field(default=0.95, ge=0.0, le=1.0)
-    #: share of visits (and, separately, visit details) that must carry a concept
+    #: share of visits that must carry a visit concept
     visit_concept_coverage_min: float = Field(default=0.95, ge=0.0, le=1.0)
+    #: share of visit details that must carry a concept. A detail names a place of care
+    #: -- a ward, an intensive-care unit, a service -- rather than a type of visit, and
+    #: places are mapped by review one department at a time, so the visit threshold would
+    #: fail every export whose ward review is still under way (one export maps 14 of its
+    #: 22 intensive-care wards and leaves 227 department names to review). The default
+    #: asks for a majority instead: a publisher that writes concept 0 on every row, or a
+    #: ward mapping that was never compiled, sits near zero and still fails, while a
+    #: dataset whose wards are a known review queue lowers it and says why in ``note``.
+    visit_detail_concept_coverage_min: float = Field(default=0.5, ge=0.0, le=1.0)
     #: share of events with an encounter id that must resolve to a visit of the same
     #: subject, where the source declares no rate of its own
     encounter_link_rate_min: float = Field(default=0.95, ge=0.0, le=1.0)
