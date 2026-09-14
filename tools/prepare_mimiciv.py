@@ -150,6 +150,20 @@ NOT_PROJECTED: dict[str, dict[str, str]] = {
         "order_provider_id": PROVIDER,
     },
     "ed_pyxis": {"gsn_rn": "ordinal of the GSN within one dispensation; med_rn distinguishes the dispensation"},
+    # The wide-to-long split is the one place where a column legitimately vanishes from
+    # the output: each of these becomes a *row* carrying its own code, value and unit
+    # (T2.M2, T2.M3). Without saying so here the coverage report calls eight real
+    # measurements unexplained, which is the noise that hides a column nobody meant to
+    # drop.
+    "ed_vitalsign": {
+        c: "wide column carried as one row per value by the declared split (T2.M2)"
+        for c in ("temperature", "heartrate", "resprate", "o2sat", "sbp", "dbp", "rhythm", "pain")
+    },
+    "ed_triage": {
+        c: "wide column carried as one row per value by the declared split (T2.M3)"
+        for c in ("temperature", "heartrate", "resprate", "o2sat", "sbp", "dbp", "pain",
+                  "acuity", "chiefcomplaint")
+    },
     "chartevents": {"caregiver_id": CAREGIVER},
     "datetimeevents": {"caregiver_id": CAREGIVER},
     "outputevents": {"caregiver_id": CAREGIVER},
