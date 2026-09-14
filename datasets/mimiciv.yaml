@@ -881,6 +881,14 @@ sources:
       source_name:    {from: [item_label]}
       value:          {from: [value]}
       unit:           {from: [valueuom]}
+    # T1.7. One item states its unit in its name and in no column: 226531 is
+    # `Admission Weight (lbs.)` and every row of it has an empty valueuom. Measured on
+    # the sample of 2026-09-14: 1,315 rows, median 178.6, first to ninety-ninth
+    # percentile 97.2 to 365.2, against 226512 `Admission Weight (Kg)` at median 79.6.
+    # Declared here rather than written into the prepared table so that the event
+    # carries UNIT_DECLARED and a reader is told the unit was supplied.
+    declared_units:
+      "226531": "lb"
     expected_encounter_link_rate:
       min_rate: 0.99
       reason: "Every charted value belongs to an admission that admissions publishes."

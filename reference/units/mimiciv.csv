@@ -1,0 +1,436 @@
+source_unit,ucum,basis
+#/hpf,/[HPF],count per high power field
+#/lpf,/[LPF],count per low power field
+#/uL,/uL,count per microlitre
+% of current infusion rate,,"a relative change to a rate, not a quantity"
+%(50 mg/5 gram),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(0.06 %),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(0.6 mg/mL),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+"(1,000 mg)",,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(1.5 mL),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(10 mg/mL),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(100 mcg/mL),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(1250 mg),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(18 mg/3 mL),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(2 mg/mL),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(21)/75 mg (7),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(24)/75 mg (4),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(25 mg/2.5gram),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(3 mL),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(300 mcg),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(4 mg/mL),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(50 mg/5 gram),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(500 mg),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(60 mg/mL),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(65 mg iron),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(84)/10 mcg (7),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+(morphine),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+*IV~mcg~mL~,,"an unfilled order-entry template, not a unit"
+*IV~mL~mL~,,"an unfilled order-entry template, not a unit"
++/-,,"a qualitative marker, not a unit"
+-,,an empty cell written as a dash
+"-109,000 unit",,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+-12 gram/160 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+"-120,000 unit",,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+-120000 unit,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+-125 unit,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+-200 mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+-60000 unit,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+/ 0 Units,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+/0mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+/hpf,/[HPF],"count per high power field, written without the hash"
+/hr,,a denominator with no numerator
+/min,/min,"per minute, written for the ED heart and respiratory rates"
+/mm3,/mm3,count per cubic millimetre
+0,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+0.8 mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+0/mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+1 mg/mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+100,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+1000ML NS,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+150,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+15000 unit,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+"180,000 unit",,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+180000 unit,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+200,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+250,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+300,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+350,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+400,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+450,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+4ML,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+50,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+50 units/ml,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+500,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+550,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+600,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+60mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+61500 unit,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+[degF],[degF],"the UCUM code itself, written for ED temperature, which the module documents in Fahrenheit"
+___,,a masked cell in the de-identified export
+_UNIT,,a placeholder the ordering system writes when no unit was chosen
+AERA,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+AERO,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+AMP,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+appl,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+application,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+bag,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+BAGS,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+billion cell,,"a count of cells in a cellular product, not a unit of measure"
+bo,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+bottle,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+BTL,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+BU,,"Bethesda unit, the factor inhibitor titre; no UCUM code exists for it"
+BULK,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+CADD,,"the brand of the ambulatory infusion pump, not a unit"
+CAN,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+Cap,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+CAPS,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+capsule,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+capsules,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+CART,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+cc,mL,"cubic centimetre, which is a millilitre"
+cc/hr,mL/h,cubic centimetre per hour; a cubic centimetre is a millilitre
+cell,,"a count of cells in a cellular product, not a unit of measure"
+chamber,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+cmH2O,cm[H2O],"centimetre of water, the airway pressures"
+cmH2O/L/seconds,cm[H2O]/(L/s),"centimetre of water per litre per second, the airway resistance; the OMOP UCUM bundle carries no concept for it"
+CON,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+CONC,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+cp,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+cps,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+CPT,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+CRE,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+CREA,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+CUP,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+DBTL,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+Degree,deg,"degree of plane angle, a bed or device angle"
+DEV,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+Dose,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+doses,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+Dosing by Pharmacy,,an instruction to the pharmacy where a unit belongs
+Drop,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+drop ou,,"a drop given in both eyes: a form with a route, not a unit"
+DROPs,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+DRP,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+dynes*sec/cm5,dyn.s/cm5,"dyne second per centimetre to the fifth, the vascular resistance; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+dynes*sec/cm5/m2,dyn.s/cm5/m2,"the same, indexed to body surface area"
+dynes.sec.cm-5/m2,dyn.s/cm5/m2,"the same, spelled with the exponent written out"
+ea,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+ELIX,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+ENE,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+enema,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+Enemas,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+ERT,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+EU/dL,,"Ehrlich unit per decilitre, the urobilinogen unit; no UCUM code exists for it"
+film,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+fL,fL,"femtolitre, the red cell volume"
+Floor Stock Bag,,a dispensing location written where a unit belongs
+g/1L NS,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+g/dL,g/dL,gram per decilitre
+g/h,g/h,"gram per hour, already in UCUM form"
+g/hr,g/h,gram per hour
+g/kg,g/kg,gram per kilogram
+g\ 0 g,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+GEL,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+gg,,two grams run together by a data-entry slip; the dose cannot be read from it
+gm,g,"gram, in the abbreviation the pharmacy system uses"
+gm/hr,g/h,"gram per hour, in the pharmacy abbreviation"
+gmgm,,two gram abbreviations run together; see gg
+GPL,,"IgG phospholipid unit, an assay-specific unit with no UCUM code"
+GR,g,"gram, upper case"
+gram,g,"gram, spelled out in the singular"
+gram/100 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+gram/118 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+gram/30 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+gram/59 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+grams,g,"gram, spelled out"
+grams/hour,g/h,"gram per hour, spelled out"
+grams/min,g/min,"gram per minute, spelled out; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+gtt,{drop},"drop, in the Latin abbreviation; a drop is a volume nobody has standardised; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+GUM,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+gummies,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+hour,h,"hour, spelled out"
+hrs,h,"hour, abbreviated"
+Inch,[in_i],"inch, as d_items spells the height item"
+INH,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+INJ,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+insp/min,/min,"inspirations per minute: a respiratory rate, whose UCUM form is a plain per-minute"
+International Units,[iU],"international unit, spelled out"
+IU,[iU],"international unit, abbreviated"
+iu/0iu,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+IU/L,[iU]/L,international unit per litre
+IU/mL,[iU]/mL,international unit per millilitre
+JAR,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+K/uL,10*3/uL,"thousands per microlitre, the usual leucocyte and platelet count"
+Kcal,kcal,"kilocalorie, the enteral feed energy"
+kcal/day,kcal/d,"kilocalorie per day; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+kcal/kg,kcal/kg,kilocalorie per kilogram
+kg/m2,kg/m2,"kilogram per square metre, the body mass index"
+KIT,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+kJ,kJ,kilojoule
+L,L,litre
+L/min,L/min,litre per minute
+L/min/m2,L/min/m2,"litre per minute per square metre, the cardiac index"
+lbs,[lb_av],pound; the OMOP UCUM bundle carries no concept for [lb_av]
+LIQ,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+Liters,L,"litre, spelled out"
+log10 cop/mL,,a base-ten logarithm of a copy number; see log10 IU/mL
+log10 copies/mL,,a base-ten logarithm of a copy number; see log10 IU/mL
+log10 IU/mL,,a base-ten logarithm of a concentration; UCUM has no unit for a logged quantity and normalizing it as if it were linear would be wrong by orders of magnitude
+LOT,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+LOZ,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+lozenge,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+lozenges,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+m/uL,10*6/uL,"millions per microlitre, the red cell count"
+mA,mA,"milliampere, a pacing output"
+mcg'ml-mg/ml,,a mangled combination of four unit abbreviations
+mcg-mg/mL,,two units hyphenated over a volume; see mg-mcg
+mcg/ kg/ hr,ug/kg/h,"microgram per kilogram per hour, with stray spaces"
+mcg/0.5,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mcg/2 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mcg/actuation,ug/{actuat},microgram per actuation of an inhaler
+mcg/day,ug/d,"microgram per day; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+mcg/dose,ug/{dose},"microgram per dose; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+mcg/h,ug/h,"microgram per hour, abbreviated"
+mcg/hour,ug/h,"microgram per hour, spelled out"
+mcg/hr,ug/h,microgram per hour
+mcg/kg,ug/kg,microgram per kilogram
+mcg/kg/hour,ug/kg/h,"microgram per kilogram per hour, spelled out"
+mcg/kg/hr,ug/kg/h,microgram per kilogram per hour
+mcg/kg/min,ug/kg/min,microgram per kilogram per minute
+mcg/min,ug/min,microgram per minute
+mcg/mL,ug/mL,microgram per millilitre
+mcg/spray,ug/{spray},"microgram per spray; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+mcg\ 0 mcg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mcg\150mcg\250mcg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mch/kg/min,,a mistyping of mcg/kg/min; no unit is written here
+mcq,,a mistyping of mcg; no unit is written here
+MD to order daily dose,,an instruction to the prescriber where a unit belongs
+mEq / 100 mL SW,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mEq / 250 mL D5W,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mEq / 250 mL NS,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mEq / 500 mL D5W,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mEq / 500 mL NS,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mEq / hr,10*-3.eq/h,"milliequivalent per hour, with spaces; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+mEq in 1L,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mEq.,10*-3.eq,"milliequivalent, with a trailing full stop"
+mEq./hour,10*-3.eq/h,"milliequivalent per hour, with a full stop; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+mEq/100 mL SW,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mEq/15 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mEq/200 mL NS,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mEq/hr,10*-3.eq/h,"milliequivalent per hour; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+mEq/L,10*-3.eq/L,milliequivalent per litre; UCUM writes the milli prefix explicitly
+mEqmEq,,two milliequivalent abbreviations run together; see gg
+mg (1 mL),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg (950 mg),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg / 0 mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg /40 mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg base)/3 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg ER,mg,"milligram; ER names the release profile of the product, not the unit"
+mg or 92mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg PE,,"milligram of phenytoin sodium equivalent: a dose expressed in another salt, which is a conversion rather than a unit"
+mg PE/kg,,phenytoin sodium equivalent per kilogram; see mg PE
+mg-35 mcg (28),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg-mcg,,"two units hyphenated, for a combination product; neither can be assigned to the one dose recorded"
+mg-mg,,two units hyphenated; see mg-mcg
+mg-mg-mcg-mg,,four units hyphenated; see mg-mcg
+mg/ 0 mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg//min,,"milligram per minute with a doubled slash; corrected it would be a rate, but a unit is not something to correct by guess"
+mg/0 mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/0.3 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/0.5 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/0.67 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/0.6mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/0mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/0mgs,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/100 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/100mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/15 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/2 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/2.625 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/20 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/24 hour,mg/(24.h),"milligram per 24 hours, spelled out"
+mg/24 hr,mg/(24.h),"milligram per 24 hours, with a space"
+mg/24h,mg/(24.h),milligram per 24 hours
+mg/24hr,mg/(24.h),milligram per 24-hour collection
+mg/250 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/3 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/40mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/5,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/5 mL,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/5 mL (5 mL),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/50 ml,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/500 ml,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/54mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/6 mL (6 mL),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/61mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/960mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/actuation,mg/{actuat},milligram per actuation of an inhaler
+mg/day,mg/d,milligram per day
+mg/dose,mg/{dose},"milligram per dose; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+mg/g,mg/g,"milligram per gram, a urine ratio against creatinine"
+mg/h,mg/h,"milligram per hour, already in UCUM form"
+mg/hour,mg/h,"milligram per hour, spelled out"
+mg/hr,mg/h,milligram per hour
+mg/kg,mg/kg,milligram per kilogram
+mg/kg/hour,mg/kg/h,"milligram per kilogram per hour, spelled out"
+mg/kg/hr,mg/kg/h,milligram per kilogram per hour
+mg/L,mg/L,milligram per litre
+mg/m2,mg/m2,"milligram per square metre, a chemotherapy dose"
+mg/mg,mg/mg,"milligram per milligram, the same ratio in another scale"
+mg/min,mg/min,milligram per minute
+mg/mL,mg/mL,milligram per millilitre
+mg/mL (1 %),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/mL (2 %),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/mL (4 %),,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg/omg,,a milligram over a mistyped milligram
+mg\ 0 mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg\ 150 mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg\ 40mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg\100 mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg\40 mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mg\960 mg,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+mgmg,,two milligram abbreviations run together; see gg
+mgs/min,mg/min,"milligram per minute, pluralised"
+MILLI UNITS/MIN,10*-3.[iU]/min,"milli-unit per minute, the oxytocin rate; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+milligrams,mg,"milligram, spelled out"
+Million Cells,,"a count of cells in a cellular product, not a unit of measure"
+Million Units,10*6.[iU],"million units, the penicillin dose"
+min,min,minute
+mIU/mL,10*-3.[iU]/mL,milli international unit per millilitre
+mL SC,,"millilitres given subcutaneously: the route is not part of the unit, and no UCUM code carries one"
+mL/beat,mL/{beat},"millilitre per beat, the stroke volume; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+ml/day,mL/d,"millilitre per day; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+mL/h,mL/h,"millilitre per hour, already in UCUM form"
+mL/hour,mL/h,"millilitre per hour, spelled out"
+mL/hr,mL/h,"millilitre per hour, the infusion rate"
+ml/kg,mL/kg,"millilitre per kilogram, lower case"
+mL/Lumen,mL,"millilitre, per lumen of a multi-lumen line; the lumen is not a unit"
+mL/m2,mL/m2,"millilitre per square metre, the stroke volume index; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+mL/min,mL/min,millilitre per minute
+mL/min/1.73m2,mL/min/1.73.m2,"millilitre per minute per 1.73 square metres, the eGFR unit"
+mL/min/m2,mL/min/m2,millilitre per minute per square metre
+mL/mL,mL/mL,"millilitre per millilitre, a dilution ratio"
+mL/Syringe,mL,"millilitre, per syringe; the syringe is a container, not a unit"
+mls,mL,"millilitre, pluralised"
+mm,mm,millimetre
+mm Hg,mm[Hg],"millimetre of mercury, spelled with a space"
+mm/hr,mm/h,"millimetre per hour, the sedimentation rate"
+mm[Hg],mm[Hg],"the UCUM code itself, written by tools/prepare_mimiciv.py for the ED blood pressures"
+mmHg.,mm[Hg],"millimetre of mercury, with a stray full stop"
+mmol,mmol,millimole
+mOsm/kg,mosm/kg,"milliosmole per kilogram, the osmolality"
+MPL,,"IgM phospholipid unit, an assay-specific unit with no UCUM code"
+msec,ms,"millisecond, abbreviated with the sec"
+MU,10*6.[iU],"million units, abbreviated"
+mV,mV,"millivolt, a pacing sensitivity"
+N/A,,the source's placeholder for a result that has no unit
+nanogram,ng,"nanogram, spelled out"
+nanograms/kg/minute,ng/kg/min,nanogram per kilogram per minute
+Neb,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+NEEDLE,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+ng,ng,nanogram
+NG/,,a fragment of the nasogastric route written where a unit belongs
+ng/dL,ng/dL,nanogram per decilitre
+ng/mL,ng/mL,nanogram per millilitre
+ng/mL DDU,ng/mL,nanogram per millilitre; the DDU basis is carried by the split code (D-R10)
+ng/mL FEU,ng/mL,nanogram per millilitre; the FEU basis is carried by the split code (D-R10)
+nmol/L,nmol/L,nanomole per litre
+Notify,,a workflow instruction written where a unit belongs
+OINT,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+ounces,[oz_av],ounce; the OMOP UCUM bundle carries no concept for [oz_av]
+PACK,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+packet,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+PAD,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+PE (Phenytoin Sodium Equivalent),,"the same, spelled out"
+PEN,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+per L,,a denominator with no numerator
+pg,pg,"picogram, the mean cell haemoglobin"
+pg/mL,pg/mL,picogram per millilitre
+Pick Option Below,,an unfilled order-entry prompt
+pills,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+PKG,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+PKT,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+Pos/Neg,,"a qualitative marker, not a unit"
+powder,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+ppm,[ppm],"parts per million, the inhaled nitric oxide concentration"
+PPN Bag,,"a bag of peripheral parenteral nutrition: a container, not a unit of measure"
+psi,[psi],"pound per square inch, a cylinder pressure"
+PTCH,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+PTCHS,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+puff,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+puffs,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+PUMP,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+PWDR,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+Ratio,{ratio},a dimensionless ratio; UCUM carries it as an annotation
+RING,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+RPM,{rpm},"revolutions per minute of a device; a machine setting, carried as a UCUM annotation; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+SBTL,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+SCOOP,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+Score,[score],a scored scale; the vocabulary carries [score] for exactly this
+scp,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+sec,s,second
+sheet,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+soak,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+SOLN,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+spacer,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+SPG,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+SPRY,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+STCK,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+STRP,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+SUPP,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+SUSP,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+SWAB,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+SYR,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+SYRP,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+tab,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+tablet,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+tablets,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+tABS,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+TC,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+tiwst,,a data-entry slip with no unit in it
+TPN Bag,,"a bag of parenteral nutrition: a container, not a unit of measure"
+TRMT,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+TROC,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+tsp,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+tube,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+U,[U],enzyme unit
+U/g/Hb,U/g{HGB},enzyme unit per gram of haemoglobin
+U/hr,[iU]/h,"unit per hour, abbreviated"
+U/L,[U]/L,enzyme unit per litre
+U/mL,[U]/mL,enzyme unit per millilitre
+UDCUP,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+ug/dL,ug/dL,microgram per decilitre
+ug/mL,ug/mL,microgram per millilitre
+uIU/mL,10*-6.[iU]/mL,"micro international unit per millilitre, the thyrotropin unit"
+Umits,[iU],"unit, misspelled"
+umol/L,umol/L,micromole per litre
+unit,[iU],"unit, singular; in this export the drugs dosed in units are dosed in international units"
+unit-mg-unit,,three units hyphenated; see mg-mcg
+UNIT/1000ML,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+unit/gram,[iU]/g,unit per gram
+unit/hour,[iU]/h,"unit per hour, singular"
+UNIT/HR,[iU]/h,"unit per hour, upper case"
+UNIT/KG,[iU]/kg,unit per kilogram
+UNIT/kg/HR,[iU]/kg/h,"unit per kilogram per hour, upper case; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+unit/mL,[iU]/mL,unit per millilitre
+Units Humalog,,insulin units qualified by the brand given; the brand is not part of the unit
+Units Insulin 70 / 30,,insulin units qualified by the preparation; see Units Humalog
+Units Insulin Glargine,,insulin units qualified by the preparation; see Units Humalog
+Units Insulin NPH,,insulin units qualified by the preparation; see Units Humalog
+Units Regular,,insulin units qualified by the preparation; see Units Humalog
+Units VWF:RCo,,"von Willebrand factor ristocetin cofactor units, specific to one assay"
+units/hour,[iU]/h,"unit per hour, spelled out"
+units/hr,[iU]/h,"unit per hour; the drugs dosed this way -- heparin, insulin -- are dosed in international units"
+Units/kg,[iU]/kg,"unit per kilogram, mixed case"
+units/kg/hr,[iU]/kg/h,"unit per kilogram per hour; valid UCUM, but the OMOP UCUM vocabulary carries no concept for it"
+Units/Liter,[iU]/L,unit per litre
+units\ 0 units,,"a number, a product concentration, or a fragment of the product description written where the dose unit belongs; it does not measure the dose, so no UCUM code is given"
+uU/ML,10*-6.[U]/mL,micro unit per millilitre
+vial,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+WAF,,"dosage form, not a unit of measure: it counts the things handed over rather than the quantity of drug in them"
+Watts,W,"watt, a device power setting"
+years,a,"year, the unit of an age charted as a value"
+°C,Cel,"degree Celsius, as d_items spells it"
+°F,[degF],"degree Fahrenheit, as d_items spells it"
