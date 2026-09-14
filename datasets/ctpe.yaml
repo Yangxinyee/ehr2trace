@@ -513,6 +513,90 @@ sources:
     # The remaining unitless codes are the four procedure names (JHOC/BAYVIEW/GSS/JHCP
     # PULMONARY FUNCTION TEST(S) and the paediatric one), which carry no value.
 
+  # -- delivered in the second tree, All_kinds/, and projected by tools/prepare_ctpe.py --
+  #
+  # Both of these live under CTPE_PREPARED_ROOT rather than the raw export, in the same
+  # four partition directories. `tools/prepare_ctpe.py` writes them and refuses to write
+  # at all if the four groups differ in format, so that nothing about a row's shape can
+  # tell a model which cohort it came from. Running any ctpe command therefore needs
+  # CTPE_PREPARED_ROOT set; the loader says so by name if it is missing.
+
+  followup:
+    adapter: parquet
+    root_env: CTPE_PREPARED_ROOT
+    file_glob: "followup.parquet"
+    shape: point_event
+    event_kind: observation
+    required: false
+    # The most recent contact the health system recorded with this patient: 30,968 rows
+    # across the four groups, 22,979 patients, and exactly one date per patient once the
+    # groups are merged. It is not a diagnosis, a measurement or a procedure, which is
+    # what `observation` is for. Two things make it worth carrying: it is the censoring
+    # date a survival analysis needs, and the observation-period rule already runs to the
+    # last trustworthy event, so a follow-up contact extends the window to where the
+    # record really ends instead of to the last laboratory result (D-R12, T2.J7, P-J4).
+    #
+    # The code is the constant the preparation step projects. The delivery states the
+    # fact by which table the row is in, and an event needs a code to be publishable, so
+    # the code is written once in the projection rather than invented here.
+    fields:
+      person_id:      {from: [PAT_MRN_ID], required: true}
+      source_code:    {from: [observation_code], required: true}
+      source_name:    {from: [observation_code]}
+      event_time:     {from: [EFFECTIVE_DATE_DTTM], required: true}
+      available_time: {from: [EFFECTIVE_DATE_DTTM]}
+    ignored_columns:
+      rn: "the rank of the contact within the patient. The delivery already kept only the most recent one, so the column is the constant 1 on all 30,968 rows and says nothing a row does not already say"
+
+  icu_transfers:
+    adapter: parquet
+    root_env: CTPE_PREPARED_ROOT
+    file_glob: "icu_transfers.parquet"
+    shape: visit
+    # A department stay is a stay *inside* an admission, not an admission: OMOP has
+    # VISIT_DETAIL for exactly this, and publishing 946,025 of them as visits would
+    # invent that many hospitalisations (D-R14, T2.J7).
+    event_kind: visit_detail
+    required: false
+    # 1,523,224 ADT rows across the four groups, covering 22,914 of the 22,980 published
+    # patients; 946,025 events once the same stay delivered in both batches collapses.
+    fields:
+      person_id:       {from: [PAT_MRN_ID], required: true}
+      encounter_id:    {from: [PAT_ENC_CSN_ID]}
+      event_time:      {from: [IN_DTTM], required: true}
+      end_time:        {from: [PAT_OUT_DTTM]}
+      # The department is what kind of stay this was, in the hospital's own words: 241
+      # names, each with exactly one department id behind it. Kept verbatim rather than
+      # reduced to an ICU/not-ICU label, because the label is already delivered beside it
+      # and collapsing 241 names into 2 would throw away the ward a patient was on.
+      visit_type:      {from: [ADT_DEPARTMENT_NAME]}
+      # d:hh:mm:ss as delivered, kept as text and never parsed as a duration -- the same
+      # treatment the identically named column gets in `outcome`.
+      duration_masked: {from: [Time_Difference]}
+    # The site says which of the 241 departments is meant (they repeat across hospitals),
+    # and the hospital's own ICU flag is evidence a department name alone does not carry:
+    # 22 departments are flagged, 8 of them named only by building and floor.
+    keep_columns: [ADT_LOC_NAME, ICU_DEPT_YN]
+    # 10,828 of the 946,025 stays are delivered twice with a different departure time.
+    # The arrival is recorded to the second, so these are the same stay disagreeing about
+    # when it ended, not two stays: keep the arrival, publish no departure, flag the
+    # event and quarantine both values (D-R4). The stay length disagrees exactly when the
+    # departure does, and is withheld with it rather than left pointing at one of them.
+    merge_rules:
+      end_time:        {rule: null_and_flag}
+      duration_masked: {rule: null_and_flag}
+    # The ADT table is the patient's whole department history; the `Outcome` sheet holds
+    # only the 25,573 encounters this extract was built around. So 91% of these encounter
+    # ids are real -- they appear on other events of the same patient -- but only 13.29%
+    # of the stays name an encounter that was delivered as a visit. That is a gap in the
+    # delivery, not a parsing failure, and it is declared rather than treated as one.
+    expected_encounter_link_rate:
+      min_rate: 0.12
+      reason: "13.29% of the 946,025 stays carry an encounter id that was delivered as a visit; the ADT table spans 226,608 encounters and the Outcome sheet only 25,573 (measured 2026-09-14)"
+    ignored_columns:
+      ADT_DEPARTMENT_ID: "the numeric key of ADT_DEPARTMENT_NAME: 241 ids, 241 names, one to one, so it identifies nothing the name does not. NULL on the 358,928 post-discharge rows, which belong to no department"
+      NAME: "not a name of a person and not a name of a department: 4 distinct values over 1,523,224 rows, in three masked shapes (aaaaaaaa aa, aaaaaaaaa x2, aaaaa aa aaaaaaa aaaaaa), which is the ADT event vocabulary saying how the stay began. It could be carried as the `action` role; it is left out until someone decides that, because this file's instruction was to project it only if it were a department name, and it is not"
+
 anchors:
   anchor_type: ctpa
   from_field: anchor_time
@@ -569,6 +653,85 @@ execution:
   bucket_count: 64
   workers: 4
   chunk_rows: 200000
+
+validation:
+  # Thresholds are the remediation plan's defaults. One of them is known to fail here and
+  # is left failing on purpose: a department stay's `visit_type` is one of 241 site-local
+  # ward names, and only the 14 whose name actually says ICU or INTENSIVE CARE are mapped
+  # (the other 8 flagged as ICU are named by building and floor, and are in the review
+  # queue). Lowering the number would hide a real gap; the queue is where it gets closed.
+  note: >-
+    visit_concept_coverage_min is expected to fail for `visit_detail` until the ADT
+    department names are reviewed: 14 of 241 are mapped as of 2026-09-14.
+
+# Delivered tables this conversion deliberately does not read (D-R12, decided 2026-09-13).
+# Paths are under the second delivery tree, `All_kinds/`, beside the two tables
+# tools/prepare_ctpe.py does read; that script lists every file it skipped, with the same
+# reasons, in its own manifest, so the two cannot drift apart silently.
+out_of_scope:
+  surgical_pathology_reports:
+    matches: ["All_kinds/Surgical Pathology Reports/**"]
+    reason: >-
+      Surgical pathology report text, 131-159 MB per group. Free-text pathology is a
+      conversion of its own -- it needs a section parser and a terminology pass before any
+      of it is a fact -- and nothing in this cohort's questions turns on it.
+  cardiac_cath:
+    matches: ["All_kinds/Cardiac Cath/**"]
+    reason: >-
+      Catheterisation reports covering about 11% of patients, at the same proportion in
+      each group. A finding present for one patient in nine cannot support a cohort-level
+      claim, and the text needs the same parser the pathology reports do.
+  lipid_panel:
+    matches: ["All_kinds/Labs - Lipid Panel/**"]
+    reason: >-
+      Lipid results, 109,000-191,000 rows per group, covering about 70% of patients. They
+      are laboratory values the main `labs` table does not carry, and they could be
+      included later; they are out of scope now because no question in this cohort asks
+      about lipids and each new code needs its own unit and range declarations.
+  icu_progress_notes:
+    matches:
+      - "All_kinds/ICU/ICU/*_notes.txt"
+      - "All_kinds/ICU/ICU/*_note.txt"
+      - "All_kinds/ICU/ICU/29b_pulmonary_embolism.txt"
+    reason: >-
+      ICU progress-note text, about 33.6 GB in four files for this cohort. They have no
+      header row -- the note text starts at byte 0 -- and they hold emergency, admission
+      and pre-procedure notes as well, so which note a block of text is cannot be told
+      without a parser nobody has written. Never opened.
+  surgical_cases:
+    matches: ["All_kinds/Surgical Cases/**"]
+    reason: >-
+      Surgical case lists, 30-77 rows per group. Too few rows to support anything, and the
+      delivery is wrong: `29_pulmonary_embolism.xlsx` has the same row count as the 29_no
+      file and every one of its MRNs belongs to 29_no, so it is a copy and the 29_has list
+      is missing (P-J12). Raised with the data owner 2026-09-13; still unanswered.
+  other_cohorts:
+    matches:
+      - "All_kinds/**/28_*"
+      - "All_kinds/**/28a_*"
+      - "All_kinds/**/30b_*"
+      - "All_kinds/**/33b_*"
+      - "All_kinds/**/35_*"
+      - "All_kinds/Ultrasound/**"
+      - "All_kinds/Most Recent Follow-Up/Most Recent Follow-Up/followup.xlsx::28_*"
+      - "All_kinds/Most Recent Follow-Up/Most Recent Follow-Up/followup.xlsx::30b_*"
+      - "All_kinds/Most Recent Follow-Up/Most Recent Follow-Up/followup.xlsx::33b_*"
+      - "All_kinds/Most Recent Follow-Up/Most Recent Follow-Up/followup.xlsx::35_*"
+    reason: >-
+      Another cohort's tables, delivered in the same tree: coronary CT (28, 28a), cardiac
+      MRI (30b), cholecystitis ultrasound (33b) and ED head CT (35). Not these patients.
+      The follow-up workbook holds one worksheet per cohort, so the same rule names the
+      sheets as well as the files.
+  archive_metadata:
+    matches: ["All_kinds/**/__MACOSX/**"]
+    reason: "AppleDouble resource forks macOS wrote when the archive was made; not data."
+  prototype_extracts:
+    matches: ["data-test/**", "data-test-v2/**"]
+    reason: >-
+      Two hand-built prototypes that sit beside the partition directories under
+      EHR_DATA_ROOT: per-patient timelines and reports for three patients, with the
+      scripts that made them. Derived from the same export, not part of it, and superseded
+      by this converter.
 
 owner_answers:
   # Answered by the data owner 2026-08-21: one cohort, exported twice. The two extracts
