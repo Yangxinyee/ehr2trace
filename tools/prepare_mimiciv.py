@@ -53,7 +53,7 @@ from pathlib import Path
 import duckdb
 
 CSV_OPTS = "header=true, all_varchar=true, compression='gzip'"
-TOOL_VERSION = "2"
+TOOL_VERSION = "3"
 
 # The container names a compounded order's BASE row carries when it names no
 # substance. mimiciv.yaml drops them from the named prescriptions; the name recovery
@@ -649,7 +649,16 @@ def build(mimic: Path, ed: Path | None, note: Path | None, out: Path, sample: in
                    spec_type_desc, test_itemid, test_name, org_itemid, org_name, isolate_num,
                    ab_itemid, ab_name, dilution_text, dilution_comparison, dilution_value,
                    interpretation,
-                   replace(dilution_text, '=>', '>=') AS dilution_result
+                   replace(dilution_text, '=>', '>=') AS dilution_result,
+                   -- One susceptibility is one antibiotic tested against one isolate of
+                   -- one organism in one specimen. The antibiotic is the event's code;
+                   -- this is the rest, as the single column a discriminator can read.
+                   -- Measured on the 1-in-100 sample of 2026-09-14: keyed on the
+                   -- antibiotic alone 1,239 of 15,161 results merged, on the isolate
+                   -- number 480, on specimen and isolate 386 -- isolate numbers repeat
+                   -- across organisms within a specimen -- and on all three none.
+                   micro_specimen_id || '/' || coalesce(isolate_num, '') || '/'
+                     || coalesce(org_itemid, org_name, '') AS susceptibility_key
             FROM _micro_ab
             """,
             "_micro_ab",

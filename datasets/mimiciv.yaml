@@ -545,20 +545,20 @@ sources:
       # was sent with no organism, which is the honest reading of a negative culture.
       value:          {from: [org_name]}
       # Two isolates of one species in one specimen, or one species in two specimens
-      # drawn the same minute, are different findings. isolate_num is what tells them
-      # apart; without it they merge into one.
-      sequence_number: {from: [isolate_num]}
+      # drawn the same minute, are different findings, and only specimen and isolate
+      # together tell them apart. Measured on the 1-in-100 sample of 2026-09-14: keyed
+      # on isolate_num alone, 636 organism rows from two different specimens drawn at
+      # the same minute merged into one finding; keyed on both, the only rows that
+      # merge are the 13,645 that belong to one isolate, which is the collapse intended.
+      sequence_number: {from: [specimen_isolate]}
     ignored_columns:
       microevent_id: >-
         The row's own identifier. Rows of one isolate are meant to collapse into one
         event, so this must not reach the identity.
       micro_specimen_id: >-
-        Groups the tests of one specimen. Carried by specimen_isolate, which is the
-        form the discriminator needs.
-      specimen_isolate: >-
-        specimen and isolate number joined, prepared as a single discriminator before
-        sequence_number could carry one; isolate_num is used instead, because the
-        specimen is already fixed by the subject, the test and the time.
+        Groups the tests of one specimen. Carried inside specimen_isolate, the
+        discriminator.
+      isolate_num: "Which isolate; carried inside specimen_isolate, the discriminator."
       test_itemid: "The numeric id behind test_name, which is the code."
       org_itemid: "The numeric id behind org_name, which is the value."
       quantity: >-
@@ -589,10 +589,19 @@ sources:
       # sensitivity interpretation where it did not.
       value:          {from: [dilution_result, interpretation]}
       status:         {from: [interpretation]}
-      sequence_number: {from: [ab_itemid]}
+      # One antibiotic against one isolate of one organism in one specimen: the
+      # antibiotic is the code, and susceptibility_key -- prepared by
+      # tools/prepare_mimiciv.py -- is the rest. Measured on the 1-in-100 sample of
+      # 2026-09-14: keyed on the antibiotic alone 1,239 of 15,161 results merged, on
+      # specimen and isolate 386, on specimen, isolate and organism none.
+      sequence_number: {from: [susceptibility_key]}
     ignored_columns:
-      microevent_id: "The row's own identifier; ab_itemid is the discriminator."
-      micro_specimen_id: "Groups the tests of one specimen; see micro_organisms."
+      microevent_id: >-
+        The row's own identifier. Not the discriminator: a result reported twice for
+        the same isolate and antibiotic is one result, and a row id would keep the
+        copies apart.
+      micro_specimen_id: "Carried inside susceptibility_key, the discriminator."
+      ab_itemid: "The numeric id behind ab_name, which is the code."
       test_itemid: "The numeric id behind test_name."
       test_name: >-
         The culture this susceptibility came from. micro_organisms publishes it as its
@@ -603,7 +612,7 @@ sources:
         The organism the antibiotic was tested against. Published by micro_organisms as
         the value of the culture event; the canonical event has one value field and this
         event's value is the susceptibility answer.
-      isolate_num: "Which isolate; micro_organisms carries it as the discriminator."
+      isolate_num: "Carried inside susceptibility_key, the discriminator."
       dilution_text: >-
         The dilution exactly as the source spells it, `=>` and all. dilution_result is
         the same string with the comparator rewritten, and the original stays in the
