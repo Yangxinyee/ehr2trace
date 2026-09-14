@@ -161,3 +161,26 @@ def test_a_unit_column_the_build_never_read_is_seen_in_the_source(clean_build):
     assert not result.passed
     assert f"{sid} states a dose unit" in result.detail
     assert result.metrics["source_unit_statements"][sid]["events_carrying_a_unit"] == 0
+
+
+def test_an_unset_prepared_root_skips_only_the_files_under_it(clean_build, monkeypatch):
+    """One source's root being unset must not stop the walk of every other root.
+
+    A dataset that gains a prepared source living under a root of its own gains a
+    variable its old environments do not set; reading that as "examine no file at all"
+    turned a coverage check into a pass that had looked at nothing.
+    """
+    import json
+
+    from ehr2trace.validate import raw_coverage
+
+    cfg, layout, _baseline = clean_build
+    sid, spec = next(iter(cfg.sources.items()))
+    variable = "EHR2TRACE_TEST_UNSET_PREPARED_ROOT"
+    monkeypatch.delenv(variable, raising=False)
+    moved = cfg.model_copy(update={"sources": {**cfg.sources, sid: spec.model_copy(update={"root_env": variable})}})
+    manifest = json.loads((layout.manifest_dir / "inputs.json").read_text(encoding="utf-8"))
+
+    report = raw_coverage(moved, manifest)
+    assert variable in report["files"]["not_examined"]
+    assert report["files"]["partitions_examined"], "the dataset's own root is still walked"

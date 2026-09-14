@@ -96,3 +96,17 @@ def test_an_artifact_is_read_from_the_tree_being_validated(tmp_path: Path):
     assert artifact_in_this_tree(lonely, recorded) == Path(recorded)
     assert artifact_in_this_tree(lonely, str(tmp_path / "nowhere.parquet")) is None
     assert artifact_in_this_tree(lonely, None) is None
+
+
+def test_a_date_or_a_clock_time_is_text_however_short():
+    for text in ("on 2/16/21", "at 10:42", "2019-03-05"):
+        assert reportable_spelling(text).startswith("text#"), text
+    for unit in ("mg/24 h", "10*3/uL", "mL/1.73m2", "x10E9/L"):
+        assert reportable_spelling(unit) == unit
+
+
+def test_a_power_of_ten_multiplier_does_not_make_a_second_family(tmp_path: Path):
+    """The vocabulary writes mEq/L as `10*-3.eq/L`; that is millimoles' family, not a new one."""
+    units = load_reference(make_reference(tmp_path), "test").units
+    assert unit_family("10*-3.eq/L", units) == unit_family("mmol/L", units)
+    assert unit_family("10*3/uL", units) == unit_family("10*9/L", units)

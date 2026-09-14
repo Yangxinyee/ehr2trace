@@ -1951,9 +1951,14 @@ def reportable_spelling(spelling: object) -> str:
     """A unit or status spelling as a report may carry it: verbatim when it is short and
     unit-shaped, otherwise a hash and a length."""
     import hashlib
+    import re
 
     text = str(spelling)
-    if len(text) <= MAX_REPORTED_SPELLING_CHARS and len(text.split()) <= MAX_REPORTED_SPELLING_WORDS and "," not in text:
+    # A date or a clock time is how a report's closing line reads and never how a unit
+    # does: `on 2/16/21` is ten characters and two words, and it is not a unit.
+    dated = re.search(r"\d{1,2}/\d{1,2}(/\d{2,4})?\b|\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}:\d{2}\b", text)
+    if (len(text) <= MAX_REPORTED_SPELLING_CHARS and len(text.split()) <= MAX_REPORTED_SPELLING_WORDS
+            and "," not in text and not dated):
         return text
     return f"text#{hashlib.sha256(text.encode('utf-8')).hexdigest()[:12]}({len(text)} chars)"
 
@@ -1992,7 +1997,10 @@ def unit_family(unit: str, units=None) -> str:
     parts = []
     for part in key.split("/"):
         atoms = []
-        for token in re.split(r"[.*](?!\d)", part.strip()):
+        # `10*-3.eq` is a multiplier and an atom; splitting on the `*` before the sign
+        # would leave `-3` behind as an atom of its own and make mEq/L a second family.
+        part = re.sub(r"10[*^][+-]?\d+|x?10e[+-]?\d+", "", part.strip())
+        for token in re.split(r"[.*](?!\d)", part):
             token = token.strip()
             if not token:
                 continue
@@ -2311,7 +2319,7 @@ def raw_coverage(cfg: DatasetConfig, manifest: dict[str, Any] | None) -> dict[st
     import json
 
     from ehr2trace.adapters import list_sheets
-    from ehr2trace.discover import IGNORED_NAMES, resolve_source_units, source_roots
+    from ehr2trace.discover import IGNORED_NAMES, resolve_source_units
     from ehr2trace.errors import ConfigError
 
     out: dict[str, Any] = {"columns": {}, "files": {}, "prepare_manifest": {}}
@@ -2357,11 +2365,27 @@ def raw_coverage(cfg: DatasetConfig, manifest: dict[str, Any] | None) -> dict[st
     unclaimed: list[str] = []
     examined: list[str] = []
     claimed_count = 0
+    # Every root that resolves is walked; a root whose variable is unset or wrong skips
+    # only the files under it, and says so. One prepared root missing from an
+    # environment once meant no file of the whole delivery was examined.
+    roots: list[Path] = []
+    not_examined: dict[str, str] = {}
     try:
-        roots = source_roots(cfg)
+        roots.append(cfg.data_root())
     except ConfigError as exc:
-        roots = []
-        out["files"]["not_examined"] = str(exc)
+        not_examined[cfg.root_env] = str(exc)
+    for spec in cfg.sources.values():
+        if spec.root_env is None or spec.root_env in not_examined:
+            continue
+        try:
+            root = cfg.source_root(spec)
+        except ConfigError as exc:
+            not_examined[spec.root_env] = str(exc)
+            continue
+        if root not in roots:
+            roots.append(root)
+    if not_examined:
+        out["files"]["not_examined"] = not_examined
     for root in roots:
         for part in cfg.partitions:
             pdir = root / part.dir
