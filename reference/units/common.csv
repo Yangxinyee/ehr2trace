@@ -141,7 +141,7 @@ arbitrary units/mL,[arb'U]/mL,UCUM case-sensitive code: arbitrary unit per milli
 mEq,meq,UCUM case-sensitive code: milliequivalent; OMOP's UCUM vocabulary spells it 10*-3.eq
 milliequivalent,meq,UCUM case-sensitive code: milliequivalent; OMOP's UCUM vocabulary spells it 10*-3.eq
 milliequivalents,meq,UCUM case-sensitive code: milliequivalent; OMOP's UCUM vocabulary spells it 10*-3.eq
-mEq/L,meq/L,UCUM case-sensitive code: milliequivalent per litre; OMOP's UCUM vocabulary spells it 10*-3.eq/L
+mEq/L,10*-3.eq/L,"UCUM case-sensitive code: milliequivalent per litre; OMOP's UCUM vocabulary spells it 10*-3.eq/L; reconciled 2026-09-14 with reference/units/ctpe.csv: this is the spelling OMOP's UCUM vocabulary carries a concept for, and a unit that resolves to no concept normalizes to nothing downstream"
 milliequivalents/L,meq/L,UCUM case-sensitive code: milliequivalent per litre; OMOP's UCUM vocabulary spells it 10*-3.eq/L
 meq/liter,meq/L,UCUM case-sensitive code: milliequivalent per litre; OMOP's UCUM vocabulary spells it 10*-3.eq/L
 mEq/hr,meq/h,UCUM case-sensitive code: milliequivalent per hour
@@ -329,7 +329,7 @@ score,{score},UCUM case-sensitive code annotation: score; OMOP's UCUM vocabulary
 points,{score},UCUM case-sensitive code annotation: score; OMOP's UCUM vocabulary spells it [score]
 pts,{score},UCUM case-sensitive code annotation: score; OMOP's UCUM vocabulary spells it [score]
 point,{score},UCUM case-sensitive code annotation: score; OMOP's UCUM vocabulary spells it [score]
-pH,[pH],UCUM case-sensitive code: pH; OMOP's UCUM vocabulary spells it pH
+pH,pH,"UCUM case-sensitive code: pH; OMOP's UCUM vocabulary spells it pH; reconciled 2026-09-14 with reference/units/ctpe.csv: this is the spelling OMOP's UCUM vocabulary carries a concept for, and a unit that resolves to no concept normalizes to nothing downstream"
 pH units,[pH],UCUM case-sensitive code: pH; OMOP's UCUM vocabulary spells it pH
 pH unit,[pH],UCUM case-sensitive code: pH; OMOP's UCUM vocabulary spells it pH
 mL/dL,mL/dL,UCUM case-sensitive code: millilitre per decilitre (volume percent)
@@ -671,7 +671,7 @@ kilopascal,kPa,UCUM case-sensitive code: kilopascal
 kilopascals,kPa,UCUM case-sensitive code: kilopascal
 Pa,Pa,UCUM case-sensitive code: pascal
 pascal,Pa,UCUM case-sensitive code: pascal
-bar,bar,UCUM case-sensitive code: bar
+bar,{bar},"UCUM case-sensitive code: bar; reconciled 2026-09-14 with reference/units/ctpe.csv: this is the spelling OMOP's UCUM vocabulary carries a concept for, and a unit that resolves to no concept normalizes to nothing downstream"
 mbar,mbar,UCUM case-sensitive code: millibar
 millibar,mbar,UCUM case-sensitive code: millibar
 atm,atm,UCUM case-sensitive code: standard atmosphere
@@ -853,7 +853,7 @@ patch,{patch},UCUM case-sensitive code annotation: transdermal patch
 patches,{patch},UCUM case-sensitive code annotation: transdermal patch
 each,{each},UCUM case-sensitive code annotation: each
 ea,{each},UCUM case-sensitive code annotation: each
-application,{application},UCUM case-sensitive code annotation: application
+application,[App],"UCUM case-sensitive code annotation: application; reconciled 2026-09-14 with reference/units/ctpe.csv: this is the spelling OMOP's UCUM vocabulary carries a concept for, and a unit that resolves to no concept normalizes to nothing downstream"
 applications,{application},UCUM case-sensitive code annotation: application
 appl,{application},UCUM case-sensitive code annotation: application
 applic,{application},UCUM case-sensitive code annotation: application
