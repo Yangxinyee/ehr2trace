@@ -1,0 +1,17 @@
+source_unit,ucum,basis,dimension
+mmol/L,mmol/L,UCUM; the fixture's serum electrolytes,substance concentration
+mEq/L,meq/L,UCUM; equivalents per litre share a dimension with millimoles per litre,substance concentration
+mg/dL,mg/dL,UCUM; the fixture's creatinine,mass concentration
+K/cu mm,10*3/uL,thousands per cubic millimetre; the fixture's white cell count,count concentration
+mg,mg,UCUM; the fixture's dose text tail,mass
+kg/m2,kg/m2,UCUM; the fixture's untimed body-mass index,mass per area
+/min,/min,UCUM; the fixture's untimed pulse,rate
+bpm,/min,beats per minute,rate
+mm[Hg],mm[Hg],UCUM; the fixture's untimed systolic pressure,pressure
+%,%,UCUM; a percent-predicted spirometry value,fraction
+ms,ms,UCUM; an electrocardiogram interval,time
+Cel,Cel,UCUM; degrees Celsius,temperature
+[degF],[degF],UCUM; degrees Fahrenheit,temperature
+mmHg,mm[Hg],the other spelling of millimetres of mercury; the generic fixture writes it without brackets,pressure
+ug/mL FEU,ug/mL{FEU},"fibrinogen equivalent units: a D-dimer in FEU is twice the same sample in D-dimer units, so the annotation is part of the quantity",mass concentration feu
+Units,[iU],international units; the generic fixture's heparin dose text ends in this word,arbitrary

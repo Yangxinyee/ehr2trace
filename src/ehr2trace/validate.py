@@ -31,6 +31,10 @@ Design section 10.2                    Where it is checked
 28-30 generalization                    ``tests/test_no_hardcoded_dataset_strings.py``,
                                         ``tests/integration/test_generic_ehr_pipeline.py``
 =====================================  =========================================
+
+The remediation checks at the end of this module come from the conversion audit of
+2026-09-13 (``docs/CONVERSION_REMEDIATION_PLAN.md``, phase 0): each names the problem
+ids it detects, and ``tools/audit_conversion.py`` reuses their summaries.
 """
 
 from __future__ import annotations
@@ -38,7 +42,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 import polars as pl
 
@@ -92,10 +96,16 @@ READ_COLUMNS: dict[str, tuple[str, ...]] = {
         # whitelist test cannot tell the two apart; loading one float column is cheaper
         # than teaching it to.
         "rate",
+        # The normalized value and unit (canonical schema 2): absent from older builds,
+        # where the loader simply leaves them out.
+        "value_number_normalized", "unit_normalized",
+        # Named by the merge-disagreement helper as the role a source may keep out of
+        # its identity; loaded so the whitelist stays complete.
+        "encounter_id",
     ),
     "anchors": ("subject_id", "anchor_date", "anchor_time", "anchor_time_known", "partition_id"),
     "cohort_membership": ("subject_id", "partition_id", "membership_label", "label_scope"),
-    "quality_issue": (),
+    "quality_issue": ("issue_type", "source_id"),
     "quarantine": ("partition_id", "source_id", "reason", "person_source_id"),
 }
 
@@ -122,6 +132,10 @@ class Layers:
     issues: pl.DataFrame | None
     quarantine: pl.DataFrame | None
     manifest: dict[str, Any] | None
+    #: What one check computed and another can reuse -- the lineage join per partition
+    #: and source, the events parquet's column list -- so a scan over the artifacts
+    #: happens once per run rather than once per check.
+    cache: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def load(cls, cfg: DatasetConfig, layout: WorkLayout) -> "Layers":
@@ -1001,6 +1015,7 @@ def _omop_lineage(l: Layers) -> CheckResult:
         tables = {
             "person": "person_id",
             "visit_occurrence": "visit_occurrence_id",
+            "visit_detail": "visit_detail_id",
             "condition_occurrence": "condition_occurrence_id",
             "drug_exposure": "drug_exposure_id",
             "procedure_occurrence": "procedure_occurrence_id",
@@ -1012,7 +1027,10 @@ def _omop_lineage(l: Layers) -> CheckResult:
         missing: dict[str, int] = {}
         counts: dict[str, int] = {}
         for table, pk in tables.items():
-            n = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            try:
+                n = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
+            except Exception:
+                continue  # a table this build's CDM release does not have
             counts[table] = n
             if not n:
                 continue
@@ -1206,8 +1224,19 @@ def _omop_foreign_keys(l: Layers) -> CheckResult:
         return _skip("OMOP not built or empty")
     try:
         dangling: dict[str, int] = {}
+
+        def count(sql: str) -> int | None:
+            """None when the table is not in this build's CDM release."""
+            try:
+                return int(con.execute(sql).fetchone()[0])
+            except Exception:
+                return None
+
         for table in (
             "visit_occurrence",
+            # A visit detail belongs to a person and to a visit, and the audit found a
+            # publisher that could parent it to neither; both references are checked.
+            "visit_detail",
             "condition_occurrence",
             "drug_exposure",
             "procedure_occurrence",
@@ -1217,21 +1246,26 @@ def _omop_foreign_keys(l: Layers) -> CheckResult:
             "death",
             "observation_period",
         ):
-            n = con.execute(
+            n = count(
                 f"SELECT count(*) FROM {table} t "
                 "WHERE NOT EXISTS (SELECT 1 FROM person p WHERE p.person_id = t.person_id)"
-            ).fetchone()[0]
+            )
             if n:
-                dangling[f"{table}.person_id"] = int(n)
-        for table in ("condition_occurrence", "drug_exposure", "procedure_occurrence",
+                dangling[f"{table}.person_id"] = n
+        for table in ("visit_detail", "condition_occurrence", "drug_exposure", "procedure_occurrence",
                       "measurement", "observation", "note"):
-            n = con.execute(
+            n = count(
                 f"SELECT count(*) FROM {table} t WHERE t.visit_occurrence_id IS NOT NULL "
                 "AND NOT EXISTS (SELECT 1 FROM visit_occurrence v "
                 "WHERE v.visit_occurrence_id = t.visit_occurrence_id)"
-            ).fetchone()[0]
+            )
             if n:
-                dangling[f"{table}.visit_occurrence_id"] = int(n)
+                dangling[f"{table}.visit_occurrence_id"] = n
+        # visit_detail.visit_occurrence_id is NOT NULL in the CDM: a detail with none
+        # is a detail parented to nothing, which the clause above cannot see.
+        n = count("SELECT count(*) FROM visit_detail WHERE visit_occurrence_id IS NULL")
+        if n:
+            dangling["visit_detail.visit_occurrence_id_null"] = n
         people = con.execute("SELECT count(*) FROM person").fetchone()[0]
         return CheckResult(
             "",
@@ -1255,6 +1289,7 @@ def _omop_primary_keys(l: Layers) -> CheckResult:
         for table, pk in (
             ("person", "person_id"),
             ("visit_occurrence", "visit_occurrence_id"),
+            ("visit_detail", "visit_detail_id"),
             ("condition_occurrence", "condition_occurrence_id"),
             ("drug_exposure", "drug_exposure_id"),
             ("procedure_occurrence", "procedure_occurrence_id"),
@@ -1264,9 +1299,10 @@ def _omop_primary_keys(l: Layers) -> CheckResult:
             ("death", "person_id"),
             ("observation_period", "observation_period_id"),
         ):
-            n = con.execute(
-                f"SELECT count(*) - count(DISTINCT {pk}) FROM {table}"
-            ).fetchone()[0]
+            try:
+                n = con.execute(f"SELECT count(*) - count(DISTINCT {pk}) FROM {table}").fetchone()[0]
+            except Exception:
+                continue  # a table this build's CDM release does not have
             if n:
                 duplicates[table] = int(n)
         return CheckResult(
@@ -1798,4 +1834,1729 @@ def _undecided_not_published(l: Layers) -> CheckResult:
         if not leaked
         else f"mappings/ carries entries nobody accepted: {leaked[:5]}",
         {"pending": len(still_open), "resolved": len(pending) - len(still_open), "decided": len(decisions)},
+    )
+
+
+# --------------------------------------------------------------------------------
+# remediation checks (docs/CONVERSION_REMEDIATION_PLAN.md, phase 0, T0.2)
+# --------------------------------------------------------------------------------
+#
+# The audit of 2026-09-13 found a class of problems the checks above could not see:
+# rows collapsed into one event because the identity omitted the field they differed
+# on, a source quarantined wholesale that still counted as present, units that never
+# reached a concept, deaths lost to a timestamp comparison, raw tables and columns that
+# nothing had ever read. Each of those is a fact about the artifacts, and each check
+# below reads it from the artifacts -- the source parquet, the lineage, the published
+# tables -- against what the configuration declares. Judgements (which share of a source
+# may be quarantined, which columns are deliberately unread, which unit a value is really
+# in) live in the dataset YAML and the reference tables under ``reference/``; nothing
+# here names a dataset.
+#
+# The heavy ones scan the parquet files in the query engine rather than holding columns
+# in memory: `READ_COLUMNS` above stays what the in-memory checks read, and the columns
+# named in SQL below are read by the engine with projection, out of core.
+
+#: Where the reference tables live: ``reference/`` in the repository unless this names
+#: another directory (the fixture tests point it at a table that covers their units).
+REFERENCE_DIR_ENV = "EHR2TRACE_REFERENCE_DIR"
+
+#: A unit whose share of a code's rows is below this is a stray spelling, not a
+#: second dimension. Above it, the code mixes units nothing converts between.
+MIN_SECOND_UNIT_FAMILY_SHARE = 0.01
+
+#: Visit type values that name nothing. A zero-length visit carrying one of these is a
+#: row without a fact -- the transfer table's discharge markers were published that way.
+PLACEHOLDER_VALUES = frozenset({"", "unknown", "none", "null", "n/a", "na", "?", "-"})
+
+#: Spellings that say a value is a temperature, used only to *report* value ranges per
+#: temperature-like code; the plausible-range table is what judges them.
+TEMPERATURE_UNIT_SPELLINGS = frozenset(
+    {"c", "°c", "degc", "deg c", "cel", "f", "°f", "degf", "deg f", "[degf]"}
+)
+
+#: Field roles that are part of an event's identity, so rows that collapsed to one
+#: event agree on them by construction, or that legitimately differ between the rows of
+#: one event (a table repeated once per extraction anchor differs in the anchor; the
+#: lines of one report differ in their line number).
+IDENTITY_ROLES = frozenset({"person_id", "event_time", "source_code", "value", "unit", "text", "sequence_number"})
+REPEATING_ROLES = frozenset({"anchor_time", "anchor_rank", "encounter_linked", "text_line"})
+
+#: Shapes whose events are one row each, or duplicates of one row. The grouping shapes
+#: build one event from many rows that differ by design, and the person shape keys
+#: every event on its own value, so neither can carry a silent merge.
+MERGEABLE_SHAPES = frozenset({"point_event", "visit"})
+
+#: Canonical field names a merge rule may be keyed on, and the role they come from.
+FIELD_TO_ROLE = {f"{role}_source": role for role in ("status", "route", "dose", "rate", "unit")}
+FIELD_TO_ROLE["value_text"] = "text"
+
+DRUG_KINDS = (str(EventKind.drug_order), str(EventKind.drug_admin), str(EventKind.drug_dispense))
+VISIT_KINDS = (str(EventKind.visit), str(EventKind.visit_detail))
+
+#: The prepared-source manifest a preparation step writes beside its output. It is a
+#: record of the preparation, not a delivered table, so it is never an unclaimed file.
+PREPARE_MANIFEST_NAME = "prepare_manifest.json"
+
+
+def _skip_with(reason: str, metrics: dict[str, Any]) -> CheckResult:
+    return CheckResult("", True, f"skipped: {reason}", metrics, skipped=True)
+
+
+def reference_root() -> Path:
+    import os
+
+    raw = os.environ.get(REFERENCE_DIR_ENV)
+    return Path(raw).expanduser() if raw else Path(__file__).resolve().parents[2] / "reference"
+
+
+def _normalize_unit_spelling(text: str) -> str:
+    import re
+
+    return re.sub(r"\s+", " ", text.strip()).lower()
+
+
+@dataclass(frozen=True)
+class UnitTable:
+    """The unit table under ``reference/units``: source spelling -> UCUM code.
+
+    A local reader for the phase-0 checks; the reference loaders of the core package
+    replace it once they exist. Spellings compare case-insensitively with whitespace
+    collapsed, and a table may carry a fourth ``dimension`` column naming the physical
+    dimension of a UCUM code, which is what decides whether two units are one family.
+    """
+
+    ucum_of: dict[str, str]
+    dimension_of: dict[str, str]
+    files: tuple[str, ...]
+
+    def ucum(self, spelling: str | None) -> str | None:
+        if spelling is None:
+            return None
+        return self.ucum_of.get(_normalize_unit_spelling(spelling))
+
+
+def _reference_loader(name: str):
+    """The core package's own reference loader of that name, when it has one.
+
+    These tables are loaded by the canonical layer too, and the two readings must be
+    the same reading. Until ``ehr2trace.reference`` exists the checks read the CSVs
+    themselves; once it does, it is the authority, and anything it cannot answer falls
+    back here rather than failing a check on an import.
+    """
+    try:
+        from ehr2trace import reference as module  # type: ignore[attr-defined]
+    except Exception:
+        return None
+    return getattr(module, name, None)
+
+
+def _adapt_unit_table(loaded: Any) -> UnitTable | None:
+    """Whatever the core loader returns, as the table these checks read.
+
+    Accepts a table of the same shape, a mapping of spelling to UCUM code, or rows
+    carrying ``source_unit``/``ucum`` (and optionally ``dimension``).
+    """
+    if loaded is None:
+        return None
+    if isinstance(loaded, UnitTable) or (hasattr(loaded, "ucum_of") and hasattr(loaded, "ucum")):
+        return loaded
+    ucum_of: dict[str, str] = {}
+    dimension_of: dict[str, str] = {}
+    rows: Any = loaded.items() if isinstance(loaded, dict) else loaded
+    for row in rows:
+        if isinstance(row, tuple) and len(row) == 2 and isinstance(row[1], str):
+            spelling, ucum, dimension = row[0], row[1], ""
+        elif isinstance(row, dict):
+            spelling, ucum = row.get("source_unit"), row.get("ucum")
+            dimension = str(row.get("dimension") or "")
+        else:
+            return None
+        if not spelling or not ucum:
+            continue
+        ucum_of[_normalize_unit_spelling(str(spelling))] = str(ucum)
+        ucum_of.setdefault(_normalize_unit_spelling(str(ucum)), str(ucum))
+        if dimension:
+            dimension_of[str(ucum).lower()] = dimension.lower()
+    return UnitTable(ucum_of, dimension_of, ("ehr2trace.reference",)) if ucum_of else None
+
+
+def load_unit_table(root: Path | None = None) -> UnitTable | None:
+    """Every ``reference/units/*.csv`` merged, or None when the directory holds none."""
+    import csv
+
+    loader = _reference_loader("load_units")
+    if loader is not None:
+        try:
+            adapted = _adapt_unit_table(loader())
+        except Exception:
+            adapted = None
+        if adapted is not None:
+            return adapted
+    directory = (root or reference_root()) / "units"
+    files = sorted(directory.glob("*.csv"))
+    if not files:
+        return None
+    ucum_of: dict[str, str] = {}
+    dimension_of: dict[str, str] = {}
+    for path in files:
+        with path.open(encoding="utf-8", newline="") as handle:
+            for row in csv.DictReader(handle):
+                spelling = (row.get("source_unit") or "").strip()
+                ucum = (row.get("ucum") or "").strip()
+                if not spelling or not ucum:
+                    continue
+                ucum_of[_normalize_unit_spelling(spelling)] = ucum
+                ucum_of.setdefault(_normalize_unit_spelling(ucum), ucum)
+                dimension = (row.get("dimension") or "").strip()
+                if dimension:
+                    dimension_of[ucum.lower()] = dimension.lower()
+    return UnitTable(ucum_of, dimension_of, tuple(str(p) for p in files))
+
+
+def load_unit_conversions(root: Path | None = None) -> list[tuple[str, str]]:
+    """``(from_ucum, to_ucum)`` pairs of ``reference/unit_conversions.csv``, or none."""
+    import csv
+
+    loader = _reference_loader("load_unit_conversions")
+    if loader is not None:
+        try:
+            loaded = loader()
+            pairs = [
+                (str(r["from_ucum"]).strip().lower(), str(r["to_ucum"]).strip().lower())
+                if isinstance(r, dict) else (str(r[0]).strip().lower(), str(r[1]).strip().lower())
+                for r in (loaded.keys() if isinstance(loaded, dict) else loaded)
+            ]
+        except Exception:
+            pairs = None
+        if pairs:
+            return pairs
+    path = (root or reference_root()) / "unit_conversions.csv"
+    if not path.exists():
+        return []
+    with path.open(encoding="utf-8", newline="") as handle:
+        return [
+            ((row.get("from_ucum") or "").strip().lower(), (row.get("to_ucum") or "").strip().lower())
+            for row in csv.DictReader(handle)
+            if (row.get("from_ucum") or "").strip() and (row.get("to_ucum") or "").strip()
+        ]
+
+
+def load_plausible_ranges(dataset_id: str, root: Path | None = None) -> dict[tuple[str, str, str], tuple[float, float]] | None:
+    """``reference/plausible_ranges/<dataset_id>.csv`` keyed on (system, code, ucum), or None."""
+    import csv
+
+    loader = _reference_loader("load_plausible_ranges")
+    if loader is not None:
+        try:
+            loaded = loader(dataset_id)
+            if isinstance(loaded, dict) and loaded:
+                return {
+                    (str(k[0]), str(k[1]), str(k[2]).lower()): (float(v[0]), float(v[1]))
+                    for k, v in loaded.items()
+                }
+        except Exception:
+            pass
+    path = (root or reference_root()) / "plausible_ranges" / f"{dataset_id}.csv"
+    if not path.exists():
+        return None
+    ranges: dict[tuple[str, str, str], tuple[float, float]] = {}
+    with path.open(encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            try:
+                low, high = float(row["low"]), float(row["high"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            key = ((row.get("code_system") or "").strip(), (row.get("source_code") or "").strip(),
+                   (row.get("ucum") or "").strip().lower())
+            if key[1]:
+                ranges[key] = (low, high)
+    return ranges
+
+
+#: UCUM atoms a metric prefix can be stripped from, for the family heuristic below.
+_UCUM_BASES = frozenset({
+    "mol", "eq", "g", "l", "m", "s", "min", "h", "d", "wk", "mo", "a", "u", "iu", "[iu]",
+    "hz", "pa", "cal", "j", "w", "v", "ohm", "cel", "[degf]", "k", "bq", "gy", "sv", "osm",
+    "kat", "%", "bar",
+})
+_UCUM_PREFIXES = ("da", "y", "z", "a", "f", "p", "n", "u", "m", "c", "d", "h", "k", "g", "t")
+_UCUM_ALIASES = {"eq": "mol", "iu": "u", "[iu]": "u", "hr": "h", "hrs": "h", "hour": "h", "hours": "h", "sec": "s", "day": "d", "days": "d"}
+
+
+def unit_family(unit: str, table: UnitTable | None = None) -> str:
+    """The dimension a unit spelling belongs to, approximately.
+
+    The unit table's ``dimension`` column is the answer when it has one. Otherwise the
+    UCUM code (or the spelling itself) is reduced to its base atoms: multipliers and
+    metric prefixes are dropped, so `mmol/L` and `umol/L` share a family while `mmol/L`
+    and `mg/dL` do not, and an annotation stays part of the family, so a code whose
+    rows mix `ng/mL` with `ng/mL FEU` is reported as mixing two.
+    """
+    import re
+
+    spelling = _normalize_unit_spelling(unit)
+    ucum = table.ucum(spelling) if table is not None else None
+    key = (ucum or spelling).lower()
+    if table is not None and key in table.dimension_of:
+        return table.dimension_of[key]
+    parts = []
+    for part in key.split("/"):
+        atoms = []
+        for token in re.split(r"[.*](?!\d)", part.strip()):
+            token = token.strip()
+            if not token:
+                continue
+            if re.fullmatch(r"(10\*-?\d+|10\^-?\d+|x?10e-?\d+|\d+(\.\d+)?)", token):
+                continue  # a multiplier
+            token = re.sub(r"(?<=[a-z\]%])\d+$", "", token)  # an exponent
+            token = _UCUM_ALIASES.get(token, token)
+            if token not in _UCUM_BASES:
+                for prefix in _UCUM_PREFIXES:
+                    rest = token[len(prefix):]
+                    if token.startswith(prefix) and rest in _UCUM_BASES:
+                        token = _UCUM_ALIASES.get(rest, rest)
+                        break
+            atoms.append(token)
+        parts.append(".".join(atoms) or "1")
+    return "/".join(parts)
+
+
+def unit_families(counts: dict[str, int], table: UnitTable | None, conversions: list[tuple[str, str]]) -> dict[str, int]:
+    """Rows per family for one code, given its rows per unit spelling.
+
+    Units the conversion table links are one family whatever their spelling: a value
+    in one is exactly a value in the other.
+    """
+    family_of: dict[str, str] = {}
+    for spelling in counts:
+        family_of[spelling] = unit_family(spelling, table)
+    # Union the families a conversion connects.
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        while parent.get(x, x) != x:
+            x = parent[x]
+        return x
+
+    for a, b in conversions:
+        fa, fb = unit_family(a, table), unit_family(b, table)
+        parent[find(fa)] = find(fb)
+    out: dict[str, int] = {}
+    for spelling, n in counts.items():
+        root = find(family_of[spelling])
+        out[root] = out.get(root, 0) + n
+    return out
+
+
+def _unit_expression(columns: set[str]) -> str:
+    """SQL for the unit an event is judged by: the normalized one where the build has
+    the column, else the source spelling."""
+    if "unit_normalized" in columns:
+        return "coalesce(unit_normalized, unit_source)"
+    return "coalesce(unit_source)"
+
+
+def _events_columns(l: Layers) -> set[str]:
+    """The columns the events parquet actually carries; older builds lack the newer ones."""
+    if l.events_path is None:
+        return set()
+    cached = l.cache.get("events_columns")
+    if cached is None:
+        import pyarrow.parquet as pq
+
+        cached = set(pq.read_schema(l.events_path).names)
+        l.cache["events_columns"] = cached
+    return cached
+
+
+def _engine(l: Layers, *, omop: bool = False, meds: bool = False):
+    """A spilling engine over the artifacts: ``evt`` and ``lnk`` views, optionally the
+    OMOP database attached read-only as ``omop`` and the MEDS shards as ``meds``.
+
+    Callers check that what they attach exists; the timezone is pinned to UTC so a
+    date taken from a naive timestamp is the UTC date, and any local date is asked for
+    explicitly with the dataset's declared zone.
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def open_engine():
+        with analytic_connection(l.layout.root / "_validate_scratch", threads=HEAVY_THREADS) as con:
+            con.execute("SET TimeZone='UTC'")
+            if l.events_path is not None:
+                con.execute(f"CREATE VIEW evt AS SELECT * FROM read_parquet('{l.events_path}')")
+            if l.links_path is not None:
+                con.execute(f"CREATE VIEW lnk AS SELECT * FROM read_parquet('{l.links_path}')")
+            if omop:
+                con.execute(f"ATTACH '{l.layout.omop_dir / 'omop.duckdb'}' AS omop (READ_ONLY)")
+            if meds:
+                con.read_parquet(_meds_files(l), hive_partitioning=False).create_view("meds")
+            yield con
+
+    return open_engine()
+
+
+def _local_date_sql(column: str, zone: str | None) -> str:
+    """SQL for the calendar date of a naive-UTC timestamp in the dataset's zone."""
+    if not zone:
+        return f"CAST({column} AS DATE)"
+    return f"CAST(timezone('{zone}', timezone('UTC', {column})) AS DATE)"
+
+
+def _omop_vocabulary_version(con, prefix: str = "") -> str | None:
+    """The vocabulary the OMOP layer was built with, or None when it had none."""
+    try:
+        row = con.execute(f"SELECT vocabulary_version FROM {prefix}cdm_source LIMIT 1").fetchone()
+    except Exception:
+        return None
+    if row is None or not row[0] or str(row[0]).lower() == "none":
+        return None
+    return str(row[0])
+
+
+def _linked_rows_by_partition_source(l: Layers) -> dict[tuple[str, str], int]:
+    """Lineage links per (partition, source): the join of the link table to the events'
+    source ids, done once in the engine and remembered for every check that asks."""
+    cached = l.cache.get("linked_by_partition_source")
+    if cached is not None:
+        return cached
+    if l.links_path is None or l.events_path is None:
+        return {}
+    with _engine(l) as con:
+        rows = con.execute(
+            "SELECT k.partition_id, e.source_id, count(*) FROM lnk k JOIN evt e USING (event_id) "
+            "GROUP BY 1, 2"
+        ).fetchall()
+    cached = {(str(p), str(s)): int(n) for p, s, n in rows}
+    l.cache["linked_by_partition_source"] = cached
+    return cached
+
+
+# -- what the raw delivery holds versus what the configuration reads --------------------
+
+
+def _sql_str(value: str) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _sql_ident(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _role_columns(spec, columns: Sequence[str]) -> dict[str, list[str]]:
+    """Role -> every parquet column an alias names, across the files of one source.
+
+    The same matching ``build_role_map`` uses -- an alias names a column case-insensitively
+    after stripping -- but keeping every spelling, because the files of one source can
+    differ in case (a byte-order mark once made them) and a union over them holds both.
+    """
+    prefix = "col__"
+    out: dict[str, list[str]] = {}
+    for role, fs in spec.fields.items():
+        matched: list[str] = []
+        for alias in fs.from_:
+            wanted = alias.strip().lower()
+            for column in columns:
+                if column.startswith(prefix) and column[len(prefix):].strip().lower() == wanted and column not in matched:
+                    matched.append(column)
+        if matched:
+            out[role] = matched
+    return out
+
+
+def _normalized_cell_sql(column: str, null_literals: Sequence[str]) -> str:
+    """One source cell in the form two extracts of the same record agree in.
+
+    A workbook that types a date as text and one that types it as a date store
+    different strings for one value; a length of stay is `5` in one and `5.0` in
+    another. Rows that differ only in that are the same record, so a time renders as a
+    time, a number as a number, and the rest compares lower-cased with its whitespace
+    collapsed -- the same rules the row hash applies.
+    """
+    c = _sql_ident(column)
+    literals = ", ".join(_sql_str(v) for v in null_literals) or "''"
+    return (
+        f"CASE WHEN nullif(trim({c}), '') IS NULL OR trim({c}) IN ({literals}) THEN NULL "
+        f"ELSE coalesce(strftime(try_cast({c} AS TIMESTAMP), '%Y-%m-%dT%H:%M:%S'), "
+        f"CAST(try_cast({c} AS DOUBLE) AS VARCHAR), "
+        f"lower(regexp_replace(trim({c}), '\\s+', ' ', 'g'))) END"
+    )
+
+
+def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path: Path, con,
+                        per_partition: bool = False) -> dict[str, dict[str, Any]]:
+    """Per source, how many events collapsed rows that disagree on a mapped field.
+
+    Joins each source's own parquet (the files the ingest manifest names) to the lineage
+    on the source row id, groups by event, and counts the events whose rows carry more
+    than one distinct value of a field. Compared: every mapped role that is neither part
+    of the identity nor allowed to vary, and every kept column. Excluded: roles under a
+    declared merge rule (the disagreement is resolved by rule and flagged), and the
+    identity extras. ``available_time`` falls under the default rule and is counted
+    apart. With ``per_partition`` the grouping also splits by the partition a row came
+    from, which separates a merge inside one extract from the true duplicate between
+    two.
+    """
+    import pyarrow.parquet as pq
+
+    from ehr2trace.registry import FIELD_ROLES
+
+    report: dict[str, dict[str, Any]] = {}
+    files_by_source: dict[str, list[str]] = {}
+    for unit in manifest.get("inputs", []):
+        path = unit.get("output_path")
+        if path and Path(path).exists() and unit.get("rows_parsed", 0):
+            files_by_source.setdefault(unit["source_id"], []).append(path)
+
+    for source_id, spec in cfg.sources.items():
+        entry: dict[str, Any] = {"shape": spec.shape, "compared": [], "skipped": None}
+        report[source_id] = entry
+        files = files_by_source.get(source_id, [])
+        if spec.shape not in MERGEABLE_SHAPES:
+            entry["skipped"] = "rows of one event differ by construction in this shape"
+            continue
+        if not files:
+            entry["skipped"] = "no parsed rows"
+            continue
+        columns: list[str] = []
+        for path in files:
+            for name in pq.read_schema(path).names:
+                if name not in columns:
+                    columns.append(name)
+        ruled = set()
+        for key in spec.merge_rules:
+            ruled.add(FIELD_TO_ROLE.get(key, key))
+            ruled.add(key)
+        excluded = IDENTITY_ROLES | REPEATING_ROLES | set(spec.identity_extra_fields) | ruled
+        if spec.encounter_in_identity:
+            excluded = excluded | {"encounter_id"}
+        expressions: dict[str, str] = {}
+        for role, cols in _role_columns(spec, columns).items():
+            if role in excluded or role not in FIELD_ROLES:
+                continue
+            expressions[role] = "coalesce(" + ", ".join(
+                _normalized_cell_sql(c, cfg.time.null_literals) for c in cols) + ")"
+        lowered = {c[len("col__"):].strip().lower(): c for c in columns if c.startswith("col__")}
+        for kept in spec.keep_columns:
+            column = lowered.get(kept.strip().lower())
+            if column is None or kept in ruled or kept.strip().lower() in {k.lower() for k in ruled}:
+                continue
+            expressions[f"column:{kept}"] = _normalized_cell_sql(column, cfg.time.null_literals)
+        entry["compared"] = sorted(k for k in expressions if k != "available_time")
+        if not expressions:
+            entry["skipped"] = "no mapped field outside the identity to compare"
+            continue
+        names = list(expressions)
+        select = ", ".join(f"{expr} AS {_sql_ident(f'f{i}')}" for i, expr in enumerate(expressions.values()))
+        distinct = ", ".join(f"count(DISTINCT {_sql_ident(f'f{i}')}) AS {_sql_ident(f'd{i}')}" for i in range(len(names)))
+        flagged = ", ".join(f"count(*) FILTER (WHERE {_sql_ident(f'd{i}')} > 1) AS {_sql_ident(f'n{i}')}" for i in range(len(names)))
+        file_list = "[" + ", ".join(_sql_str(f) for f in files) + "]"
+        con.execute(
+            f"CREATE OR REPLACE TEMP TABLE src AS SELECT source_row_id, {select} "
+            f"FROM read_parquet({file_list}, union_by_name=true)"
+        )
+        groupings = [("all", "")]
+        if per_partition and len(cfg.partitions) > 1:
+            groupings.append(("within_partition", ", k.partition_id"))
+        for label, extra in groupings:
+            row = con.execute(
+                f"""
+                WITH g AS (
+                    SELECT k.event_id{extra}, count(*) AS n_rows, {distinct}
+                    FROM read_parquet('{links_path}') k JOIN src s USING (source_row_id)
+                    GROUP BY k.event_id{extra}
+                )
+                SELECT count(*), count(*) FILTER (WHERE n_rows > 1), {flagged} FROM g
+                """
+            ).fetchone()
+            counts = {names[i]: int(row[2 + i] or 0) for i in range(len(names))}
+            availability = counts.pop("available_time", 0)
+            block = {
+                "events": int(row[0] or 0),
+                "merged_events": int(row[1] or 0),
+                "disagreements": {k: v for k, v in sorted(counts.items()) if v},
+                "availability_disagreements": availability,
+            }
+            if label == "all":
+                entry.update(block)
+            else:
+                entry[label] = block
+        con.execute("DROP TABLE IF EXISTS src")
+    return report
+
+
+def raw_coverage(cfg: DatasetConfig, manifest: dict[str, Any] | None) -> dict[str, Any]:
+    """Every delivered column and file, against what the configuration reads or declares.
+
+    A column is covered when a role alias names it, a filter or kind-switch reads it, an
+    untimed value or provenance flag comes from it, a merge rule or ``keep_columns``
+    names it, it is the identity key, or ``ignored_columns`` says why it is left alone.
+    A file (or a workbook sheet) is covered when a source resolves to it, or an
+    ``out_of_scope`` entry matches its name. An ``unread_inputs`` list in a preparation
+    manifest is held to the same declaration.
+    """
+    import fnmatch
+    import json
+
+    from ehr2trace.adapters import list_sheets
+    from ehr2trace.discover import IGNORED_NAMES, resolve_source_units, source_roots
+    from ehr2trace.errors import ConfigError
+
+    out: dict[str, Any] = {"columns": {}, "files": {}, "prepare_manifest": {}}
+
+    # (a) columns
+    identity_keys = {cfg.identity.person_key.strip().lower()}
+    if cfg.identity.encounter_key:
+        identity_keys.add(cfg.identity.encounter_key.strip().lower())
+    columns_by_source: dict[str, set[str]] = {}
+    for unit in (manifest or {}).get("inputs", []):
+        columns_by_source.setdefault(unit["source_id"], set()).update(unit.get("columns", []))
+    for source_id, columns in sorted(columns_by_source.items()):
+        spec = cfg.sources.get(source_id)
+        if spec is None:
+            out["columns"][source_id] = {"undeclared": sorted(columns), "note": "source not in configuration"}
+            continue
+        covered = {a.strip().lower() for fs in spec.fields.values() for a in fs.from_}
+        covered |= {c.strip().lower() for c in spec.keep_columns}
+        covered |= {rf.column.strip().lower() for rf in spec.row_filters}
+        if spec.event_kind_from is not None:
+            covered.add(spec.event_kind_from.column.strip().lower())
+        covered |= {u.column.strip().lower() for u in spec.untimed_values}
+        covered |= {c.strip().lower() for c in spec.flag_when.values()}
+        covered |= {k.strip().lower() for k in spec.merge_rules}
+        if spec.study_code_from:
+            covered.add(spec.study_code_from.strip().lower())
+        covered |= identity_keys
+        ignored = {c.strip().lower() for c in spec.ignored_columns}
+        undeclared = sorted(c for c in columns if c.strip().lower() not in covered and c.strip().lower() not in ignored)
+        out["columns"][source_id] = {
+            "columns": len(columns),
+            "mapped_or_used": sum(1 for c in columns if c.strip().lower() in covered),
+            "ignored_with_reason": sum(1 for c in columns if c.strip().lower() in ignored and c.strip().lower() not in covered),
+            "undeclared": undeclared,
+        }
+
+    # (b) files and sheets under every partition directory of every source root
+    patterns = [m for entry in cfg.out_of_scope.values() for m in entry.matches]
+
+    def declared(*names: str) -> bool:
+        return any(fnmatch.fnmatch(n, p) for n in names for p in patterns)
+
+    unclaimed: list[str] = []
+    examined: list[str] = []
+    claimed_count = 0
+    try:
+        roots = source_roots(cfg)
+    except ConfigError as exc:
+        roots = []
+        out["files"]["not_examined"] = str(exc)
+    for root in roots:
+        for part in cfg.partitions:
+            pdir = root / part.dir
+            if not pdir.is_dir():
+                continue
+            examined.append(f"{part.id}")
+            claimed: dict[Path, set[str | None]] = {}
+            for source_id, spec in cfg.sources_for(part.id).items():
+                try:
+                    units = resolve_source_units(cfg, part.id, source_id, spec)
+                except ConfigError:
+                    continue
+                for unit in units:
+                    claimed.setdefault(Path(unit.path).resolve(), set()).add(unit.sheet)
+            for path in sorted(p for p in pdir.rglob("*") if p.is_file()):
+                if path.name in IGNORED_NAMES or path.name.startswith("~$") or path.name == PREPARE_MANIFEST_NAME:
+                    continue
+                relative = str(path.relative_to(root))
+                sheets = claimed.get(path.resolve())
+                if sheets is None:
+                    if declared(relative, path.name):
+                        claimed_count += 1
+                    else:
+                        unclaimed.append(relative)
+                    continue
+                claimed_count += 1
+                if None in sheets:
+                    continue
+                try:
+                    every_sheet = list_sheets(path)
+                except Exception:
+                    every_sheet = []
+                for sheet in every_sheet:
+                    if sheet in sheets:
+                        continue
+                    if declared(sheet, f"{relative}#{sheet}", f"{path.name}#{sheet}"):
+                        continue
+                    unclaimed.append(f"{relative}#{sheet}")
+    out["files"].update({"partitions_examined": examined, "claimed_or_declared": claimed_count, "unclaimed": unclaimed})
+
+    # (c) inputs a preparation step recorded as unread
+    undeclared_unread: list[str] = []
+    seen_manifests: list[str] = []
+    candidates: list[Path] = []
+    for root in roots:
+        candidates.append(root / PREPARE_MANIFEST_NAME)
+        for part in cfg.partitions:
+            candidates.append(root / part.dir / PREPARE_MANIFEST_NAME)
+    for candidate in candidates:
+        if not candidate.exists() or str(candidate) in seen_manifests:
+            continue
+        seen_manifests.append(str(candidate))
+        try:
+            payload = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for item in payload.get("unread_inputs", []) or []:
+            name = str(item.get("path", "")) if isinstance(item, dict) else str(item)
+            if name and not declared(name, Path(name).name):
+                undeclared_unread.append(name)
+    out["prepare_manifest"] = {"manifests": len(seen_manifests), "undeclared_unread_inputs": undeclared_unread}
+    return out
+
+
+# -- aggregate summaries shared with tools/audit_conversion.py ----------------------------
+
+
+def note_duplicate_groups(con, zone: str | None) -> dict[str, int]:
+    """Notes repeated within one subject: same local date, code and text (exact), and
+    the same text on another date (near). Texts are hashed, never carried."""
+    local = _local_date_sql("event_time", zone)
+    row = con.execute(
+        f"""
+        WITH n AS (
+            SELECT subject_id, source_code, hash(value_text) AS h, {local} AS d, count(*) AS c
+            FROM evt WHERE event_kind = '{EventKind.note}' AND value_text IS NOT NULL
+            GROUP BY 1, 2, 3, 4
+        )
+        SELECT count(*) FILTER (WHERE c > 1),
+               coalesce(sum(c - 1) FILTER (WHERE c > 1), 0),
+               (SELECT count(*) FROM (SELECT subject_id, source_code, h FROM n GROUP BY 1, 2, 3 HAVING count(*) > 1)),
+               coalesce(sum(c), 0)
+        FROM n
+        """
+    ).fetchone()
+    return {
+        "exact_duplicate_groups": int(row[0] or 0),
+        "surplus_note_events": int(row[1] or 0),
+        "same_text_other_date_groups": int(row[2] or 0),
+        "notes_with_text": int(row[3] or 0),
+    }
+
+
+def encounter_link_rates(con) -> dict[str, dict[str, Any]]:
+    """Per source, the share of events with an encounter id that resolve to a visit or
+    visit detail of the same subject."""
+    kinds = ", ".join(_sql_str(k) for k in VISIT_KINDS)
+    rows = con.execute(
+        f"""
+        WITH v AS (
+            SELECT DISTINCT subject_id, encounter_id FROM evt
+            WHERE event_kind IN ({kinds}) AND encounter_id IS NOT NULL
+        )
+        SELECT e.source_id, count(*), count(*) FILTER (WHERE v.encounter_id IS NOT NULL)
+        FROM evt e LEFT JOIN v ON v.subject_id = e.subject_id AND v.encounter_id = e.encounter_id
+        WHERE e.encounter_id IS NOT NULL AND e.event_kind NOT IN ({kinds})
+        GROUP BY 1
+        """
+    ).fetchall()
+    return {
+        str(s): {"with_encounter": int(n), "linked": int(k), "rate": round(int(k) / int(n), 4) if n else 0.0}
+        for s, n, k in rows
+    }
+
+
+def unit_spellings_per_code(con, columns: set[str], top: int = 50) -> list[dict[str, Any]]:
+    """The unit spellings each of the most frequent measured codes carries."""
+    kinds = ", ".join(_sql_str(k) for k in (str(EventKind.measurement), str(EventKind.observation)))
+    unit = _unit_expression(columns)
+    rows = con.execute(
+        f"""
+        WITH u AS (
+            SELECT code_system, source_code, regexp_replace(trim({unit}), '\\s+', ' ', 'g') AS spelling, count(*) AS n
+            FROM evt WHERE event_kind IN ({kinds}) AND {unit} IS NOT NULL
+            GROUP BY 1, 2, 3
+        ), top_codes AS (
+            SELECT code_system, source_code, sum(n) AS rows FROM u GROUP BY 1, 2 ORDER BY rows DESC, 1, 2 LIMIT {int(top)}
+        )
+        SELECT u.code_system, u.source_code, t.rows, u.spelling, u.n
+        FROM u JOIN top_codes t USING (code_system, source_code)
+        ORDER BY t.rows DESC, u.code_system, u.source_code, u.n DESC
+        """
+    ).fetchall()
+    out: dict[tuple[str, str], dict[str, Any]] = {}
+    for system, code, total, spelling, n in rows:
+        entry = out.setdefault((system, code), {"code_system": system, "source_code": code, "rows": int(total), "units": {}})
+        entry["units"][str(spelling)[:32]] = int(n)
+    return list(out.values())
+
+
+def temperature_like_summary(con, columns: set[str]) -> list[dict[str, Any]]:
+    """Value ranges of the codes whose unit spells a temperature: reported, not judged."""
+    spellings = ", ".join(_sql_str(s) for s in sorted(TEMPERATURE_UNIT_SPELLINGS))
+    value = "coalesce(value_number_normalized, value_number)" if "value_number_normalized" in columns else "value_number"
+    rows = con.execute(
+        f"""
+        SELECT code_system, source_code, lower(regexp_replace(trim(unit_source), '\\s+', ' ', 'g')) AS u,
+               count(*), min({value}), quantile_cont({value}, 0.01), median({value}),
+               quantile_cont({value}, 0.99), max({value})
+        FROM evt
+        WHERE unit_source IS NOT NULL AND {value} IS NOT NULL
+          AND (lower(trim(unit_source)) IN ({spellings})
+               OR lower(unit_source) LIKE '%celsius%' OR lower(unit_source) LIKE '%fahrenheit%')
+        GROUP BY 1, 2, 3 ORDER BY 4 DESC
+        """
+    ).fetchall()
+    return [
+        {"code_system": s, "source_code": c, "unit": str(u)[:32], "rows": int(n),
+         "min": lo, "p01": p1, "median": med, "p99": p99, "max": hi}
+        for s, c, u, n, lo, p1, med, p99, hi in rows
+    ]
+
+
+def death_local_dates(con, zone: str | None) -> dict[str, int]:
+    """Subjects with a death event, and how many of them put it on more than one local date."""
+    local = _local_date_sql("event_time", zone)
+    row = con.execute(
+        f"""
+        WITH d AS (
+            SELECT subject_id, count(DISTINCT {local}) AS dates, count(*) AS events
+            FROM evt WHERE event_kind = '{EventKind.death}' AND event_time IS NOT NULL GROUP BY 1
+        )
+        SELECT count(*), count(*) FILTER (WHERE dates > 1), count(*) FILTER (WHERE events > 1) FROM d
+        """
+    ).fetchone()
+    return {
+        "subjects_with_death_event": int(row[0] or 0),
+        "subjects_with_conflicting_local_dates": int(row[1] or 0),
+        "subjects_with_several_death_events": int(row[2] or 0),
+    }
+
+
+# -- the checks ---------------------------------------------------------------------------
+
+
+@check("DUPLICATES_AGREE", slow=True)
+def _duplicates_agree(l: Layers) -> CheckResult:
+    """Rows that collapsed into one event agree on every mapped field, or a rule said how.
+
+    From the audit (P-C1, P-C2; P-CU1, P-CU6, P-CU7, P-J1, P-J2, P-J10, P-M1, P-M6,
+    P-M19): the identity omitted dose, route, status and end time, so orders that
+    differed in them became one event, and the merge kept whichever value it met first
+    -- 726,710 dose disagreements in one export, 45,348 status disagreements in another.
+
+    Reads each source's parquet (the files the ingest manifest names), the lineage
+    table, the configuration's roles, merge rules and kept columns, and the quality
+    issues. Fails on any disagreement outside a declared rule, or on any MERGE_CONFLICT
+    issue the build itself recorded. Skips without a manifest, lineage or events. Slow:
+    every source is joined to the whole lineage table.
+    """
+    if l.manifest is None or l.links_path is None or l.events_path is None:
+        return _skip("canonical layer not built")
+    with _engine(l) as con:
+        report = merge_disagreements(l.cfg, l.manifest, l.links_path, con)
+    disagreeing = {
+        sid: entry["disagreements"]
+        for sid, entry in report.items() if entry.get("disagreements")
+    }
+    conflicts = 0
+    if l.issues is not None and "issue_type" in l.issues.columns:
+        conflicts = int(l.issues.filter(pl.col("issue_type") == str(QualityFlag.MERGE_CONFLICT)).height)
+    compared = sum(1 for e in report.values() if not e.get("skipped"))
+    merged = sum(int(e.get("merged_events", 0)) for e in report.values())
+    availability = sum(int(e.get("availability_disagreements", 0)) for e in report.values())
+    ok = not disagreeing and not conflicts
+    return CheckResult(
+        "",
+        ok,
+        f"{merged:,} events merged more than one source row across {compared} sources; every "
+        f"mapped field agrees or falls under a declared rule ({availability:,} availability "
+        f"disagreements resolved by the default rule)"
+        if ok
+        else "rows merged into one event disagree on fields nobody declared a rule for: "
+        + "; ".join(f"{sid}: " + ", ".join(f"{k}={v:,}" for k, v in sorted(d.items())) for sid, d in sorted(disagreeing.items())[:5])
+        + (f"; {conflicts:,} MERGE_CONFLICT issues recorded" if conflicts else ""),
+        {"per_source": report, "merge_conflict_issues": conflicts, "sources_disagreeing": sorted(disagreeing)},
+    )
+
+
+@check("SOURCE_YIELDS_EVENTS")
+def _source_yields_events(l: Layers) -> CheckResult:
+    """A source with parsed rows produces events, unless it is declared expected empty.
+
+    From the audit (P-C11b, P-M2): a wide table declared with the wrong shape had every
+    one of its 1,564,610 rows quarantined and still counted as present, because presence
+    was judged by the manifest and events by nothing.
+
+    Reads the ingest manifest and the lineage joined to events, per partition and source.
+    Fails for any (partition, source) with parsed rows and no linked row whose source
+    does not declare ``expected_empty``. Skips without a manifest or lineage.
+    """
+    if l.manifest is None or l.links_path is None or l.events_path is None:
+        return _skip("canonical layer not built")
+    parsed: dict[tuple[str, str], int] = {}
+    for unit in l.manifest["inputs"]:
+        key = (unit["partition_id"], unit["source_id"])
+        parsed[key] = parsed.get(key, 0) + int(unit["rows_parsed"])
+    linked = _linked_rows_by_partition_source(l)
+    silent, declared, stale = [], [], []
+    for (partition, source), rows in sorted(parsed.items()):
+        if not rows:
+            continue
+        spec = l.cfg.sources.get(source)
+        n = linked.get((partition, source), 0)
+        if n:
+            if spec is not None and spec.expected_empty:
+                stale.append(f"{partition}/{source}")
+            continue
+        if spec is not None and spec.expected_empty:
+            declared.append(f"{partition}/{source}")
+        else:
+            silent.append(f"{partition}/{source} ({rows:,} rows parsed)")
+    return CheckResult(
+        "",
+        not silent,
+        f"every source with parsed rows yields events ({len(declared)} declared empty on purpose)"
+        + (f"; declared empty but yielding events: {stale[:3]}" if stale else "")
+        if not silent
+        else f"{len(silent)} source(s) parsed rows and produced no event: {silent[:5]}",
+        {"silent": silent, "declared_empty": declared, "declared_empty_but_yielding": stale,
+         "linked_rows": {f"{p}/{s}": n for (p, s), n in sorted(linked.items())}},
+    )
+
+
+@check("QUARANTINE_SHARE_DECLARED")
+def _quarantine_share_declared(l: Layers) -> CheckResult:
+    """A source quarantined beyond the threshold for one reason says so in its YAML.
+
+    From the audit (P-C11c, P-M3, P-M21, W1, W2): any share of quarantine counted as
+    explained as long as each row had a reason -- 2,849,786 triage values with no time,
+    534,610 orders with no date, a body-mass index with no measurement time -- and
+    nothing distinguished a known property of the export from a converter defect.
+
+    Reads the canonical quarantine (distinct source rows per source and reason), the
+    ingest-stage quarantine files the manifest names, and the manifest's row counts.
+    Fails when a (source, reason) share exceeds ``validation.quarantine_share_threshold``
+    and the source's ``expected_quarantine`` does not declare that reason with a
+    ``max_share`` at or above it. Reports every share. Skips without a manifest.
+    """
+    if l.manifest is None:
+        return _skip("no ingest manifest")
+    parsed: dict[str, int] = {}
+    read: dict[str, int] = {}
+    ingest_files: dict[str, list[str]] = {}
+    for unit in l.manifest["inputs"]:
+        sid = unit["source_id"]
+        parsed[sid] = parsed.get(sid, 0) + int(unit["rows_parsed"])
+        read[sid] = read.get(sid, 0) + int(unit["rows_read"])
+        q = unit.get("quarantine_path")
+        if q and Path(q).exists():
+            ingest_files.setdefault(sid, []).append(q)
+    counts: dict[tuple[str, str], tuple[int, int]] = {}  # (source, reason) -> (rows, denominator)
+    quarantine_path = l.layout.canonical_path("quarantine")
+    with _engine(l) as con:
+        if quarantine_path.exists():
+            for sid, reason, n in con.execute(
+                f"SELECT source_id, reason, count(DISTINCT source_row_id) FROM read_parquet('{quarantine_path}') "
+                "GROUP BY 1, 2"
+            ).fetchall():
+                counts[(str(sid), str(reason))] = (int(n), parsed.get(str(sid), 0))
+        for sid, files in ingest_files.items():
+            file_list = "[" + ", ".join(_sql_str(f) for f in files) + "]"
+            for reason, n in con.execute(
+                f"SELECT reason, count(*) FROM read_parquet({file_list}) GROUP BY 1"
+            ).fetchall():
+                key = (sid, str(reason))
+                previous = counts.get(key, (0, read.get(sid, 0)))[0]
+                counts[key] = (previous + int(n), read.get(sid, 0))
+    threshold = l.cfg.validation.quarantine_share_threshold
+    shares: dict[str, dict[str, float]] = {}
+    undeclared: list[str] = []
+    for (sid, reason), (n, denominator) in sorted(counts.items()):
+        share = round(n / denominator, 4) if denominator else 0.0
+        shares.setdefault(sid, {})[reason] = share
+        if share <= threshold:
+            continue
+        spec = l.cfg.sources.get(sid)
+        expected = spec.expected_quarantine.get(reason) if spec is not None else None
+        if expected is None or expected.max_share < share:
+            undeclared.append(f"{sid}/{reason} {share:.1%}" + (f" (declared up to {expected.max_share:.0%})" if expected else ""))
+    return CheckResult(
+        "",
+        not undeclared,
+        f"{len(counts)} (source, reason) quarantine shares, none above {threshold:.0%} without a declaration"
+        if not undeclared
+        else f"quarantine shares above {threshold:.0%} that no YAML declares: {undeclared[:6]}",
+        {"threshold": threshold, "shares": shares, "undeclared": undeclared},
+    )
+
+
+@check("DEATH_PUBLISHED")
+def _death_published(l: Layers) -> CheckResult:
+    """Every subject with a death event has one published death, unless the dates conflict.
+
+    From the audit (P-C7, P-C11d, P-M5): the death publisher compared timestamps, so a
+    date-only death beside a timed one on the same day counted as a conflict; 11,402
+    subjects lost their DEATH row and MEDS carried two death events for each, while the
+    conflict was only ever written as a quality issue.
+
+    Reads the death events (local dates in the dataset's declared zone, the
+    DEATH_DATE_CONFLICT flag), the OMOP lineage of the death and person tables, and the
+    MEDS death rows. A subject whose deaths fall on one local date must have a DEATH row
+    when published to PERSON, and exactly one MEDS death row; a subject on several dates
+    or flagged is exempt and reported. Skips without death events, and when neither OMOP
+    nor MEDS is built.
+    """
+    if l.events is None:
+        return _skip("canonical layer not built")
+    deaths = l.events.filter(
+        (pl.col("event_kind") == str(EventKind.death)) & pl.col("event_time").is_not_null()
+    )
+    if deaths.height == 0:
+        return _skip("no death events in this dataset")
+    zone = l.cfg.time.timezone_assumption or "UTC"
+    per_subject = (
+        deaths.with_columns(
+            pl.col("event_time").dt.replace_time_zone("UTC").dt.convert_time_zone(zone).dt.date().alias("local_day"),
+            pl.col("quality_flags").list.contains(str(QualityFlag.DEATH_DATE_CONFLICT)).alias("flagged"),
+        )
+        .group_by("subject_id")
+        .agg(pl.col("local_day").n_unique().alias("days"), pl.col("flagged").any().alias("flagged"))
+    )
+    conflicting = set(per_subject.filter((pl.col("days") > 1) | pl.col("flagged"))["subject_id"].to_list())
+    expected = set(per_subject["subject_id"].to_list()) - conflicting
+    subject_of_event = dict(zip(deaths["event_id"].to_list(), deaths["subject_id"].to_list()))
+
+    metrics: dict[str, Any] = {
+        "subjects_with_death": per_subject.height, "conflicting_subjects": len(conflicting),
+    }
+    problems: list[str] = []
+    examined = 0
+    con = _omop_connection(l)
+    if con is not None:
+        try:
+            death_events = {r[0] for r in con.execute(
+                "SELECT DISTINCT event_id FROM etl_audit.lineage WHERE target_table = 'death'").fetchall()}
+            person_events = {r[0] for r in con.execute(
+                "SELECT DISTINCT event_id FROM etl_audit.lineage WHERE target_table = 'person'").fetchall()}
+            death_rows = int(con.execute("SELECT count(*) FROM death").fetchone()[0])
+        finally:
+            con.close()
+        with_row = {subject_of_event[e] for e in death_events if e in subject_of_event}
+        published = set(l.events.filter(pl.col("event_id").is_in(list(person_events)))["subject_id"].to_list()) if person_events else set()
+        missing = (expected & published) - with_row
+        metrics.update({"omop_death_rows": death_rows, "omop_subjects_missing_death": len(missing)})
+        examined += 1
+        if missing:
+            problems.append(f"{len(missing):,} published persons with a death on one local date have no DEATH row")
+    files = _meds_files(l)
+    if files:
+        import meds as meds_spec
+
+        rows = _meds_query(files, "SELECT subject_id, count(*) FROM meds WHERE code = $code GROUP BY subject_id",
+                           {"code": meds_spec.death_code})
+        per_meds = {int(s): int(n) for s, n in rows}
+        wrong = {s for s in expected if per_meds.get(s, 0) != 1}
+        metrics.update({"meds_death_rows": sum(per_meds.values()), "meds_subjects_not_exactly_one": len(wrong)})
+        examined += 1
+        if wrong:
+            problems.append(f"{len(wrong):,} subjects have {'no' if all(per_meds.get(s, 0) == 0 for s in wrong) else 'not exactly one'} MEDS death row")
+    if not examined:
+        return _skip_with("neither OMOP nor MEDS is built", metrics)
+    return CheckResult(
+        "",
+        not problems,
+        f"{len(expected):,} subjects with a death on one local date ({zone}) are published as dead "
+        f"in every built target; {len(conflicting):,} carry a genuine date conflict and are reported"
+        if not problems
+        else "; ".join(problems),
+        metrics,
+    )
+
+
+@check("UNIT_CONCEPT_COVERAGE")
+def _unit_concept_coverage(l: Layers) -> CheckResult:
+    """Measurements that state a unit carry a unit concept.
+
+    From the audit (P-C3, P-C5, P-J7, P-J9, P-M17): ``unit_concept_id`` was the literal
+    0 in the publisher, so 161,725,013 rows in one export and every row in the others
+    carried a unit string and no concept; values the source states without a unit had
+    no way to be given one.
+
+    Reads OMOP MEASUREMENT (rows with a unit source value) and, for events flagged
+    UNIT_DECLARED, their published rows through the lineage. The share with a non-zero
+    concept must reach ``validation.unit_concept_coverage_min``. Skips when OMOP is not
+    built, was built without a vocabulary, or no measurement carries a unit.
+    """
+    con = _omop_connection(l)
+    if con is None:
+        return _skip("OMOP not built or empty")
+    try:
+        if _omop_vocabulary_version(con) is None:
+            return _skip("OMOP was built without a vocabulary: no unit concept could be assigned")
+        total, covered = con.execute(
+            "SELECT count(*), count(*) FILTER (WHERE unit_concept_id <> 0) FROM measurement "
+            "WHERE unit_source_value IS NOT NULL"
+        ).fetchone()
+    finally:
+        con.close()
+    total, covered = int(total or 0), int(covered or 0)
+    declared_total = declared_covered = 0
+    if l.events is not None:
+        declared = l.events.filter(
+            pl.col("quality_flags").list.contains(str(QualityFlag.UNIT_DECLARED))
+        ).select("event_id")
+        if declared.height:
+            with _engine(l, omop=True) as engine:
+                engine.register("declared", declared.to_arrow())
+                row = engine.execute(
+                    """
+                    SELECT count(DISTINCT m.measurement_id),
+                           count(DISTINCT m.measurement_id) FILTER (WHERE m.unit_concept_id <> 0)
+                    FROM declared d
+                    JOIN omop.etl_audit.lineage g ON g.event_id = d.event_id AND g.target_table = 'measurement'
+                    JOIN omop.main.measurement m ON m.measurement_id = g.target_pk
+                    WHERE m.unit_source_value IS NULL
+                    """
+                ).fetchone()
+            declared_total, declared_covered = int(row[0] or 0), int(row[1] or 0)
+    denominator = total + declared_total
+    if not denominator:
+        return _skip("no published measurement states a unit")
+    share = (covered + declared_covered) / denominator
+    minimum = l.cfg.validation.unit_concept_coverage_min
+    return CheckResult(
+        "",
+        share >= minimum,
+        f"{covered + declared_covered:,} of {denominator:,} measurements with a stated or declared unit "
+        f"carry a unit concept ({share:.1%}, threshold {minimum:.0%})",
+        {"with_unit": denominator, "with_concept": covered + declared_covered, "share": round(share, 4),
+         "declared_units": declared_total, "threshold": minimum},
+    )
+
+
+@check("UNIT_KNOWN")
+def _unit_known(l: Layers) -> CheckResult:
+    """Every unit string on an event is in the unit table, or the event says it is not.
+
+    From the audit (P-C8, P-J8): the value parser read any text after a number as a
+    unit, so an electrocardiogram diagnosis became a number with a diagnosis for its
+    unit. Once the parser accepts only spellings the table knows, an unknown spelling on
+    an event carries UNIT_UNKNOWN and nothing was normalized from it.
+
+    Reads the distinct unit spellings of the events (with their UNIT_UNKNOWN flags) and
+    ``reference/units/*.csv``. Fails on any spelling outside the table on an unflagged
+    event; reports the most frequent unknown spellings. Skips when no unit table exists
+    or no event carries a unit.
+    """
+    table = load_unit_table()
+    if table is None:
+        return _skip(f"no unit table under {reference_root() / 'units'}")
+    if l.events_path is None:
+        return _skip("canonical layer not built")
+    with _engine(l) as con:
+        rows = con.execute(
+            f"""
+            SELECT regexp_replace(trim(unit_source), '\\s+', ' ', 'g') AS u, count(*),
+                   count(*) FILTER (WHERE NOT list_contains(quality_flags, '{QualityFlag.UNIT_UNKNOWN}'))
+            FROM evt WHERE unit_source IS NOT NULL GROUP BY 1
+            """
+        ).fetchall()
+    if not rows:
+        return _skip("no event carries a unit")
+    known = sum(int(n) for u, n, _ in rows if table.ucum(str(u)) is not None)
+    unknown = sorted(
+        ((int(unflagged), int(n), str(u)) for u, n, unflagged in rows if table.ucum(str(u)) is None),
+        reverse=True,
+    )
+    unflagged_total = sum(u for u, _, _ in unknown)
+    top = {spelling[:32]: n for _, n, spelling in unknown[:10]}
+    return CheckResult(
+        "",
+        unflagged_total == 0,
+        f"{len(rows):,} distinct unit spellings on {known + sum(n for _, n, _ in unknown):,} events; "
+        f"{len(unknown):,} spellings are outside the unit table and every event carrying one says so"
+        if unflagged_total == 0
+        else f"{unflagged_total:,} events carry a unit the table does not know, unflagged; "
+        f"most frequent: {top}",
+        {"distinct_spellings": len(rows), "unknown_spellings": len(unknown), "unknown_unflagged_events": unflagged_total,
+         "top_unknown": top, "unit_table_files": list(table.files)},
+    )
+
+
+@check("UNIT_VALUE_PLAUSIBLE")
+def _unit_value_plausible(l: Layers) -> CheckResult:
+    """A value outside the plausible range declared for its code and unit is flagged.
+
+    From the audit (P-C4, P-CU2, P-CU9, P-CU10, P-M2, D-R17): body temperatures labelled
+    Celsius with a median of 98, a respiratory rate of 196, blood pressures of zero,
+    drop-down option numbers read as measurements -- all published as values. The
+    decision is to keep the value, flag it IMPLAUSIBLE, and leave the normalized column
+    empty; the ranges live in ``reference/plausible_ranges/<dataset>.csv``.
+
+    Reads the events' code, unit (the normalized unit where the column exists, else the
+    source spelling resolved through the unit table), value (normalized where present)
+    and flags, against the dataset's range table. Fails on any value outside its range
+    without the IMPLAUSIBLE flag. Always reports the value ranges of temperature-like
+    codes. Skips without a range table for this dataset.
+    """
+    if l.events_path is None:
+        return _skip("canonical layer not built")
+    columns = _events_columns(l)
+    ranges = load_plausible_ranges(l.cfg.dataset_id)
+    table = load_unit_table()
+    with _engine(l) as con:
+        temperatures = temperature_like_summary(con, columns)
+        if ranges is None:
+            return _skip_with(
+                f"no plausible-range table for {l.cfg.dataset_id} under {reference_root() / 'plausible_ranges'}; "
+                f"value ranges of {len(temperatures)} temperature-like codes reported",
+                {"temperature_like": temperatures},
+            )
+        con.execute("CREATE TEMP TABLE rng (code_system VARCHAR, source_code VARCHAR, ucum VARCHAR, low DOUBLE, high DOUBLE)")
+        con.executemany("INSERT INTO rng VALUES (?, ?, ?, ?, ?)", [(s, c, u, lo, hi) for (s, c, u), (lo, hi) in ranges.items()])
+        con.execute("CREATE TEMP TABLE umap (spelling VARCHAR, ucum VARCHAR)")
+        if table is not None:
+            con.executemany("INSERT INTO umap VALUES (?, ?)", [(k, v.lower()) for k, v in table.ucum_of.items()])
+        normalized = "unit_normalized" in columns
+        value = "coalesce(value_number_normalized, value_number)" if "value_number_normalized" in columns else "value_number"
+        rows = con.execute(
+            f"""
+            WITH spelled AS (
+                SELECT code_system, source_code, quality_flags, {value} AS v,
+                       lower(regexp_replace(trim(unit_source), '\\s+', ' ', 'g')) AS u,
+                       {"lower(unit_normalized)" if normalized else "CAST(NULL AS VARCHAR)"} AS un
+                FROM evt
+                WHERE (unit_source IS NOT NULL{" OR unit_normalized IS NOT NULL" if normalized else ""})
+                  AND {value} IS NOT NULL
+            ), resolved AS (
+                SELECT s.code_system, s.source_code, s.quality_flags, s.v, coalesce(s.un, umap.ucum, s.u) AS ucum
+                FROM spelled s LEFT JOIN umap ON umap.spelling = s.u
+            )
+            SELECT r.code_system, r.source_code, r.ucum, count(*),
+                   count(*) FILTER (WHERE e.v < r.low OR e.v > r.high),
+                   count(*) FILTER (WHERE (e.v < r.low OR e.v > r.high)
+                                      AND NOT list_contains(e.quality_flags, '{QualityFlag.IMPLAUSIBLE}'))
+            FROM resolved e JOIN rng r ON r.code_system = e.code_system AND r.source_code = e.source_code AND r.ucum = e.ucum
+            GROUP BY 1, 2, 3 ORDER BY 6 DESC, 5 DESC, 4 DESC
+            """
+        ).fetchall()
+    judged = [{"code_system": s, "source_code": c, "unit": u, "rows": int(n), "outside": int(o), "unflagged": int(f)}
+              for s, c, u, n, o, f in rows]
+    unflagged = sum(j["unflagged"] for j in judged)
+    outside = sum(j["outside"] for j in judged)
+    return CheckResult(
+        "",
+        unflagged == 0,
+        f"{sum(j['rows'] for j in judged):,} values judged against {len(ranges)} declared ranges; "
+        f"{outside:,} lie outside and every one is flagged"
+        if unflagged == 0
+        else f"{unflagged:,} values lie outside their declared plausible range and are not flagged: "
+        + "; ".join(f"{j['source_code']} [{j['unit']}] {j['unflagged']:,}" for j in judged[:5] if j["unflagged"]),
+        {"ranges_declared": len(ranges), "judged": judged[:20], "outside": outside, "unflagged": unflagged,
+         "temperature_like": temperatures},
+    )
+
+
+@check("UNIT_HOMOGENEOUS_PER_CODE")
+def _unit_homogeneous_per_code(l: Layers) -> CheckResult:
+    """One code does not mix units that no exact conversion links.
+
+    From the audit (P-C4, P-M9, D-R10): one D-dimer item carried both `ng/mL` and
+    `ng/mL FEU`, quantities no factor converts between, under one code; the decision is
+    to split such a code by its unit rather than convert.
+
+    Reads rows per (code, unit) over the measured events, the unit table's dimensions
+    and the conversion table. Reports every code whose units fall in more than one
+    family; fails when a code's second family exceeds MIN_SECOND_UNIT_FAMILY_SHARE of
+    its rows. Skips when no measured event carries a unit.
+    """
+    if l.events_path is None:
+        return _skip("canonical layer not built")
+    columns = _events_columns(l)
+    table = load_unit_table()
+    conversions = load_unit_conversions()
+    kinds = ", ".join(_sql_str(k) for k in (str(EventKind.measurement), str(EventKind.observation)))
+    unit = _unit_expression(columns)
+    with _engine(l) as con:
+        rows = con.execute(
+            f"""
+            SELECT code_system, source_code, regexp_replace(trim({unit}), '\\s+', ' ', 'g'), count(*)
+            FROM evt WHERE event_kind IN ({kinds}) AND {unit} IS NOT NULL GROUP BY 1, 2, 3
+            """
+        ).fetchall()
+    if not rows:
+        return _skip("no measured event carries a unit")
+    per_code: dict[tuple[str, str], dict[str, int]] = {}
+    for system, code, spelling, n in rows:
+        per_code.setdefault((str(system), str(code)), {})[str(spelling)] = int(n)
+    mixed: list[dict[str, Any]] = []
+    for (system, code), spellings in per_code.items():
+        families = unit_families(spellings, table, conversions)
+        if len(families) < 2:
+            continue
+        total = sum(families.values())
+        ordered = sorted(families.items(), key=lambda kv: -kv[1])
+        second_share = ordered[1][1] / total if total else 0.0
+        mixed.append({
+            "code_system": system, "source_code": code, "rows": total,
+            "families": {f: n for f, n in ordered[:6]}, "second_family_share": round(second_share, 4),
+            "fails": second_share > MIN_SECOND_UNIT_FAMILY_SHARE,
+        })
+    mixed.sort(key=lambda m: (-m["fails"], -m["second_family_share"], -m["rows"]))
+    failing = [m for m in mixed if m["fails"]]
+    return CheckResult(
+        "",
+        not failing,
+        f"{len(per_code):,} measured codes carry a unit; {len(mixed)} mix unit families and none beyond "
+        f"{MIN_SECOND_UNIT_FAMILY_SHARE:.0%} of its rows"
+        if not failing
+        else f"{len(failing)} code(s) mix units no conversion links: "
+        + "; ".join(f"{m['source_code']} {list(m['families'])[:2]} ({m['second_family_share']:.1%})" for m in failing[:5]),
+        {"codes_with_units": len(per_code), "mixed": mixed[:20], "failing": len(failing),
+         "unit_table": table is not None, "conversions": len(conversions)},
+    )
+
+
+@check("DOSE_UNIT_CARRIED")
+def _dose_unit_carried(l: Layers) -> CheckResult:
+    """A drug record whose source states a dose unit publishes it in OMOP and in MEDS.
+
+    From the audit (P-C6, P-CU3, P-M10): the publisher took the dose unit only from the
+    dose text, so an export that keeps the unit in its own column published 18,567,232
+    drug exposures with no unit, and another whose unit column was never mapped left
+    1,897,802 bare numbers in MEDS.
+
+    Reads the drug events' unit and dose text (each distinct dose parsed once, with the
+    parser the publisher uses), OMOP DRUG_EXPOSURE through the lineage, and the MEDS drug
+    rows by event id. Fails when such a row has a null OMOP dose unit, or a MEDS row with
+    neither a unit nor its dose text. Reports bare doses (no unit anywhere). Skips when
+    no drug event states a unit or a parseable dose unit, or nothing is published.
+    """
+    if l.events_path is None:
+        return _skip("canonical layer not built")
+    from ehr2trace.canonical.values import parse_value
+    from ehr2trace.errors import QuarantineRow
+
+    kinds = ", ".join(_sql_str(k) for k in DRUG_KINDS)
+    omop_built = (l.layout.omop_dir / "omop.duckdb").exists()
+    meds_files = _meds_files(l)
+    if not omop_built and not meds_files:
+        return _skip("neither OMOP nor MEDS is built")
+    with _engine(l, omop=omop_built, meds=bool(meds_files)) as con:
+        doses = [r[0] for r in con.execute(
+            f"SELECT DISTINCT dose_source FROM evt WHERE event_kind IN ({kinds}) AND dose_source IS NOT NULL"
+        ).fetchall()]
+        with_unit = []
+        for dose in doses:
+            try:
+                if parse_value(dose).unit:
+                    with_unit.append((dose,))
+            except QuarantineRow:
+                continue
+        con.execute("CREATE TEMP TABLE dosed (dose_source VARCHAR)")
+        if with_unit:
+            con.executemany("INSERT INTO dosed VALUES (?)", with_unit)
+        con.execute(
+            f"""
+            CREATE TEMP TABLE carried AS
+            SELECT event_id, unit_source IS NOT NULL AS has_unit
+            FROM evt WHERE event_kind IN ({kinds})
+              AND (unit_source IS NOT NULL OR dose_source IN (SELECT dose_source FROM dosed))
+            """
+        )
+        candidates = int(con.execute("SELECT count(*) FROM carried").fetchone()[0])
+        metrics: dict[str, Any] = {"drug_events_with_source_unit": candidates, "parseable_dose_texts": len(with_unit)}
+        if not candidates:
+            return _skip_with("no drug event states a unit or a parseable dose unit", metrics)
+        problems: list[str] = []
+        if omop_built:
+            row = con.execute(
+                """
+                SELECT count(DISTINCT d.drug_exposure_id),
+                       count(DISTINCT d.drug_exposure_id) FILTER (WHERE d.dose_unit_source_value IS NULL)
+                FROM omop.main.drug_exposure d
+                JOIN omop.etl_audit.lineage g ON g.target_table = 'drug_exposure' AND g.target_pk = d.drug_exposure_id
+                JOIN carried c ON c.event_id = g.event_id
+                """
+            ).fetchone()
+            metrics.update({"omop_rows": int(row[0] or 0), "omop_missing_unit": int(row[1] or 0)})
+            if row[1]:
+                problems.append(f"{int(row[1]):,} of {int(row[0]):,} drug exposures whose source states a unit have none in OMOP")
+        if meds_files:
+            row = con.execute(
+                f"""
+                SELECT count(*), count(*) FILTER (WHERE m.unit IS NULL AND m.dose IS NULL),
+                       (SELECT count(*) FROM meds WHERE event_kind IN ({kinds}) AND dose IS NOT NULL AND unit IS NULL
+                        AND dose NOT IN (SELECT dose_source FROM dosed))
+                FROM meds m JOIN carried c ON c.event_id = m.event_id
+                WHERE m.event_kind IN ({kinds})
+                """
+            ).fetchone()
+            metrics.update({"meds_rows": int(row[0] or 0), "meds_missing_unit": int(row[1] or 0), "meds_bare_doses": int(row[2] or 0)})
+            if row[1]:
+                problems.append(f"{int(row[1]):,} of {int(row[0]):,} MEDS drug rows whose source states a unit carry neither a unit nor their dose text")
+    return CheckResult(
+        "",
+        not problems,
+        f"{candidates:,} drug events state a unit or a parseable dose unit and every published row carries it"
+        + (f"; {metrics.get('meds_bare_doses', 0):,} MEDS doses have no unit anywhere (reported)" if metrics.get("meds_bare_doses") else "")
+        if not problems
+        else "; ".join(problems),
+        metrics,
+    )
+
+
+@check("VISIT_CONCEPT_COVERAGE")
+def _visit_concept_coverage(l: Layers) -> CheckResult:
+    """Published visits carry a visit concept, and no zero-length visit names nothing.
+
+    From the audit (P-J5, P-M7, P-M8, P-M20, D-R8, D-R14): 34% of one export's visits
+    and 86% of another's had concept 0 -- unmapped visit types, transfers and service
+    changes published as visits, and 546,024 discharge markers with no unit and no end
+    time published as zero-length visits.
+
+    Reads OMOP VISIT_OCCURRENCE and, when it holds rows, VISIT_DETAIL (concept coverage
+    against ``validation.visit_concept_coverage_min``, judged only when the build had a
+    vocabulary), and the canonical visit events for zero-length visits whose type is
+    empty or a placeholder, which must number zero. Skips when OMOP is not built.
+    """
+    con = _omop_connection(l)
+    if con is None:
+        return _skip("OMOP not built or empty")
+    try:
+        has_vocabulary = _omop_vocabulary_version(con) is not None
+        coverage: dict[str, dict[str, Any]] = {}
+        for table, column in (("visit_occurrence", "visit_concept_id"), ("visit_detail", "visit_detail_concept_id")):
+            try:
+                total, covered = con.execute(
+                    f"SELECT count(*), count(*) FILTER (WHERE {column} <> 0) FROM {table}"
+                ).fetchone()
+            except Exception:
+                continue
+            if not total:
+                continue
+            coverage[table] = {"rows": int(total), "with_concept": int(covered), "share": round(int(covered) / int(total), 4)}
+        zero_unmapped = int(con.execute(
+            "SELECT count(*) FROM visit_occurrence WHERE visit_start_datetime = visit_end_datetime AND visit_concept_id = 0"
+        ).fetchone()[0])
+    finally:
+        con.close()
+    placeholders = 0
+    if l.events is not None:
+        visits = l.events.filter(pl.col("event_kind") == str(EventKind.visit))
+        placeholders = int(visits.filter(
+            (pl.col("end_time").is_null() | (pl.col("end_time") == pl.col("event_time")))
+            & (pl.col("source_code").is_null()
+               | pl.col("source_code").str.strip_chars().str.to_lowercase().is_in(sorted(PLACEHOLDER_VALUES)))
+        ).height)
+    minimum = l.cfg.validation.visit_concept_coverage_min
+    problems: list[str] = []
+    if has_vocabulary:
+        for table, c in coverage.items():
+            if c["share"] < minimum:
+                problems.append(f"{table}: {c['with_concept']:,} of {c['rows']:,} rows carry a concept ({c['share']:.1%} < {minimum:.0%})")
+    if placeholders:
+        problems.append(f"{placeholders:,} zero-length visits whose type is empty or a placeholder were published")
+    if not coverage:
+        return _skip_with("no visit published", {"placeholder_zero_length_visits": placeholders})
+    return CheckResult(
+        "",
+        not problems,
+        ", ".join(f"{t} {c['share']:.1%} of {c['rows']:,} rows carry a concept" for t, c in coverage.items())
+        + ("" if has_vocabulary else " (built without a vocabulary, so not judged)")
+        + f"; {zero_unmapped:,} zero-length visits without a concept, none typed by a placeholder"
+        if not problems
+        else "; ".join(problems),
+        {"coverage": coverage, "threshold": minimum, "judged": has_vocabulary,
+         "zero_length_unmapped_visits": zero_unmapped, "placeholder_zero_length_visits": placeholders},
+    )
+
+
+@check("NOTE_TEXT_UNIQUE")
+def _note_text_unique(l: Layers) -> CheckResult:
+    """One subject does not carry the same note text twice on one day under one code.
+
+    From the audit (P-CU4, W6, D-R2): 491,192 groups of notes identical in patient, day,
+    type and full text differed only in an encounter id that matched no other table, and
+    each became its own event; another export repeats 8,237 report texts on other dates,
+    which is reported and left alone.
+
+    Reads the note events' subject, local date (dataset zone), code and a hash of the
+    text -- the text itself is never held. Fails on any exact group of more than one;
+    reports groups that share text across dates. Skips without note events.
+    """
+    if l.events_path is None:
+        return _skip("canonical layer not built")
+    with _engine(l) as con:
+        summary = note_duplicate_groups(con, l.cfg.time.timezone_assumption)
+    if not summary["notes_with_text"]:
+        return _skip("no note carries text")
+    exact = summary["exact_duplicate_groups"]
+    return CheckResult(
+        "",
+        exact == 0,
+        f"{summary['notes_with_text']:,} notes with text; no subject carries one text twice on a day "
+        f"({summary['same_text_other_date_groups']:,} texts recur on another date, reported)"
+        if exact == 0
+        else f"{exact:,} groups of notes share subject, day, code and full text; {summary['surplus_note_events']:,} "
+        "events are copies that differ only in what the identity still keys on",
+        summary,
+    )
+
+
+@check("ENCOUNTER_RESOLVES")
+def _encounter_resolves(l: Layers) -> CheckResult:
+    """An event's encounter id names a visit of the same subject, at the declared rate.
+
+    From the audit (P-CU12, P-M14, P-M15): a note table whose encounter ids matched
+    other tables 2.6% of the time; emergency visits keyed on one identifier while their
+    vital signs used another and their medications none, so nothing linked.
+
+    Reads the events' subject and encounter id against the visit and visit-detail
+    events. Per source, the linked share must reach the source's
+    ``expected_encounter_link_rate.min_rate`` or else ``validation.encounter_link_rate_min``.
+    Skips when the dataset has no visit events or no event carries an encounter id.
+    """
+    if l.events_path is None:
+        return _skip("canonical layer not built")
+    if l.events is not None and l.events.filter(pl.col("event_kind").is_in(list(VISIT_KINDS))).height == 0:
+        return _skip("no visit events to resolve encounters against")
+    with _engine(l) as con:
+        rates = encounter_link_rates(con)
+    if not rates:
+        return _skip("no event carries an encounter id")
+    default = l.cfg.validation.encounter_link_rate_min
+    failing: list[str] = []
+    for sid, r in sorted(rates.items()):
+        spec = l.cfg.sources.get(sid)
+        expected = spec.expected_encounter_link_rate if spec is not None else None
+        minimum = expected.min_rate if expected is not None else default
+        r["min_rate"] = minimum
+        r["declared"] = expected is not None
+        if r["rate"] < minimum:
+            failing.append(f"{sid} {r['rate']:.1%} < {minimum:.0%}")
+    return CheckResult(
+        "",
+        not failing,
+        f"{len(rates)} sources carry encounter ids and each resolves to a visit at its declared rate: "
+        + ", ".join(f"{sid} {r['rate']:.0%}" for sid, r in sorted(rates.items()))
+        if not failing
+        else f"encounter ids that do not resolve to a visit of the same subject: {failing[:6]}",
+        {"per_source": rates, "default_min_rate": default},
+    )
+
+
+@check("CODE_DESCRIPTION_IS_REPRESENTATIVE")
+def _code_description_representative(l: Layers) -> CheckResult:
+    """codes.parquet describes each code by its concept name, or by its commonest source name.
+
+    From the audit (P-C9): the description was the alphabetically smallest source string,
+    so a concept carrying 127,700 rows of one name and 15 of another was described by
+    the other.
+
+    Reads MEDS codes.parquet, the events' (source, code, name) frequencies, the MEDS
+    ``dataset.json``, and the vocabulary when one is installed. An OMOP code's description
+    must be its concept name (accepted as any non-empty text without a vocabulary); a
+    SOURCE code's description must be the most frequent source name of its events. The
+    SOURCE rule is enforced on a MEDS layer written under extension column version 2 and
+    reported on an older one, whose publisher did not yet promise it. Skips when MEDS is
+    not built.
+    """
+    import json
+
+    import meds as meds_spec
+
+    from ehr2trace.terminology import normalize_term
+
+    files = _meds_files(l)
+    codes_path = l.layout.meds_dir / meds_spec.code_metadata_filepath
+    if not files or not codes_path.exists() or l.events_path is None:
+        return _skip("MEDS not built")
+    metadata_path = l.layout.meds_dir / meds_spec.dataset_metadata_filepath
+    version = 1
+    if metadata_path.exists():
+        try:
+            version = int(json.loads(metadata_path.read_text(encoding="utf-8")).get("extension_columns_version", 1))
+        except (ValueError, TypeError):
+            version = 1
+    if version < 2 and "unit_normalized" in _meds_columns(files):
+        version = 2
+    codes = pl.read_parquet(codes_path)
+    with _engine(l) as con:
+        rows = con.execute(
+            "SELECT source_id, source_code, source_name, count(*) FROM evt "
+            "WHERE source_code IS NOT NULL GROUP BY 1, 2, 3"
+        ).fetchall()
+    from collections import Counter
+
+    names: dict[tuple[str, str], Counter] = {}
+    for source_id, code, name, n in rows:
+        key = (str(source_id), normalize_term(code) or "unspecified")
+        counter = names.setdefault(key, Counter())
+        if name is not None and str(name).strip():
+            counter[str(name).strip()] += int(n)
+
+    def fold(text: str | None) -> str:
+        return " ".join(str(text or "").split()).lower()
+
+    concept_names: dict[int, str] = {}
+    omop_ids = [int(c) for c in codes["omop_concept_id"].drop_nulls().to_list()] if "omop_concept_id" in codes.columns else []
+    vocabulary_used = False
+    if omop_ids:
+        import os
+
+        from ehr2trace.terminology import Vocabulary
+
+        vocabulary = Vocabulary.open(Path(os.environ["OMOP_VOCAB_DIR"]) if os.environ.get("OMOP_VOCAB_DIR") else None)
+        try:
+            if getattr(vocabulary, "available", False):
+                vocabulary_used = True
+                vocabulary.con.execute("CREATE OR REPLACE TEMP TABLE _ids (concept_id BIGINT)")
+                vocabulary.con.executemany("INSERT INTO _ids VALUES (?)", [(i,) for i in set(omop_ids)])
+                for concept_id, name in vocabulary.con.execute(
+                    "SELECT i.concept_id, c.concept_name FROM _ids i JOIN CONCEPT c ON CAST(c.concept_id AS BIGINT) = i.concept_id"
+                ).fetchall():
+                    concept_names[int(concept_id)] = str(name)
+                vocabulary.con.execute("DROP TABLE IF EXISTS _ids")
+        finally:
+            vocabulary.close()
+
+    wrong_omop: list[str] = []
+    wrong_source: list[str] = []
+    examined = 0
+    for row in codes.iter_rows(named=True):
+        code, description = str(row["code"]), row.get("description")
+        if code == meds_spec.death_code:
+            continue
+        examined += 1
+        if code.startswith("OMOP/"):
+            concept_id = row.get("omop_concept_id")
+            expected = concept_names.get(int(concept_id)) if concept_id is not None else None
+            if expected is not None:
+                if fold(description) != fold(expected):
+                    wrong_omop.append(f"{code}: described as {str(description)[:40]!r}, concept name {expected[:40]!r}")
+            elif not fold(description):
+                wrong_omop.append(f"{code}: empty description")
+            continue
+        parts = code.split("/", 2)
+        if len(parts) != 3:
+            continue
+        counter = names.get((parts[1], parts[2]))
+        if not counter:
+            if not fold(description):
+                wrong_source.append(f"{code}: empty description")
+            continue
+        commonest = counter.most_common(1)[0][0]
+        if fold(description) != fold(commonest):
+            wrong_source.append(f"{code}: described as {str(description)[:40]!r}, commonest name {commonest[:40]!r}")
+    enforced_source = version >= 2
+    failures = wrong_omop + (wrong_source if enforced_source else [])
+    return CheckResult(
+        "",
+        not failures,
+        f"{examined:,} codes described by their concept name or commonest source name"
+        + ("" if vocabulary_used or not omop_ids else " (no vocabulary installed: OMOP descriptions accepted as given)")
+        + (f"; {len(wrong_source):,} SOURCE codes described by something other than their commonest name, "
+           "reported only because this MEDS layer predates the rule" if wrong_source and not enforced_source else "")
+        if not failures
+        else f"{len(failures):,} of {examined:,} code descriptions are not representative, e.g. {failures[:3]}",
+        {"codes": examined, "wrong_omop": len(wrong_omop), "wrong_source": len(wrong_source),
+         "source_rule_enforced": enforced_source, "vocabulary_used": vocabulary_used, "examples": failures[:10]},
+    )
+
+
+@check("RAW_COVERAGE_DECLARED")
+def _raw_coverage_declared(l: Layers) -> CheckResult:
+    """Every delivered column, file and sheet is read, kept, or declared unread with a reason.
+
+    From the audit (P-C10, P-C13, P-CU5, P-CU8, P-J4, P-J6, P-J12, P-M4, P-M11, P-M12,
+    P-M13, P-M18, W7): a whole imaging table, three medication columns, a directory of
+    follow-up and intensive-care tables, an entire ICU module and eight other tables
+    were never read, and no check said so.
+
+    Reads the manifest's column lists per source against the configuration (roles,
+    filters, kept columns, untimed values, flags, merge rules, identity keys and
+    ``ignored_columns``), every file and workbook sheet under the partition directories
+    of every source root against the sources' resolved units and ``out_of_scope``, and
+    any preparation manifest's ``unread_inputs``. Fails on anything undeclared; reports
+    counts per source. Skips without a manifest; the file walk is skipped, with its
+    reason, when a root is not reachable.
+    """
+    if l.manifest is None:
+        return _skip("no ingest manifest")
+    report = raw_coverage(l.cfg, l.manifest)
+    undeclared_columns = {sid: c["undeclared"] for sid, c in report["columns"].items() if c["undeclared"]}
+    unclaimed = report["files"].get("unclaimed", [])
+    unread = report["prepare_manifest"].get("undeclared_unread_inputs", [])
+    problems: list[str] = []
+    if undeclared_columns:
+        problems.append(
+            f"{sum(len(v) for v in undeclared_columns.values())} columns neither read nor declared ignored: "
+            + "; ".join(f"{sid}: {cols[:4]}" for sid, cols in sorted(undeclared_columns.items())[:5])
+        )
+    if unclaimed:
+        problems.append(f"{len(unclaimed)} delivered files or sheets no source reads and no out_of_scope entry names: {unclaimed[:4]}")
+    if unread:
+        problems.append(f"{len(unread)} inputs a preparation step left unread without an out_of_scope entry: {unread[:4]}")
+    columns_total = sum(c.get("columns", 0) for c in report["columns"].values())
+    not_examined = report["files"].get("not_examined")
+    return CheckResult(
+        "",
+        not problems,
+        f"{columns_total} delivered columns across {len(report['columns'])} sources are read, kept or declared; "
+        f"{report['files'].get('claimed_or_declared', 0)} files claimed or declared"
+        + (f" (files not examined: {not_examined})" if not_examined else "")
+        if not problems
+        else "; ".join(problems),
+        report,
+    )
+
+
+@check("EXCLUDED_STATUS_NOT_PUBLISHED")
+def _excluded_status_not_published(l: Layers) -> CheckResult:
+    """No published event carries a status its source declared excluded.
+
+    From the audit (P-J11, D-R6): 30,069 problem-list rows whose status says the entry
+    was deleted were published as diagnoses.
+
+    Reads the events' status per source against each source's ``excluded_status``
+    (case-insensitive, stripped). Fails on any match. When no source declares an
+    excluded status, skips and reports each status-bearing source's most frequent
+    status values instead, so a status worth excluding is visible.
+    """
+    if l.events_path is None:
+        return _skip("canonical layer not built")
+    declaring = {sid: [s.strip().lower() for s in spec.excluded_status]
+                 for sid, spec in l.cfg.sources.items() if spec.excluded_status}
+    with_status = [sid for sid, spec in l.cfg.sources.items() if "status" in spec.fields]
+    with _engine(l) as con:
+        distribution: dict[str, dict[str, int]] = {}
+        if with_status:
+            for sid, status, n in con.execute(
+                f"""
+                SELECT source_id, lower(trim(status_source)), count(*) FROM evt
+                WHERE source_id IN ({', '.join(_sql_str(s) for s in with_status)}) AND status_source IS NOT NULL
+                GROUP BY 1, 2 ORDER BY 3 DESC
+                """
+            ).fetchall():
+                per = distribution.setdefault(str(sid), {})
+                if len(per) < 5:
+                    per[str(status)[:32]] = int(n)
+        if not declaring:
+            return _skip_with("no source declares an excluded status; status distributions reported",
+                              {"status_values": distribution})
+        conditions = " OR ".join(
+            f"(source_id = {_sql_str(sid)} AND lower(trim(status_source)) IN ({', '.join(_sql_str(v) for v in values)}))"
+            for sid, values in declaring.items()
+        )
+        leaked = {str(sid): int(n) for sid, n in con.execute(
+            f"SELECT source_id, count(*) FROM evt WHERE {conditions} GROUP BY 1"
+        ).fetchall()}
+    return CheckResult(
+        "",
+        not leaked,
+        f"{len(declaring)} source(s) declare excluded statuses and no published event carries one"
+        if not leaked
+        else f"events published with a status their source excludes: {leaked}",
+        {"declaring_sources": sorted(declaring), "leaked": leaked, "status_values": distribution},
     )

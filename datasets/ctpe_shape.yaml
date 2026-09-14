@@ -51,6 +51,13 @@ sources:
       dose:         {from: [HV_Discrete_Dose]}
       event_time:   {from: [Ordering_Date], required: true}
       status:       {from: [Order_Status]}
+    expected_quarantine:
+      MISSING_EVENT_TIME:
+        max_share: 0.35
+        reason: >-
+          The fixture reproduces the export's undated orders: one order per partition
+          ships with an empty ordering date, which is a property of the delivery and
+          not of the converter.
 
   medication_admin:
     adapter: any_of
@@ -90,6 +97,10 @@ sources:
       source_name:    {from: [Lab_Name]}
       value:          {from: [Value]}
       unit:           {from: [Units]}
+    ignored_columns:
+      rn: "the extract's own row number within a patient; provenance of the query, not of the result"
+      Reference_Range_Low: "the laboratory's reference interval, not a measured value; no OMOP field holds it here"
+      Reference_Range_High: "the laboratory's reference interval, not a measured value; no OMOP field holds it here"
 
   problem_list:
     adapter: delimited
@@ -105,6 +116,11 @@ sources:
       source_name: {from: [Diagnosis_Name]}
       event_time:  {from: [First_Noted_Date], required: true}
       status:      {from: [Status]}
+    # A problem list records what was entered and what was taken back. An entry the
+    # clinician deleted is not a diagnosis the patient had, so it never becomes one.
+    # No fixture row carries this status; the declaration is what makes a row that
+    # acquires one detectable.
+    excluded_status: ["Deleted"]
 
   echo:
     adapter: delimited
@@ -164,6 +180,18 @@ sources:
       - {column: BMI, code: BMI, unit: "kg/m2"}
       - {column: Pulse, code: PULSE, unit: "/min"}
       - {column: BP_Systolic, code: BP_SYSTOLIC, unit: "mm[Hg]"}
+    expected_quarantine:
+      UNTIMED_CLINICAL_VALUE:
+        max_share: 1.0
+        reason: >-
+          A demographics sheet carries one row per patient and no measurement time, so
+          every vital sign on it is untimed by construction. They are quarantined rather
+          than dated from the extraction, and the share is the whole sheet.
+      UNTIMED_VITAL_STATUS:
+        max_share: 1.0
+        reason: >-
+          Patients recorded alive have no death date, so their vital status has no time
+          to be an event at. The share is whatever fraction of the cohort is alive.
 
   outcome:
     adapter: excel
@@ -179,6 +207,11 @@ sources:
       length_of_stay:  {from: [Length_of_stay_days]}
       duration_masked: {from: [Time_Difference]}
       death_time:      {from: [Death_Date]}
+    merge_rules:
+      # The same admission appears in two extracts with two lengths of stay, because
+      # each extract measured it when it was taken. Neither is wrong and neither may
+      # win by arrival order: the longer stay is the one that saw the admission end.
+      length_of_stay: latest
 
   pft_narrative:
     adapter: excel

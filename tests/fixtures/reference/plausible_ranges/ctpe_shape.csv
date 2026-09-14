@@ -1,0 +1,4 @@
+code_system,source_code,ucum,low,high,basis
+SOURCE,NA,mmol/L,100,180,serum sodium outside 100-180 mmol/L is not compatible with a measured result; fixture value 138
+SOURCE,WBC,10*3/uL,0,500,white cell counts above 500 thousand per microlitre are not compatible with a measured result; fixture value 38.62
+SOURCE,CREAT,mg/dL,0,40,serum creatinine above 40 mg/dL is not compatible with a measured result; fixture values are comparators
