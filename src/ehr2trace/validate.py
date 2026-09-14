@@ -2235,6 +2235,29 @@ def _linked_rows_by_partition_source(l: Layers) -> dict[tuple[str, str], int]:
 # -- what the raw delivery holds versus what the configuration reads --------------------
 
 
+def artifact_in_this_tree(layout: WorkLayout, recorded: str | None) -> Path | None:
+    """The copy of a manifest-recorded artifact that *this* work tree holds.
+
+    The ingest manifest records absolute paths, so a work tree that was copied,
+    moved, or cloned for a fault-injection run carries a manifest pointing at the tree
+    it came from. Reading that one would validate somebody else's artifacts and report
+    the answer as this build's. The recorded path is therefore re-rooted onto this
+    layout when a file of the same relative path exists under it, and used as recorded
+    only when it does not.
+    """
+    if not recorded:
+        return None
+    path = Path(recorded)
+    if layout.root in path.parents:
+        return path if path.exists() else None
+    parts = path.parts
+    for i in range(1, len(parts)):  # longest suffix first
+        candidate = layout.root.joinpath(*parts[i:])
+        if candidate.exists():
+            return candidate
+    return path if path.exists() else None
+
+
 def _sql_str(value: str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
@@ -2284,7 +2307,7 @@ def _normalized_cell_sql(column: str, null_literals: Sequence[str]) -> str:
 
 
 def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path: Path, con,
-                        per_partition: bool = False) -> dict[str, dict[str, Any]]:
+                        per_partition: bool = False, layout: WorkLayout | None = None) -> dict[str, dict[str, Any]]:
     """Per source, how many events collapsed rows that disagree on a mapped field.
 
     Joins each source's own parquet (the files the ingest manifest names) to the lineage
@@ -2304,9 +2327,11 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
     report: dict[str, dict[str, Any]] = {}
     files_by_source: dict[str, list[str]] = {}
     for unit in manifest.get("inputs", []):
-        path = unit.get("output_path")
-        if path and Path(path).exists() and unit.get("rows_parsed", 0):
-            files_by_source.setdefault(unit["source_id"], []).append(path)
+        recorded = unit.get("output_path")
+        path = artifact_in_this_tree(layout, recorded) if layout is not None else (
+            Path(recorded) if recorded and Path(recorded).exists() else None)
+        if path is not None and unit.get("rows_parsed", 0):
+            files_by_source.setdefault(unit["source_id"], []).append(str(path))
 
     for source_id, spec in cfg.sources.items():
         entry: dict[str, Any] = {"shape": spec.shape, "compared": [], "skipped": None}
@@ -2653,7 +2678,7 @@ def _duplicates_agree(l: Layers) -> CheckResult:
     if l.manifest is None or l.links_path is None or l.events_path is None:
         return _skip("canonical layer not built")
     with _engine(l) as con:
-        report = merge_disagreements(l.cfg, l.manifest, l.links_path, con)
+        report = merge_disagreements(l.cfg, l.manifest, l.links_path, con, layout=l.layout)
     disagreeing = {
         sid: entry["disagreements"]
         for sid, entry in report.items() if entry.get("disagreements")
@@ -2748,9 +2773,9 @@ def _quarantine_share_declared(l: Layers) -> CheckResult:
         sid = unit["source_id"]
         parsed[sid] = parsed.get(sid, 0) + int(unit["rows_parsed"])
         read[sid] = read.get(sid, 0) + int(unit["rows_read"])
-        q = unit.get("quarantine_path")
-        if q and Path(q).exists():
-            ingest_files.setdefault(sid, []).append(q)
+        q = artifact_in_this_tree(l.layout, unit.get("quarantine_path"))
+        if q is not None:
+            ingest_files.setdefault(sid, []).append(str(q))
     counts: dict[tuple[str, str], tuple[int, int]] = {}  # (source, reason) -> (rows, denominator)
     quarantine_path = l.layout.canonical_path("quarantine")
     with _engine(l) as con:

@@ -1,6 +1,6 @@
 # Fault catalogue
 
-Forty checks passing on the pipeline that produced the data proves very little.
+Fifty-five checks passing on the pipeline that produced the data proves very little.
 The question a reader should ask is the other one: when a specific corruption is
 present, does anything fire?
 
@@ -26,30 +26,42 @@ Detector sensitivity is a property of the checks, not of the dataset's size.
 Every fault in the catalogue below is detected: a check that passes on the clean
 build fails on the corrupted one. That is asserted by the test above and gated in CI.
 
-The number worth reading is not nineteen out of nineteen. **Six** of the nineteen got
-past the suite the first time and motivated the six checks that now catch them, and a
-detector written in response to a fault is guaranteed to catch it. What the six have in
-common is the transferable part: each compares an artifact against independently stored
-information, which no check reading a single artifact in isolation could do.
+The number worth reading is not twenty-eight out of twenty-eight. **Fifteen** of the
+twenty-eight got past the suite at the time they happened, and a detector written in
+response to a fault is guaranteed to catch it afterwards. Six of those fifteen were
+found here, by this experiment, and motivated the six checks named below. The other
+nine were found by reading three finished conversions — 300 million events that had
+already been published, validated and reported clean — and are the nine of the
+conversion audit of 2026-09-13, each now injected as the artifact state the audit
+actually found.
 
-Fourteen of the nineteen never reach an OMOP database at all, so standard CDM-level
-data-quality tooling cannot be pointed at them; they are faults in the canonical layer,
-the anchors, the identities, or the MEDS shards, above or beside the target schema.
+What all fifteen have in common is the transferable part: each compares an artifact
+against information stored independently of it — another artifact, the dataset's own
+declaration, or a reference table — which no check reading a single artifact in
+isolation could do. Nine of the fifteen compare against a declaration, which is also
+their limit: `EXCLUDED_STATUS_PUBLISHED` is invisible until some source says which
+status means "taken back", and `VALUE_IN_A_DIFFERENT_UNIT_THAN_ITS_LABEL` is invisible
+until some table says what a plausible value is. A judgement nobody has written down
+cannot be checked, and the honest form of that is a check that reports and says it is
+not judging, which is what these do.
+
+Twenty-one of the twenty-eight never reach an OMOP database at all, so standard
+CDM-level data-quality tooling cannot be pointed at them; they are faults in the
+canonical layer, the ingest manifest, the anchors, the identities, or the MEDS shards,
+above or beside the target schema.
 
 Detection is also not the same as being able to act on it. Comparing each mutated clone
 against the tree it was cloned from establishes which artifacts a fault actually damaged;
-a firing check localises the fault if it names one of them. Fifteen of nineteen do.
-
-Both numbers come from the identical harness; the "before" figure is measured by
-ignoring the four new check ids, not by checking out an older revision, so nothing else
-moves between the two rows.
+a firing check localises the fault if it names one of them. Fifteen of the first
+nineteen did; the figure has not been re-measured for the nine the audit added, though
+each of those names the source, the code or the table it fired on in its detail string.
 
 The honest caveat, stated up front: a detector written in response to a specific fault
-is guaranteed to catch that fault. 17/17 is not evidence that the suite is complete. The
-value of the experiment is in the first row — five corruptions that the suite was
-supposed to cover and did not — and in the five gaps being of a kind that recur.
+is guaranteed to catch that fault. 28/28 is not evidence that the suite is complete. The
+value of the experiment is in the fifteen — corruptions the suite was supposed to cover
+and did not — and in the gaps being of a kind that recur.
 
-## What the five misses had in common
+## What the six misses had in common
 
 Each miss was a check looking at the wrong artifact.
 
@@ -62,12 +74,14 @@ Each miss was a check looking at the wrong artifact.
 | `NOTE_TEXT_SILENTLY_DROPPED` | Every check read what was published. None compared it against what the *config* said would be published, so a source that declared a text column and emitted none satisfied all of them: the events had codes, times and lineage, and the OMOP exporter's `coalesce` turned the missing text into an empty string that counted as present. |
 | `MEDS_BUILT_WITHOUT_VOCABULARY` | Every check read one target at a time. None compared the two targets against each other, so a MEDS layer whose every code was unmapped sat beside an OMOP layer carrying 29,459 concepts and satisfied all of them: the shards validated, the shards' codes were documented, the lineage was complete. A digest comparison of a rebuild noticed; `MEDS_CONCEPTS_ARE_OMOPS` now asks whether each term resolves alike in both, and the MEDS stage refuses to build without the vocabulary its OMOP layer had. |
 
-The five checks added in response — `ANCHOR_TIMES_ARE_NOT_THE_EVENT_CLOCK`,
+The six checks added in response — `ANCHOR_TIMES_ARE_NOT_THE_EVENT_CLOCK`,
 `CANONICAL_SCHEMA_AS_DECLARED`, `EVENT_SUBJECTS_WERE_ISSUED_BY_IDENTITY`,
-`OMOP_BIRTH_YEAR_IS_REPRODUCIBLE`, `TEXT_SOURCES_PUBLISH_THEIR_TEXT` — are all of the
-same shape: check the artifact that ships, and check it against something derived
-independently of it. The last one makes the pattern explicit, because the independent
-thing it checks against is the dataset's own declaration.
+`OMOP_BIRTH_YEAR_IS_REPRODUCIBLE`, `MEDS_CONCEPTS_ARE_OMOPS`,
+`TEXT_SOURCES_PUBLISH_THEIR_TEXT` — are all of the same shape: check the artifact that
+ships, and check it against something derived independently of it. The last one makes
+the pattern explicit, because the independent thing it checks against is the dataset's
+own declaration, and the fifteen checks of the conversion audit are built entirely that
+way.
 
 ## The catalogue
 
@@ -87,6 +101,18 @@ failures are not interesting — they are caught by the pipeline crashing.
 | `LINEAGE_LINKS_DANGLE` | Rebuilding one layer without the other leaves links pointing at events that no longer exist, while the published tables still look complete. |
 | `IDENTITY_NOT_RESOLVED_ACROSS_PARTITIONS` | 6,784 patients appear in more than one partition. Hashing the partition into the subject key splits each into several people, inflating the cohort and truncating every timeline. |
 | `NOTE_TEXT_SILENTLY_DROPPED` | `text` was a declared field role that only one shape read. A source whose rows are each a whole note mapped its text column, converted without a complaint, and published 2,652,887 MIMIC-IV notes with nothing in them. |
+| `ORDERS_WITH_DIFFERENT_DOSES_MERGED` | An event identity that omits the dose makes two orders of different strengths one event, and the merge keeps whichever row it met first: 726,710 dose disagreements inside merged groups in one export, 1,118,171 collapsed drug rows in another, 1,327,147 prescriptions in a third. |
+| `SOURCE_PARSED_ROWS_AND_YIELDED_NOTHING` | A wide table declared with a shape that cannot read it quarantined every one of 1,564,610 emergency-department vital signs and still counted as delivered, because presence was judged by the manifest and events by nobody. |
+| `VALUE_IN_A_DIFFERENT_UNIT_THAN_ITS_LABEL` | Body temperatures with a median of 98 under a Celsius label, a respiratory rate of 196, blood pressures of zero. Nothing compared a value against what its unit makes possible. |
+| `ONE_NOTE_UNDER_TWO_ENCOUNTERS` | A note table whose encounter id matched no other table put the same text under several of them: 491,192 groups identical in patient, day, type and full text, about 936,403 surplus events. |
+| `DIAGNOSIS_TEXT_READ_AS_A_UNIT` | A value parser that takes any text after a number as its unit turned 26 electrocardiogram diagnoses into a number with a diagnosis for a unit. |
+| `EXCLUDED_STATUS_PUBLISHED` | A problem list records what was entered and what was taken back. 30,069 rows whose status says the entry was deleted were published as diagnoses. |
+
+### Ingest layer
+
+| Fault | Drawn from |
+|---|---|
+| `RAW_COLUMN_NEVER_DECLARED` | A delivered column nothing reads is invisible: three medication columns, a whole imaging table, an entire intensive-care module and eight other tables were never read by any conversion, and no check said so. |
 
 ### OMOP layer
 
@@ -97,6 +123,8 @@ failures are not interesting — they are caught by the pipeline crashing.
 | `PRIMARY_KEY_COLLISION` | A surrogate key derived from too short a hash prefix collides silently; the row count is right and one fact overwrites another downstream. |
 | `CONCEPT_PLACED_IN_THE_WRONG_DOMAIN` | 2,313 of the reference export's diagnosis codes map to standard concepts outside the Condition domain. Publishing them into `CONDITION_OCCURRENCE` anyway is what a mapping without a domain gate does. |
 | `BIRTH_YEAR_INVENTED_UNDER_STRICT_POLICY` | The export carries an age but no birth date and no as-of date. Filling `year_of_birth` from the run year is the permissive default, and it shifts every patient's age by the gap between extraction and run. |
+| `DOSE_UNIT_DROPPED_FROM_DRUG_ROWS` | A publisher that reads the dose unit only out of the dose text loses it wherever the source keeps it in its own column: 3,088,590 drug rows with an empty dose unit in one export, 18,567,232 in another, while every one of their sources stated it. |
+| `DEATH_DATE_AND_TIME_TREATED_AS_A_CONFLICT` | Two records of one death — one a date, one a time — were compared as timestamps, so they disagreed by construction and the publisher refused to choose. 11,402 subjects lost their DEATH row; read as local dates, all but one died on the same day in both records. |
 
 ### MEDS layer
 
