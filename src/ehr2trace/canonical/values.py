@@ -10,7 +10,7 @@ Form                         Destination
 plain number                 ``value_number``
 number + unit in one cell    ``value_number`` + ``unit_source`` (the unit must be in
                              the unit table when one is given; otherwise the cell is
-                             free text)
+                             free text + ``NON_NUMERIC_RESULT``)
 range (``35-40``)            ``value_low`` / ``value_high``
 comparator (``<0.5``)        ``value_text`` verbatim + ``COMPARATOR_VALUE``
 sentinel text                ``value_text`` + ``NON_NUMERIC_RESULT``
@@ -127,14 +127,20 @@ def parse_value(
         return ParsedValue(number=_to_float(text), unit=unit, form="number")
 
     m = RE_NUMBER_UNIT.match(text)
-    if m and not RE_RANGE.match(text) and spec.accepts_unit(m.group("unit")):
-        embedded = m.group("unit").strip()
-        return ParsedValue(
-            number=_to_float(m.group("num")),
-            unit=unit or embedded,
-            flags=[] if (unit is None or unit == embedded) else [str(QualityFlag.UNIT_UNPARSED)],
-            form="number_unit",
-        )
+    numeric_looking = False
+    if m and not RE_RANGE.match(text):
+        if spec.accepts_unit(m.group("unit")):
+            embedded = m.group("unit").strip()
+            return ParsedValue(
+                number=_to_float(m.group("num")),
+                unit=unit or embedded,
+                flags=[] if (unit is None or unit == embedded) else [str(QualityFlag.UNIT_UNPARSED)],
+                form="number_unit",
+            )
+        # A number followed by words that are not a unit is text, and text that looks
+        # like a measurement is worth marking: `2 SINUS TACHYCARDIA` is an ECG
+        # diagnosis line, and the reason it reached here is that somebody numbered it.
+        numeric_looking = True
 
     m = RE_RANGE.match(text)
     if m:
@@ -170,7 +176,12 @@ def parse_value(
     if expect == "numeric":
         raise QuarantineRow(QuarantineReason.UNPARSEABLE_VALUE, text[:200])
 
-    return ParsedValue(text=text, unit=unit, form="text")
+    return ParsedValue(
+        text=text,
+        unit=unit,
+        flags=[str(QualityFlag.NON_NUMERIC_RESULT)] if numeric_looking else [],
+        form="text",
+    )
 
 
 def _clean(value: object, spec: ValueParsingSpec) -> str | None:
