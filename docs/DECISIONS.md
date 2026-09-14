@@ -423,3 +423,253 @@ trough before dawn.
 So the suffix labels the column rather than converting it, the declared zone was already
 right, and nothing changes but the record of why. The question stays in the YAML with
 that reading as its answer, marked as the study team's and put to the owner to confirm.
+
+## Eighteen decisions of 2026-09-13 close the conversion audit
+
+A read-only audit of the three built datasets on 2026-09-13 (`docs/CONVERSION_REMEDIATION_PLAN.md`)
+found 58 problems: thirteen in the converter, the rest in what each dataset's config
+declared or failed to declare. Most of them turn on a judgement the data cannot make
+alone -- what a unit really is, which of two disagreeing values to keep, what a
+delivered table is for -- and every such judgement was put to the study team as a
+question with a recommended answer. Xinye decided all eighteen on 2026-09-13. Sixteen
+follow the recommendation; two (D-R13, D-R15) do not, and say why below. Each entry
+names the decision id the plan uses, so the yaml comments, the checks and this record
+point at the same thing.
+
+Three questions remain with the data owner and are not decided here: whether the CU
+temperature column is in fact Fahrenheit (D-R1 proceeds as if it is), a re-delivery of
+the JHU surgical-cases file for the `29_has` group (the delivered one is a copy of
+`29_no`, P-J12), and nothing for MIMIC-IV, whose one death-date conflict is public data
+the team can check itself.
+
+None of the decisions is written into `src/`. They live in `datasets/*.yaml`, in
+`reference/` and, where a concept is involved, in `mappings/` through the review loop.
+
+## D-R1: two CU temperature rows are read as Fahrenheit, and the source is asked
+
+The flowsheet rows `Temp` (67,660 values) and `Core (Body) Temperature` (90 values)
+carry `degree Celsius` in the unit column, sit beside `Temp (in Celsius)` (59,953
+values), and all three map to the same concept. The values say otherwise: 67,604 of
+the 67,660 `Temp` values lie in 90-110, thirteen in 30-45, the median is 98, and every
+`Core` value is in 90-110. Nobody's body is 98 degrees Celsius. The mapping note that
+said "unit agrees" was wrong, and is corrected through the review loop.
+
+The yaml declares `unit_override: [degF]` for the two rows with that evidence beside
+it. The source's unit string stays in `unit_source`; the normalized value is converted
+to Celsius by the exact rule in `reference/unit_conversions.csv` and the event carries
+`UNIT_OVERRIDDEN`. The data owner is asked to confirm; if they say the column is right,
+the override is removed and the values become implausible instead (D-R17).
+
+## D-R2: a CU note repeated under several encounter ids is one note
+
+491,192 groups of notes share a patient, a day, a note type and the entire text, and
+differ only in `arb_encounter_id`; they added about 936,403 events. The encounter ids
+on notes are barely usable as links anyway: of 163,612 patient-encounter pairs in the
+notes, 4,293 (2.6%) occur in any other table, against 65.6% for medications and 66.3%
+for vital signs. That is a property of the export, not something the converter can
+repair, and it decides the merge rule.
+
+Notes declare `encounter_in_identity: false`, so the copies collapse to one event with
+every source row linked. The preparation step marks each note whose encounter id is
+seen in another table, and the `prefer_linked` rule keeps that id when exactly one
+copy carries the mark; otherwise the event's encounter is null and flagged
+`ENCOUNTER_UNLINKED`. The expected link rate (2%) is declared so the check reports it
+as known rather than as a failure.
+
+## D-R3: a facility charge and a professional charge for one CPT service are one service
+
+97,183 groups of CU procedure rows (97,205 rows) share a patient, an encounter, a date
+and a CPT code and were already collapsing to one event. Reading the rows settles what
+they are: one carries the hospital's charge (`HB CHG ...`), the other the professional
+one (`PR ...`, `MEDICINE`, `EM ...`); the transthoracic echo 93306 alone has 55,120 such
+pairs. Two bills, one procedure.
+
+The merge keeps one event and both rows in the lineage, and the `keep_all_flag` rule
+on the two columns that differ (`procedure_name`, `procedure_category`) flags it
+`BILLING_DUPLICATE`. The quantity is not set to 2: the patient had one echo.
+
+## D-R4: whether two visit records are one visit depends on how precisely they are dated
+
+CU ICU stays are dated to the day and carry a fractional length of stay; 176 groups
+(177 rows) share a start day and differ in that length by 0.25 to 9.9 days. Two stays
+starting on one day, the second after a transfer out and back, is the ordinary reading,
+so the length of stay joins the identity (`identity_extra_fields: [length_of_stay]`) and
+each is its own visit detail.
+
+MIMIC-IV transfers are dated to the second: 25 groups share a start to the second and
+differ in the end by 0 to 473 minutes, and four ED stays do the same. Two records that
+begin at the same second are one record with two ends, so `end_time` takes the
+`null_and_flag` rule: the start is kept, the end set to null, the event flagged
+`VALUE_CONFLICT`, and the ends it refused to choose between written to quarantine.
+
+## D-R5: a result visible at two different times was visible at the earlier one
+
+The same laboratory result arrives with two `storetime` values: 328,120 MIMIC-IV groups
+(270,415 less than an hour apart, 54,890 within a day, 2,582 within a week, 233 beyond
+it) and 14,709 JHU groups (9,384, 5,117, 128 and 80 by the same bands). Availability
+exists to keep the future out of a training window, and the earliest time is the one
+that does not overstate when the result became visible. `available_time` merges to
+the earliest and the event carries `AVAILABILITY_MERGED`; the rule is the default for
+that field and is also written in the yaml where it matters.
+
+## D-R6: a deleted problem-list entry is not a diagnosis, and a status is resolved by rank
+
+30,069 JHU problem-list rows carry the status `Deleted` and were published as
+conditions. They are dropped by `excluded_status`, and a check refuses any published
+event whose status the yaml excludes. Among the remaining rows, 74,269 groups (79,102
+rows) within one partition disagree on status: empty against `Active` in 27,177
+groups, empty against `Resolved` in 6,454, `Active` against `Resolved` in 5,430. A
+stated status outranks an empty one, so `status_source` takes the `priority` rule with
+`Resolved` and `Active` ahead of nothing; a group carrying both `Active` and `Resolved`
+is a contradiction the merge keeps visible as `STATUS_CONFLICT`.
+
+## D-R7: an ED triage measurement is dated by arrival, and says so
+
+The triage table has no time of its own, and 2,849,786 values were quarantined for it.
+Every row carries the stay's arrival time (425,087 of 425,087), the first vital sign of
+an ED stay is recorded a median of three minutes after arrival, and 61% within thirty
+minutes. Triage happens at arrival; that is what the word means. The values are
+published at `stay_intime` with `TIME_FALLBACK` on every one, so a model that wants to
+be strict can drop them and one that wants the triage picture has it. The chief
+complaint becomes a text event at the same time.
+
+## D-R8: a transfer row that says "discharge" is not a visit
+
+546,024 MIMIC-IV transfer rows have `eventtype = discharge`, care unit `UNKNOWN` and no
+end time; 91.3% of them fall within an hour of the admission's `dischtime`. They record
+the moment of leaving, which the admissions table already records, and they were
+published as zero-length visits with no concept. A row filter removes them.
+
+## D-R9: an ED stay is an emergency visit; where it went afterwards is a different fact
+
+`edstays.disposition` (HOME 241,628, ADMITTED 158,010, and the rest) was declared as the
+visit type, so every ED visit resolved to no concept. An ED stay is an emergency visit
+by definition: the preparation step projects that constant and it maps to the
+Emergency Room Visit concept. The disposition is what it is -- the discharge
+destination -- and goes to `discharged_to`, which OMOP records as
+`discharged_to_source_value`.
+
+## D-R10: two D-dimer units become two codes, and no factor is invented
+
+Item 50915 reports D-dimer in `ng/mL` and in `ng/mL FEU`, with a median near 500 under
+both labels in every period and only FEU from 2017 on: a relabelling. Item 51196 is not:
+in 2008-2010 its `ng/mL` values (3,180, median 539) and its FEU values (3,465, median
+846) differ as a fibrinogen-equivalent and a D-dimer unit should, and after 2011 only
+FEU remains. There is no exact factor between the two conventions, and the rule here
+converts only exactly. So `split_code_by_unit` gives each item one code per unit, each
+mapped on its own to the LOINC concept for that convention, and nothing is scaled.
+
+## D-R11: two death records on one local day are one death
+
+11,402 MIMIC-IV patients carried two death events: `patients.dod` at local midnight and
+`admissions.deathtime` at the hour. Comparing timestamps, every one of them was a
+conflict and none reached the DEATH table; 26,899 rows were published for 38,301
+deaths. Comparing dates in UTC, as the first draft of the audit did, made 1,864 of them
+cross a day boundary. Comparing dates in the dataset's own zone, 11,401 are the same day
+and one is not (four days apart).
+
+Same local day: one event, the precise time from the admission, both rows linked, the
+event flagged `DEATH_TIME_MERGED`; one DEATH row and one MEDS death per person.
+Different days: both events kept and flagged `DEATH_DATE_CONFLICT`, no DEATH row, and
+the case written to the review queue -- which for public data the team can settle
+itself.
+
+## D-R12: two of the seven extra JHU tables are read, and the rest are declared
+
+The `All_kinds/` delivery holds seven tables for the CTPE cohort, matched to the four
+partitions by their MRNs. Two enter the conversion: the most recent follow-up (one row
+per patient per group; a censoring endpoint the outcome definitions need) and the ICU
+transfer workbooks (289 to 422 thousand rows per group, covering 99.6-99.8% of each
+group's patients; the record of where a patient was). Both are prepared into per-partition
+parquet with a format fingerprint compared across the four groups first, so a difference
+in how the groups were exported cannot become a proxy for the label.
+
+The other five are declared `out_of_scope` with their reasons: surgical pathology
+(131-159 MB per group, one of them a 1.02-million-row workbook; a text corpus without a
+task here), cardiac catheterisation (about 11% of patients), lipid panels (109-191
+thousand rows, about 70% of patients; a lab the labs table already covers in part), the
+ICU progress notes (four files, 33.6 GB, no header row) and the surgical cases (30-77
+rows per group, and the `29_has` file is a copy of `29_no`, which has been raised with
+the owner).
+
+## D-R13: the whole ICU module of MIMIC-IV is read, not the smallest useful part of it
+
+The recommendation was to start with `icustays`, `inputevents` and `ingredientevents`
+and leave `chartevents` (3.5 GB compressed) for later. The decision is the whole module:
+`icustays` as visit details, `inputevents` and `ingredientevents` as administrations
+with rates, `outputevents` and `chartevents` as measurements, `procedureevents` as
+procedures, `datetimeevents` as observations, `d_items` as a lookup, and `caregiver`
+declared out of scope (a staff identifier, not a clinical fact).
+
+The reason for departing is what the conversion is for: an ICU stay is where the
+record is densest and the decisions come fastest, and a model of those decisions
+trained on the ward tables alone would be trained on the quiet half. The cost is
+accepted and named: the rebuild takes longer and more memory (measured on a sample
+first, then in full), units come per row from `valueuom`, and plausible ranges are
+declared only for the vital-sign items whose physiology gives a basis. The module is
+brought in as four batches, each accepted on its own numbers.
+
+## D-R14: transfers, service changes and ICU stays are visit details
+
+86% of MIMIC-IV's `visit_occurrence` rows (3,431,629 of 3,977,657) carried no concept,
+because 2,413,554 transfers and 593,071 service changes were published as visits: a
+move between wards is not a visit. OMOP has a table for a stay within a visit, and the
+converter now has an event kind for it. Transfers, services, MIMIC-IV ICU stays, CU ICU
+stays and the JHU ICU transfers are `visit_detail` events, published under the visit
+they belong to -- found by encounter id, or, where the source gives none, by the visit
+of the same person that contains the start time. A detail with no parent is not
+published and is counted, because a detail of nothing is not a fact OMOP can hold.
+
+## D-R15: an infusion rate is a column of its own, and OMOP hears about it through `sig`
+
+2,104,436 eMAR rows state an infusion rate: heparin in units per hour on 346,875 of
+them, furosemide in mg per hour on 78,565, insulin on 26,774, nitroglycerin in
+mcg/kg/min on 22,200. A rate is not a dose and had nowhere to go. The canonical layer
+and MEDS gain `rate_source`, `rate` and `rate_unit`; that part follows the
+recommendation.
+
+The recommendation stopped there, because OMOP's `DRUG_EXPOSURE` has no rate column.
+The decision goes further: the OMOP row's `sig` carries `<dose text>; rate <value>
+<unit>`, so a reader of the OMOP layer alone can see that a heparin drip ran at a rate
+rather than as a single dose. `sig` is OMOP's field for the prescription's directions,
+and this is a deliberate borrowing of it, stated here and in the code beside the
+format; the 250-character cap that already applied to unparsed dose text still applies,
+and the structured numbers live in MEDS.
+
+## D-R16: every CU accession goes into an imaging manifest, not the event stream
+
+T1a lists 168,046 CT accessions, 40,091 of them later scans with no date in the
+delivery. Roughly 7,500 have images (the 2016 and 2017 scans; 7,486 rows in the
+conversion summary, 110,567 series in the copy summary), and the imaging link files
+carry the original study date for those. None of this is an event: an accession number
+with no date is not something that happened at a time, and an accession with a date is
+a scan whose report the delivery does not contain.
+
+So the preparation step writes an imaging manifest -- accession, original study date
+where the link files have it, series description and de-identified path -- keyed by
+the export's own patient id, and the yaml records it under `out_of_scope` as a table
+that exists beside the events. Patient names, birth dates and original patient ids in
+the link files are never copied.
+
+## D-R17: an implausible value is kept, flagged, and not normalized
+
+`Temp (in Celsius)` has a minimum of -15.6; `Temp` runs from 7.8 to 134.6; `Resp`
+reaches 196; zeros appear in diastolic pressure (15 rows), systolic (7), pulse (21),
+respirations (51) and SpO2 (11). None of these is a measurement of a living person, and
+none is deleted: `value_number` stays as recorded, the event carries `IMPLAUSIBLE`, and
+`value_number_normalized` is null so nothing downstream computes with it. The ranges
+live in `reference/plausible_ranges/<dataset>.csv` with a basis column, per code and
+unit, and only where physiology gives one. The fourteen `Respirations` rows whose values
+are the numbers of a pick-list are not measurements at all and are dropped by name.
+
+## D-R18: a MIMIC-IV administration with no drug name takes the name of its order
+
+2,120,873 eMAR rows and 1,137,574 pharmacy rows name no medication and were
+quarantined. Each carries a `pharmacy_id`, and the prescription with that id names the
+drug: 1,463,157 (69%) of the eMAR rows and 1,069,122 (94%) of the pharmacy rows can be
+named that way, the pharmacy ones mostly large-volume intravenous fluids (1,035,767) and
+parenteral nutrition (68,439). The preparation step performs the lookup and marks the
+rows; the yaml reads the name from the recovered column and flags the event
+`NAME_FROM_LINKED_ORDER`, so a reader knows the name came from the order rather than the
+administration record. Rows the lookup cannot name stay quarantined, and the manifest
+counts both.

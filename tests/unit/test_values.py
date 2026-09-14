@@ -55,6 +55,29 @@ def test_free_text_diagnosis():
     assert v.flags == []
 
 
+def test_a_tail_that_is_not_a_unit_makes_the_whole_cell_text():
+    """`2 SINUS TACHYCARDIA` is an ECG diagnosis, not two of something (T1.9, P-C8).
+
+    Without a unit table the old rule read any word after a number as a unit, which is
+    how twenty-six diagnoses became measurements. The table is what says no.
+    """
+    spec = ValueParsingSpec(known_units=frozenset({"mg", "k/cu mm"}))
+    v = parse_value("2 SINUS TACHYCARDIA", spec=spec)
+    assert v.number is None and v.unit is None and v.form == "text"
+    assert v.text == "2 SINUS TACHYCARDIA"
+    assert str(QualityFlag.NON_NUMERIC_RESULT) in v.flags, "a numbered line is worth marking"
+    known = parse_value("38.62 K/cu mm", spec=spec)
+    assert known.number == 38.62 and known.unit == "K/cu mm" and known.form == "number_unit"
+    # a cell that is plain text was never a candidate and earns no marker
+    assert parse_value("SINUS TACHYCARDIA", spec=spec).flags == []
+
+
+def test_a_numbered_line_is_quarantined_where_a_number_is_required():
+    spec = ValueParsingSpec(known_units=frozenset({"mg"}))
+    with pytest.raises(QuarantineRow):
+        parse_value("2 SINUS TACHYCARDIA", spec=spec, expect="numeric")
+
+
 def test_signature_line_is_flagged_not_treated_as_a_result():
     v = parse_value("Confirmed by SMITH, J on 2018-03-04")
     assert str(QualityFlag.SIGNATURE_LINE) in v.flags

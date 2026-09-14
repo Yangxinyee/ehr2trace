@@ -1,0 +1,6 @@
+code_system,source_code,ucum,low,high,basis
+SOURCE,NA,mmol/L,100,180,"serum sodium compatible with life; the synthetic fixture writes 138 (tests/fixtures/ctpe_shape)"
+SOURCE,K,mmol/L,1,10,"serum potassium compatible with life; the fixture's potassium is a sentinel and never a number"
+SOURCE,CREAT,mg/dL,0,40,"serum creatinine; the fixture's creatinine is a comparator and never a number"
+SOURCE,WBC,10*3/uL,0,200,"white cell count; leukaemic counts reach 200; keyed on the unit K/cu mm converts to"
+SOURCE,PHART,,6.5,8,"arterial pH compatible with life; the fixture writes 7.31 with no unit"

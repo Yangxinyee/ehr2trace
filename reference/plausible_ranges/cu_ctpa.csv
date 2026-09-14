@@ -1,0 +1,13 @@
+code_system,source_code,ucum,low,high,basis
+SOURCE,Temp,Cel,30,45,"core body temperature after the [degF]->Cel override (D-R1, D-R17): below 30 C is profound hypothermia beyond what a ward thermometer records, above 45 C is incompatible with life; the export holds 7.8 and 134.6 (P-CU10), and a 0 is a missing value written as a number"
+SOURCE,Core (Body) Temperature,Cel,30,45,"as Temp: the same measurement under a second flowsheet row name, also overridden to [degF]"
+SOURCE,Temp (in Celsius),Cel,30,45,"body temperature delivered in Celsius: the same 30-45 C bounds; the export holds a -15.6 (P-CU10)"
+SOURCE,Pulse,/min,20,300,"heart rate: below 20/min is not a perfusing rhythm a flowsheet records as a vital sign, above 300/min exceeds any conducted tachycardia; the export's 21 zeros are missing values written as 0 (P-CU10)"
+SOURCE,Resp,/min,4,80,"respiratory rate: below 4/min is agonal and above 80/min beyond what a nurse counts as a spontaneous rate; the export holds a 196 and 51 zeros (P-CU10)"
+SOURCE,SpO2,%,50,100,"pulse oximetry: bounded above by 100%, and below 50% the oximeter reading is a probe artefact rather than a saturation; the export's 11 zeros are missing values (P-CU10)"
+SOURCE,Post SpO2,%,50,100,"as SpO2: a saturation after an intervention, 15 rows"
+SOURCE,BP systolic,mm[Hg],40,300,"systolic pressure: below 40 mm[Hg] a cuff does not register a pressure and above 300 exceeds the cuff's range; the export's 7 zeros are missing values (P-CU10)"
+SOURCE,BP diastolic,mm[Hg],20,200,"diastolic pressure: 20-200 mm[Hg] spans what a cuff can register; the export's 15 zeros are missing values (P-CU10)"
+SOURCE,NIBP systolic,mm[Hg],40,300,"as BP systolic: the non-invasive cuff row, 2,143 rows"
+SOURCE,NIBP diastolic,mm[Hg],20,200,"as BP diastolic: the non-invasive cuff row, 2,143 rows"
+SOURCE,BMI,kg/m2,10,100,"body mass index: below 10 or above 100 kg/m2 is outside recorded human extremes; quarantined as untimed in this export (W2), listed so a dated BMI in a later extract is bounded"

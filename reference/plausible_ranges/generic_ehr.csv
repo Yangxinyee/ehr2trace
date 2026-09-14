@@ -1,0 +1,7 @@
+code_system,source_code,ucum,low,high,basis
+SOURCE,CREAT,mg/dL,0,40,"serum creatinine; the synthetic fixture writes 1.02 and 0.98 (tests/fixtures/generic_ehr)"
+SOURCE,K,mmol/L,1,10,"serum potassium compatible with life; the fixture's potassium is a sentinel"
+SOURCE,NA,mmol/L,100,180,"serum sodium compatible with life; the fixture writes 138"
+SOURCE,WBC,10*3/uL,0,200,"white cell count; the fixture writes 38.62 K/cu mm, which converts to this unit"
+SOURCE,DDIMER,ug/mL{FEU},0,100,"D-dimer in fibrinogen-equivalent units; the fixture's value is a comparator"
+SOURCE,RVSP,mm[Hg],0,200,"right ventricular systolic pressure; the fixture's value is a range"
