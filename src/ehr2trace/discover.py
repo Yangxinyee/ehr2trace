@@ -104,8 +104,25 @@ class InspectReport:
 # --------------------------------------------------------------------------------
 
 
-def partition_dir(cfg: DatasetConfig, partition_id: str) -> Path:
-    return cfg.data_root() / cfg.partition(partition_id).dir
+def partition_dir(cfg: DatasetConfig, partition_id: str, spec: SourceSpec | None = None) -> Path:
+    """A partition's directory, under the dataset's root or the source's own.
+
+    A source the preparation step delivers outside the raw export declares ``root_env``
+    and keeps the same partition layout beneath it, so only the root changes.
+    """
+    root = cfg.source_root(spec) if spec is not None else cfg.data_root()
+    return root / cfg.partition(partition_id).dir
+
+
+def source_roots(cfg: DatasetConfig) -> list[Path]:
+    """Every root a declared source lives under, the dataset's own first."""
+    roots = [cfg.data_root()]
+    for spec in cfg.sources.values():
+        if spec.root_env is not None:
+            root = cfg.source_root(spec)
+            if root not in roots:
+                roots.append(root)
+    return roots
 
 
 def _hash_one(path_str: str) -> tuple[str, str]:
@@ -115,38 +132,39 @@ def _hash_one(path_str: str) -> tuple[str, str]:
 def scan_files(cfg: DatasetConfig, compute_hashes: bool = True, workers: int = 8) -> list[FileRecord]:
     """Every input file under every declared partition, with size and content hash."""
     records: list[FileRecord] = []
-    for part in cfg.partitions:
-        pdir = partition_dir(cfg, part.id)
-        if not pdir.is_dir():
-            continue
-        for path in sorted(pdir.rglob("*")):
-            if not path.is_file() or path.name in IGNORED_NAMES or path.name.startswith("~$"):
+    for root in source_roots(cfg):
+        for part in cfg.partitions:
+            pdir = root / part.dir
+            if not pdir.is_dir():
                 continue
-            suffix = path.suffix.lower()
-            if suffix in TEXT_SUFFIXES:
-                kind, sheets = "text", []
-                bom, ending = has_bom(path), sniff_line_ending(path)
-            elif suffix in WORKBOOK_SUFFIXES:
-                kind, sheets = "workbook", list_sheets(path)
-                bom, ending = None, None
-            elif suffix in COLUMNAR_SUFFIXES:
-                kind, sheets = "columnar", []
-                bom, ending = None, None
-            else:
-                continue
-            records.append(
-                FileRecord(
-                    partition_id=part.id,
-                    relative_path=str(path.relative_to(cfg.data_root())),
-                    absolute_path=str(path),
-                    size_bytes=path.stat().st_size,
-                    sha256=None,
-                    kind=kind,
-                    sheets=sheets,
-                    bom=bom,
-                    line_ending=ending,
+            for path in sorted(pdir.rglob("*")):
+                if not path.is_file() or path.name in IGNORED_NAMES or path.name.startswith("~$"):
+                    continue
+                suffix = path.suffix.lower()
+                if suffix in TEXT_SUFFIXES:
+                    kind, sheets = "text", []
+                    bom, ending = has_bom(path), sniff_line_ending(path)
+                elif suffix in WORKBOOK_SUFFIXES:
+                    kind, sheets = "workbook", list_sheets(path)
+                    bom, ending = None, None
+                elif suffix in COLUMNAR_SUFFIXES:
+                    kind, sheets = "columnar", []
+                    bom, ending = None, None
+                else:
+                    continue
+                records.append(
+                    FileRecord(
+                        partition_id=part.id,
+                        relative_path=str(path.relative_to(root)),
+                        absolute_path=str(path),
+                        size_bytes=path.stat().st_size,
+                        sha256=None,
+                        kind=kind,
+                        sheets=sheets,
+                        bom=bom,
+                        line_ending=ending,
+                    )
                 )
-            )
     if compute_hashes and records:
         with ProcessPoolExecutor(max_workers=max(1, workers)) as ex:
             for path_str, digest in ex.map(_hash_one, [r.absolute_path for r in records]):
@@ -163,7 +181,7 @@ def resolve_source_units(cfg: DatasetConfig, partition_id: str, source_id: str, 
     which is how one logical source can be a standalone file in one partition and a
     sheet in another without the rest of the pipeline noticing.
     """
-    pdir = partition_dir(cfg, partition_id)
+    pdir = partition_dir(cfg, partition_id, spec)
     if not pdir.is_dir():
         return []
     if spec.adapter == "any_of":

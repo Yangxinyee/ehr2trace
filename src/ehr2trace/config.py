@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from ehr2trace.errors import BlockerError, ConfigError
 from ehr2trace.registry import FIELD_ROLES, adapter_names, shape_names
+from ehr2trace.schema import QualityFlag
 
 Strict = ConfigDict(extra="forbid", populate_by_name=True, frozen=True)
 
@@ -140,6 +141,132 @@ class CodeSplitSpec(BaseModel):
         return v
 
 
+MERGE_RULES: tuple[str, ...] = (
+    "earliest", "latest", "null_and_flag", "priority", "prefer_linked", "keep_all_flag",
+)
+
+#: The flag each rule writes when nothing else is declared. Named here so a YAML that
+#: says only `earliest` still produces a row that says what happened to it.
+DEFAULT_MERGE_FLAG: dict[str, str] = {
+    "earliest": str(QualityFlag.AVAILABILITY_MERGED),
+    "latest": str(QualityFlag.AVAILABILITY_MERGED),
+    "null_and_flag": str(QualityFlag.VALUE_CONFLICT),
+    "priority": str(QualityFlag.STATUS_CONFLICT),
+    "prefer_linked": str(QualityFlag.ENCOUNTER_UNLINKED),
+    "keep_all_flag": str(QualityFlag.MERGE_CONFLICT),
+}
+
+
+class MergeRuleSpec(BaseModel):
+    """What to do when rows that collapse to one event disagree on a field.
+
+    Same event id means the same clinical fact; it does not mean the extracts agree on
+    every column of it. Two billings of one procedure differ in who billed; a lab result
+    repeated in two batches differs in when it became visible; a note repeated under
+    several encounter ids differs in the encounter. The audit of 2026-09-13 found the
+    merge keeping whichever value it met first, which is a choice nobody made. Each rule
+    here is a choice somebody did make, per field, in the open:
+
+    ``earliest`` / ``latest``
+        keep the smallest or largest value (times, mostly);
+    ``null_and_flag``
+        keep nothing, flag the event, and quarantine the values it refused to choose
+        between;
+    ``priority``
+        keep the first value of ``order`` that any row carries; pairs in
+        ``conflict_when`` that occur together are flagged as a contradiction;
+    ``prefer_linked``
+        keep the one value whose row carries a truthy ``linked_by`` marker; with none
+        or several, keep nothing and flag;
+    ``keep_all_flag``
+        keep the survivor's value, leave every value in the lineage, and flag the event.
+
+    A disagreement on a field with no rule is a ``MERGE_CONFLICT``: recorded as a
+    quality issue and reported by validation, never resolved by arrival order.
+    """
+
+    model_config = Strict
+
+    rule: Literal["earliest", "latest", "null_and_flag", "priority", "prefer_linked", "keep_all_flag"]
+    #: priority: the values in winning order, compared case-insensitively after stripping
+    order: list[str] = Field(default_factory=list)
+    #: priority: value pairs whose co-occurrence among the merged rows is flagged
+    conflict_when: list[list[str]] = Field(default_factory=list)
+    #: the quality flag written when the rule fires; defaults per rule
+    flag: str | None = None
+    #: prefer_linked: the field role whose truthy cell marks a row as seen elsewhere
+    linked_by: str = "encounter_linked"
+
+    @field_validator("flag")
+    @classmethod
+    def _known_flag(cls, v: str | None) -> str | None:
+        if v is not None and v not in QualityFlag.__members__:
+            raise ValueError(f"unknown quality flag {v!r}; add it to schema.QualityFlag first")
+        return v
+
+    @model_validator(mode="after")
+    def _shape_fits_rule(self) -> "MergeRuleSpec":
+        if self.rule == "priority" and not self.order:
+            raise ValueError("merge rule 'priority' needs 'order': the values in winning order")
+        if self.rule != "priority" and (self.order or self.conflict_when):
+            raise ValueError("'order' and 'conflict_when' belong to the 'priority' rule only")
+        for pair in self.conflict_when:
+            if len(pair) != 2:
+                raise ValueError("each 'conflict_when' entry is a pair of values")
+        if self.linked_by not in FIELD_ROLES:
+            raise ValueError(f"'linked_by' must be a field role, not {self.linked_by!r}")
+        return self
+
+    @property
+    def flag_name(self) -> str:
+        return self.flag or DEFAULT_MERGE_FLAG[self.rule]
+
+
+class ExpectedQuarantineSpec(BaseModel):
+    """A quarantine share this source is known to carry, and why.
+
+    Validation reports any source whose rows are quarantined for one reason beyond a
+    threshold. Where that is the data rather than the converter -- orders with no date
+    in the export, a body-mass index with no measurement time -- the share is declared
+    here so the report can say "expected" instead of "unexplained".
+    """
+
+    model_config = Strict
+
+    #: upper bound on the share of this source's parsed rows quarantined for this reason
+    max_share: float = Field(gt=0.0, le=1.0)
+    reason: str
+
+
+class ExpectedLinkRateSpec(BaseModel):
+    """How many of this source's encounter ids are expected to resolve to a visit."""
+
+    model_config = Strict
+
+    min_rate: float = Field(ge=0.0, le=1.0)
+    reason: str
+
+
+class OutOfScopeSpec(BaseModel):
+    """A delivered table this conversion deliberately does not read, and why.
+
+    ``matches`` are file names or globs under the delivery; a file nobody declared and
+    nothing matches is what RAW_COVERAGE_DECLARED reports.
+    """
+
+    model_config = Strict
+
+    matches: list[str]
+    reason: str
+
+    @field_validator("matches")
+    @classmethod
+    def _nonempty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("'matches' must name at least one file or glob")
+        return v
+
+
 class AdapterOptions(BaseModel):
     model_config = Strict
 
@@ -227,6 +354,74 @@ class SourceSpec(BaseModel):
     #: a cell holding several codes, and how to divide it
     code_split: "CodeSplitSpec | None" = None
     notes: str | None = None
+
+    # -- identity and merging (remediation plan T1.1, T1.2) --------------------------
+    #: field roles folded into the event identity beyond the defaults. An ICU stay
+    #: recorded to the day needs its length of stay to stay distinct from another stay
+    #: that began the same day.
+    identity_extra_fields: list[str] = Field(default_factory=list)
+    #: whether the encounter id is part of the event identity. Off for a source whose
+    #: encounter ids are noise -- the same note text filed under several of them -- so
+    #: the copies collapse and a `prefer_linked` rule picks the encounter, if any.
+    encounter_in_identity: bool = True
+    #: what to do when merged rows disagree on a field. Keys are canonical event fields
+    #: (`available_time`, `end_time`, `status_source`, `encounter_id` ...), field roles,
+    #: or kept columns. A bare rule name is accepted as shorthand for `{rule: name}`.
+    merge_rules: dict[str, MergeRuleSpec] = Field(default_factory=dict)
+    # -- units and values (T1.6, T1.7) --------------------------------------------------
+    #: source code -> unit, for values the source states without one (an ECG interval
+    #: in milliseconds, a spirometry volume in litres). Flagged UNIT_DECLARED.
+    declared_units: dict[str, str] = Field(default_factory=dict)
+    #: source code -> the unit the values are actually in, where the source's own unit
+    #: column is wrong. The source string is kept; normalization uses this one and the
+    #: event is flagged UNIT_OVERRIDDEN. Every entry is a decision with evidence behind it.
+    unit_override: dict[str, str] = Field(default_factory=dict)
+    #: source codes whose unit becomes part of the code (`code|unit`), because the source
+    #: mixes units under one code that cannot be converted into each other.
+    split_code_by_unit: list[str] = Field(default_factory=list)
+    #: status values whose rows are not clinical facts and are dropped before shaping,
+    #: compared case-insensitively after stripping. A problem list's deleted entries.
+    excluded_status: list[str] = Field(default_factory=list)
+    #: quality flag -> column; a row whose cell is truthy (1, true, yes) carries the flag.
+    #: How a preparation step's provenance markers reach the event.
+    flag_when: dict[str, str] = Field(default_factory=dict)
+    # -- what the checks may expect (T0.2) ------------------------------------------------
+    #: quarantine reason -> the share this source is known to carry, and why
+    expected_quarantine: dict[str, ExpectedQuarantineSpec] = Field(default_factory=dict)
+    #: why this source is expected to produce no events at all; null means it must
+    expected_empty: str | None = None
+    #: how many of this source's encounter ids are expected to resolve to a visit
+    expected_encounter_link_rate: ExpectedLinkRateSpec | None = None
+    #: column -> reason it is neither mapped nor kept. Every delivered column is either
+    #: mapped, kept, used by a filter, or listed here; anything else is undeclared.
+    ignored_columns: dict[str, str] = Field(default_factory=dict)
+    #: environment variable of a root other than the dataset's, for a source the
+    #: preparation step delivers outside the raw export (the partition directory layout
+    #: is the same under it). Null means the dataset's own root.
+    root_env: str | None = None
+
+    @field_validator("merge_rules", mode="before")
+    @classmethod
+    def _rule_shorthand(cls, v: Any) -> Any:
+        if not isinstance(v, dict):
+            return v
+        return {k: ({"rule": r} if isinstance(r, str) else r) for k, r in v.items()}
+
+    @field_validator("identity_extra_fields")
+    @classmethod
+    def _identity_roles(cls, v: list[str]) -> list[str]:
+        unknown = set(v) - set(FIELD_ROLES)
+        if unknown:
+            raise ValueError(f"identity_extra_fields names unknown roles {sorted(unknown)}")
+        return v
+
+    @field_validator("flag_when")
+    @classmethod
+    def _flags_exist(cls, v: dict[str, str]) -> dict[str, str]:
+        unknown = set(v) - set(QualityFlag.__members__)
+        if unknown:
+            raise ValueError(f"flag_when names unknown quality flags {sorted(unknown)}")
+        return v
 
     @model_validator(mode="after")
     def _one_way_to_declare_a_kind(self) -> "SourceSpec":
@@ -479,6 +674,31 @@ class ReferenceRange(BaseModel):
     unit: str | None = None
 
 
+class ValidationSpec(BaseModel):
+    """Thresholds the checks judge this dataset against.
+
+    Operational, like ``execution``: a threshold says when to complain, never what to
+    produce, so it stays outside the content address and tuning it costs no rebuild.
+    Each default is the value the remediation plan of 2026-09-13 set; a dataset that
+    departs from one writes its reason next to the number.
+    """
+
+    model_config = Strict
+
+    #: a source's rows quarantined for one reason beyond this share must be declared
+    quarantine_share_threshold: float = Field(default=0.05, ge=0.0, le=1.0)
+    #: share of numeric measurements with a source or declared unit that must carry a
+    #: non-zero unit concept
+    unit_concept_coverage_min: float = Field(default=0.95, ge=0.0, le=1.0)
+    #: share of visits (and, separately, visit details) that must carry a concept
+    visit_concept_coverage_min: float = Field(default=0.95, ge=0.0, le=1.0)
+    #: share of events with an encounter id that must resolve to a visit of the same
+    #: subject, where the source declares no rate of its own
+    encounter_link_rate_min: float = Field(default=0.95, ge=0.0, le=1.0)
+    #: why any of the above departs from its default
+    note: str | None = None
+
+
 class DatasetConfig(BaseModel):
     """The whole dataset contract."""
 
@@ -500,6 +720,9 @@ class DatasetConfig(BaseModel):
     execution: ExecutionSpec = Field(default_factory=ExecutionSpec)
     owner_answers: OwnerAnswers = Field(default_factory=OwnerAnswers)
     reference_ranges: dict[str, ReferenceRange] = Field(default_factory=dict)
+    validation: ValidationSpec = Field(default_factory=ValidationSpec)
+    #: delivered tables this conversion deliberately does not read, each with a reason
+    out_of_scope: dict[str, OutOfScopeSpec] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _cross_checks(self) -> "DatasetConfig":
@@ -512,6 +735,26 @@ class DatasetConfig(BaseModel):
             if unknown:
                 raise ValueError(f"source {name!r} restricted to unknown partitions {sorted(unknown)}")
         return self
+
+    def source_root(self, spec: SourceSpec) -> Path:
+        """The directory a source's partition directories live under.
+
+        The dataset's root unless the source declares its own: a preparation step that
+        delivers a table outside the raw export puts it under the same partition layout
+        beneath another root, and names that root's variable here.
+        """
+        if spec.root_env is None:
+            return self.data_root()
+        raw = os.environ.get(spec.root_env)
+        if not raw:
+            raise ConfigError(
+                f"environment variable {spec.root_env} is not set; a source declares it as "
+                "the root its prepared files live under"
+            )
+        root = Path(raw).expanduser()
+        if not root.is_dir():
+            raise ConfigError(f"{spec.root_env}={root} is not a directory")
+        return root
 
     # -- derived ---------------------------------------------------------------
 
@@ -553,13 +796,25 @@ class DatasetConfig(BaseModel):
     #: but it does decide which subject lands in which bucket file, so it must still
     #: enter the per-task digests -- otherwise a resumed run would happily reuse a
     #: bucket computed under a different partitioning. See ``StageTask.digest``.
-    OPERATIONAL_FIELDS: ClassVar[tuple[str, ...]] = ("execution",)
+    OPERATIONAL_FIELDS: ClassVar[tuple[str, ...]] = ("execution", "validation", "out_of_scope")
+
+    #: Per-source fields that only tell the checks what to expect. They cannot change a
+    #: produced byte either, and they are exactly the fields somebody fills in *after*
+    #: looking at a build -- declaring why a source quarantines what it does, which
+    #: delivered columns are deliberately unread. Hashing them would make every such
+    #: declaration cost a full re-ingest, which is how declarations stop being written.
+    DECLARATION_ONLY_SOURCE_FIELDS: ClassVar[tuple[str, ...]] = (
+        "expected_quarantine", "expected_empty", "expected_encounter_link_rate", "ignored_columns",
+    )
 
     def canonical_json(self) -> str:
         """Config content in a stable textual form; the basis of ``config_hash``."""
         payload = self.model_dump(mode="json", by_alias=True)
         for field_name in self.OPERATIONAL_FIELDS:
             payload.pop(field_name, None)
+        for source in payload.get("sources", {}).values():
+            for field_name in self.DECLARATION_ONLY_SOURCE_FIELDS:
+                source.pop(field_name, None)
         return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
     def config_hash(self) -> str:

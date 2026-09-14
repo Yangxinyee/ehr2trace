@@ -41,6 +41,16 @@ FIELD_ROLES: frozenset[str] = frozenset(
         "status",
         "route",
         "dose",
+        #: an infusion's rate and the unit it is stated in, kept apart from the dose
+        "rate",
+        "rate_unit",
+        #: what was done to the record: an order placed, changed, discontinued
+        "action",
+        # visit attributes carried through to the encounter
+        "discharged_to",
+        #: a marker the preparation step writes when this row's encounter id is seen in
+        #: other tables; read by the `prefer_linked` merge rule and nothing else
+        "encounter_linked",
         # text
         "text",
         "text_line",

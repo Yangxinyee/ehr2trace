@@ -73,6 +73,12 @@ def test_event_kinds_cover_the_documented_set():
         "service_order",
         "procedure",
         "measurement",
+        # A fact that is none of the above -- a follow-up contact, a documented date --
+        # has an OMOP table of its own and, since 2026-09-13, a kind that names it.
+        "observation",
+        # A stay inside a visit: a transfer, a service change, an ICU stay. Published
+        # under the visit it belongs to (VISIT_DETAIL), never as a visit of its own.
+        "visit_detail",
         "note",
         "death",
     }

@@ -88,6 +88,10 @@ READ_COLUMNS: dict[str, tuple[str, ...]] = {
         "event_id", "subject_id", "event_kind", "event_time", "available_time",
         "end_time", "code_system", "source_code", "value_number", "value_text",
         "quality_flags", "source_id",
+        # A metric key elsewhere in this module spells the same as this column, and the
+        # whitelist test cannot tell the two apart; loading one float column is cheaper
+        # than teaching it to.
+        "rate",
     ),
     "anchors": ("subject_id", "anchor_date", "anchor_time", "anchor_time_known", "partition_id"),
     "cohort_membership": ("subject_id", "partition_id", "membership_label", "label_scope"),

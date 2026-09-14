@@ -35,8 +35,16 @@ class EventKind(StrEnum):
     service_order = "service_order"
     procedure = "procedure"
     measurement = "measurement"
+    #: a fact that is not a condition, drug, procedure or measurement: a follow-up
+    #: contact, a documented date, a social or administrative observation. OMOP has a
+    #: table for exactly this and until now nothing could be declared as one.
+    observation = "observation"
     note = "note"
     death = "death"
+    #: a stay inside a visit: a transfer between units, a change of service, an ICU
+    #: stay. Published to OMOP's VISIT_DETAIL under the visit it belongs to, never as
+    #: a visit of its own.
+    visit_detail = "visit_detail"
 
 
 class ProvenanceStatus(StrEnum):
@@ -85,6 +93,43 @@ class QualityFlag(StrEnum):
     UNTIMED_VALUE = "UNTIMED_VALUE"
     UNIT_UNPARSED = "UNIT_UNPARSED"
     DUPLICATE_ACROSS_PARTITIONS = "DUPLICATE_ACROSS_PARTITIONS"
+    # -- merging (remediation plan T1.2, T1.3; decisions D-R2 to D-R6) ----------------
+    #: rows that merged into this event disagreed on a field the rule set to null
+    VALUE_CONFLICT = "VALUE_CONFLICT"
+    #: rows that merged into this event disagreed on a field with no declared rule
+    MERGE_CONFLICT = "MERGE_CONFLICT"
+    #: the merged rows stated different availability times; the earliest was kept
+    AVAILABILITY_MERGED = "AVAILABILITY_MERGED"
+    #: a `priority` rule saw two values it was told to treat as contradictory
+    STATUS_CONFLICT = "STATUS_CONFLICT"
+    #: no encounter id among the merged rows was seen in another table; set to null
+    ENCOUNTER_UNLINKED = "ENCOUNTER_UNLINKED"
+    #: exactly one of the merged rows' encounter ids was seen elsewhere; it was kept
+    ENCOUNTER_FROM_LINKED_ROW = "ENCOUNTER_FROM_LINKED_ROW"
+    #: one service billed twice (facility and professional); one event, both rows linked
+    BILLING_DUPLICATE = "BILLING_DUPLICATE"
+    # -- units and values (T1.6, T1.7, T1.9; D-R1, D-R10, D-R17) ---------------------
+    #: the source's unit was replaced for normalization by a declared one; the
+    #: source's own string stays in unit_source
+    UNIT_OVERRIDDEN = "UNIT_OVERRIDDEN"
+    #: the source carried no unit and the dataset declared one for this code
+    UNIT_DECLARED = "UNIT_DECLARED"
+    #: the unit string is not in the unit table, so nothing was normalized
+    UNIT_UNKNOWN = "UNIT_UNKNOWN"
+    #: outside the declared plausible range; the value is kept and not normalized
+    IMPLAUSIBLE = "IMPLAUSIBLE"
+    #: this code carries its unit as a suffix because the source mixed incommensurable ones
+    CODE_SPLIT_BY_UNIT = "CODE_SPLIT_BY_UNIT"
+    #: the rate text did not parse as a number; rate_source keeps it verbatim
+    RATE_UNPARSED = "RATE_UNPARSED"
+    # -- deaths (T1.8; D-R11) ---------------------------------------------------------
+    #: two sources put the death on the same local date; one event, the more precise time
+    DEATH_TIME_MERGED = "DEATH_TIME_MERGED"
+    #: two sources put the death on different local dates; both kept, neither published to OMOP
+    DEATH_DATE_CONFLICT = "DEATH_DATE_CONFLICT"
+    # -- preparation-time provenance (D-R18) ------------------------------------------
+    #: the drug name was recovered from the order this record points at
+    NAME_FROM_LINKED_ORDER = "NAME_FROM_LINKED_ORDER"
 
 
 class QuarantineReason(StrEnum):
@@ -96,6 +141,9 @@ class QuarantineReason(StrEnum):
     UNTIMED_CLINICAL_VALUE = "UNTIMED_CLINICAL_VALUE"
     UNTIMED_VITAL_STATUS = "UNTIMED_VITAL_STATUS"
     DECODE_ERROR = "DECODE_ERROR"
+    #: a value a `null_and_flag` merge rule refused to choose between; the row keeps
+    #: its link to the event and its losing value is recorded here
+    VALUE_CONFLICT = "VALUE_CONFLICT"
 
 
 #: Person attributes that may legitimately carry no time.
@@ -198,6 +246,20 @@ CANONICAL_EVENT_SCHEMA = pa.schema(
         pa.field("status_source", pa.string()),
         pa.field("route_source", pa.string()),
         pa.field("dose_source", pa.string()),
+        # Normalization adds columns and never overwrites: value_number and unit_source
+        # stay exactly as the source wrote them. These two hold the value after an exact
+        # conversion (degF -> Cel) and the unit in its UCUM spelling, or null where no
+        # exact conversion is known or the value is outside its plausible range.
+        pa.field("value_number_normalized", pa.float64()),
+        pa.field("unit_normalized", pa.string()),
+        # An infusion's rate, kept apart from its dose: verbatim, parsed, and its unit.
+        pa.field("rate_source", pa.string()),
+        pa.field("rate", pa.float64()),
+        pa.field("rate_unit", pa.string()),
+        # What was done to the record (an order placed, changed, discontinued).
+        pa.field("action", pa.string()),
+        # Where a visit discharged to, as the source wrote it.
+        pa.field("discharged_to", pa.string()),
         pa.field("provenance_status", pa.string()),
         pa.field("mapping_version", pa.string()),
         pa.field("quality_flags", pa.list_(pa.string())),
@@ -303,6 +365,13 @@ class CanonicalEvent(BaseModel):
     status_source: str | None = None
     route_source: str | None = None
     dose_source: str | None = None
+    value_number_normalized: float | None = None
+    unit_normalized: str | None = None
+    rate_source: str | None = None
+    rate: float | None = None
+    rate_unit: str | None = None
+    action: str | None = None
+    discharged_to: str | None = None
     provenance_status: ProvenanceStatus = ProvenanceStatus.observed
     mapping_version: str = "0"
     quality_flags: list[str] = Field(default_factory=list)
