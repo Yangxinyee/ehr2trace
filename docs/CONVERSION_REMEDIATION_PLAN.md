@@ -697,6 +697,10 @@
 | 2026-09-14 | `mappings/visit.csv`：字符串 `Observation` 被 JHU 映射为 9201 Inpatient Visit，被 MIMIC（transfers.careunit）映射为 581385 Observation Room | 9201，两个数据集共用 | `mappings/` 是所有数据集共用的命名空间，一个字符串只能有一个概念；文件里 2026-09-09 已有"所有 observation 入院类型都是 9201"的约定，JHU 那一行明确权衡过 581385 并因此放弃。MIMIC 工作根的 `review/decisions.csv` 同步改为 9201，避免今后重新 compile 时悄悄改回 |
 | 2026-09-14 | `Emergency` 两边都映射到 9203，只有备注不同 | 保留 main 的行 | 概念相同，无分歧 |
 | 2026-09-14 | CU 全量准备列出 15,081 个未读文件，其中 14,972 个 NIfTI、48 个 DICOM 侧文件和 4 个拷贝脚本没有任何 `out_of_scope` 覆盖（1/200 抽样只列本批病人的影像，所以抽样时看不到） | 声明为 `imaging_payload` 与 `imaging_copy_scripts` | D-R16：影像已由 `imaging_series.parquet` 按序列编目并记录去标识路径，像素不是表，也不进事件流；声明不进配置哈希，不触发重建 |
+| 2026-09-14 | MIMIC 抽样：28 个处方合并事件的药名不同，全是同一 NDC、同一 pharmacy_id 下复配医嘱的 MAIN 与 BASE 两行描述同一袋液体（`Sodium Chloride 0.9%` 的 `Bag` 与 `Floor Stock Bag`） | 两个处方 source 的 `source_name` 用 `keep_all_flag`，新增标记 `NAME_VARIANTS_MERGED` | 合并为一个事件是对的，差别只在容器措辞；`MERGE_CONFLICT` 表示没有声明规则，规则已声明时不该再用它 |
+| 2026-09-14 | `Emergency Department Observation`（MIMIC transfers.careunit，全量 101,347 行）原映射 581385 Observation Room | 改为 9201 | 与共享字符串 `Observation` 及所有 observation 入院类型的 9201 约定一致，一个临床含义只用一个概念；先改 MIMIC 工作根的 review 日志，再编译到临时目录并只取这一行 |
+| 2026-09-14 | 公共单位表 6 个 UCUM 代码在词表里没有概念（`u[iU]/mL`、`m[iU]/mL`、`m[iU]/L`、`m[iU]`、`k[iU]/L`、`mL/min/{1.73_m2}`，共 22 行；MIMIC 抽样中 4,754 条测量因此单位概念为 0） | 改为词表的写法（`10*-6.[iU]/mL`、`mL/min/(173.10*-2.m2)` 等） | 与 `c60c4d1` 同一原则：解析不到概念的单位规范化后一无所得 |
+| 2026-09-14 | MIMIC 纳入 ICU 模块后，按抽样外推规范层在 64 桶、4 进程下需约 390 GB，超过本机 251 GB | `execution.bucket_count` 改为 256 | 运行参数，不进内容地址，只把同样的工作分得更细 |
 
 ### 9.4 正式构建前半段：准备、ingest、identity（2026-09-14）
 

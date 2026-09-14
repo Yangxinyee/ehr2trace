@@ -130,6 +130,10 @@ class QualityFlag(StrEnum):
     # -- preparation-time provenance (D-R18) ------------------------------------------
     #: the drug name was recovered from the order this record points at
     NAME_FROM_LINKED_ORDER = "NAME_FROM_LINKED_ORDER"
+    #: the rows merged into this event named one fact differently -- a compounded
+    #: order's MAIN and BASE rows describing one bag -- so one name was kept and every
+    #: name stays in the lineage
+    NAME_VARIANTS_MERGED = "NAME_VARIANTS_MERGED"
 
 
 class QuarantineReason(StrEnum):
