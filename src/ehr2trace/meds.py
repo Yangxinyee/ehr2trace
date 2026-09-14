@@ -77,8 +77,35 @@ MEDS_SCHEMA = pa.schema(
         #: the order this event carried out, when one is known
         pa.field("caused_by_event_id", pa.string()),
         pa.field("quality_flags", pa.list_(pa.string())),
+        # -- extension columns version 2 (remediation plan T1.11, P-C13) -----------------
+        # Appended after the version-1 columns so a reader that indexes by position sees
+        # what it saw before. The value after an exact unit conversion and the unit in
+        # its UCUM spelling; the original value and unit stay in numeric_value and unit.
+        pa.field("value_number_normalized", pa.float64()),
+        pa.field("unit_normalized", pa.string()),
+        # An infusion's rate, kept apart from its dose: verbatim, parsed, and its unit.
+        pa.field("rate_source", pa.string()),
+        pa.field("rate", pa.float64()),
+        pa.field("rate_unit", pa.string()),
+        # What was done to the record (an order placed, changed, discontinued).
+        pa.field("action", pa.string()),
+        # Where a visit discharged to, as the source wrote it.
+        pa.field("discharged_to", pa.string()),
     ]
 )
+
+#: Bumped whenever an extension column is added or changes meaning; recorded in
+#: ``dataset.json`` next to the full list so a reader can tell which columns to expect.
+#: 1: the columns up to ``quality_flags``. 2: the seven added on 2026-09-13.
+EXTENSION_COLUMNS_VERSION = 2
+EXTENSION_COLUMNS_ADDED: dict[str, tuple[str, ...]] = {
+    "2": (
+        "value_number_normalized", "unit_normalized", "rate_source", "rate", "rate_unit",
+        "action", "discharged_to",
+    ),
+}
+#: The required MEDS columns come first; everything after them is this project's.
+REQUIRED_MEDS_COLUMNS = 5
 
 CODE_METADATA_SCHEMA = pa.schema(
     [
@@ -235,23 +262,42 @@ def _build_term_map(con, vocabulary, mappings: MappingRegistry,
     ]
     resolved, _unresolved = resolve_terms_batch(
         terms, vocabulary, mappings, drug_name_noise, drug_name_truncated_at)
+    # The concept's name travels with the map so codes.parquet can describe a mapped
+    # code by what the vocabulary calls it rather than by one of the source names that
+    # happened to map there.
     con.execute(
         "CREATE TABLE term_map (code_system VARCHAR, source_code VARCHAR, "
-        "concept_id BIGINT, normalized VARCHAR)"
+        "concept_id BIGINT, normalized VARCHAR, concept_name VARCHAR)"
     )
     con.executemany(
-        "INSERT INTO term_map VALUES (?, ?, ?, ?)",
+        "INSERT INTO term_map VALUES (?, ?, ?, ?, ?)",
         [
             (
                 t.code_system,
                 t.source_code,
                 int(resolved[t.key].concept_id) if t.key in resolved else None,
                 normalize_term(t.source_code),
+                (resolved[t.key].concept_name or None) if t.key in resolved else None,
             )
             for t in terms
         ],
     )
     return len(terms), len(resolved)
+
+
+def _code_sql(event: str = "e", term: str = "m") -> str:
+    """The MEDS code of an event, as one SQL expression used wherever a code is derived.
+
+    One clinical fact gets one code: the reserved death code, the mapped OMOP concept,
+    or the source code under its source's namespace. Written once so the rows and the
+    code metadata cannot disagree about what a code is.
+    """
+    return f"""CASE
+                       WHEN {event}.event_kind = '{EventKind.death}' THEN '{meds_spec.death_code}'
+                       WHEN {term}.concept_id IS NOT NULL THEN 'OMOP/' || CAST({term}.concept_id AS VARCHAR)
+                       ELSE 'SOURCE/' || coalesce({event}.source_id, 'unknown') || '/'
+                            || coalesce(nullif({term}.normalized, ''), 'unspecified')
+                   END"""
 
 
 def _materialize_rows(con, out_path: Path, scratch_dir: Path) -> None:
@@ -277,6 +323,13 @@ def _materialize_rows(con, out_path: Path, scratch_dir: Path) -> None:
         ) TO '{links_path}' (FORMAT PARQUET, COMPRESSION ZSTD)
         """
     )
+    # A canonical file written under schema version 1 lacks the version-2 columns; it
+    # is still a valid input and publishes nulls there.
+    present = {r[0] for r in con.execute("DESCRIBE evt").fetchall()}
+
+    def optional(name: str, sql_type: str) -> str:
+        return f"e.{name}" if name in present else f"CAST(NULL AS {sql_type})"
+
     con.execute(
         f"""
         COPY (
@@ -285,12 +338,7 @@ def _materialize_rows(con, out_path: Path, scratch_dir: Path) -> None:
             )
             SELECT e.subject_id,
                    e.event_time AS time,
-                   CASE
-                       WHEN e.event_kind = '{EventKind.death}' THEN '{meds_spec.death_code}'
-                       WHEN m.concept_id IS NOT NULL THEN 'OMOP/' || CAST(m.concept_id AS VARCHAR)
-                       ELSE 'SOURCE/' || coalesce(e.source_id, 'unknown') || '/'
-                            || coalesce(nullif(m.normalized, ''), 'unspecified')
-                   END AS code,
+                   {_code_sql()} AS code,
                    CAST(e.value_number AS FLOAT) AS numeric_value,
                    e.value_text AS text_value,
                    e.event_id,
@@ -311,7 +359,14 @@ def _materialize_rows(con, out_path: Path, scratch_dir: Path) -> None:
                        WHEN e.available_time IS NULL AND e.event_time IS NOT NULL
                        THEN list_sort(list_distinct(list_append(e.quality_flags, '{assumed}')))
                        ELSE list_sort(e.quality_flags)
-                   END AS quality_flags
+                   END AS quality_flags,
+                   {optional('value_number_normalized', 'DOUBLE')} AS value_number_normalized,
+                   {optional('unit_normalized', 'VARCHAR')} AS unit_normalized,
+                   {optional('rate_source', 'VARCHAR')} AS rate_source,
+                   {optional('rate', 'DOUBLE')} AS rate,
+                   {optional('rate_unit', 'VARCHAR')} AS rate_unit,
+                   {optional('action', 'VARCHAR')} AS action,
+                   {optional('discharged_to', 'VARCHAR')} AS discharged_to
             FROM evt e
             LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
             LEFT JOIN links l ON l.event_id = e.event_id
@@ -383,21 +438,66 @@ def _iter_subject_tables(rows_path: Path) -> Iterator[tuple[int, pa.Table]]:
 
 
 def _write_code_metadata(con, rows_path: Path, layout: WorkLayout) -> dict[str, int]:
-    """Every code that actually appears, with its mapping status. No more, no less."""
+    """Every code that actually appears, with its mapping status. No more, no less.
+
+    The description is what the vocabulary calls a mapped concept, and for a source
+    code the name the source uses for it most often (remediation plan T1.10, P-C9).
+    It used to be the alphabetically smallest name, which described a code carrying
+    127,700 rows named one way and 15 named another by the fifteen. Ties among the
+    most frequent break alphabetically, so the choice is total; a code with no name
+    falls back to its source code, then to itself.
+    """
     table = con.execute(
         f"""
-        SELECT code,
-               min(coalesce(source_code, code)) AS description,
+        WITH counted AS (
+            SELECT code,
+                   min(omop_concept_id) AS omop_concept_id,
+                   min(event_kind) AS event_kind,
+                   count(*) AS n_events
+            FROM read_parquet('{rows_path}')
+            GROUP BY code
+        ),
+        named AS (
+            SELECT {_code_sql()} AS code, e.source_name, count(*) AS occurrences
+            FROM evt e
+            LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
+            WHERE e.source_name IS NOT NULL
+            GROUP BY 1, 2
+        ),
+        representative AS (
+            SELECT code, source_name FROM (
+                SELECT code, source_name,
+                       row_number() OVER (PARTITION BY code ORDER BY occurrences DESC, source_name) AS rank
+                FROM named
+            ) WHERE rank = 1
+        ),
+        concept_names AS (
+            SELECT concept_id, min(concept_name) AS concept_name
+            FROM term_map
+            WHERE concept_id IS NOT NULL AND concept_name IS NOT NULL AND concept_name <> ''
+            GROUP BY concept_id
+        ),
+        coded AS (
+            SELECT {_code_sql()} AS code, min(e.source_code) AS source_code
+            FROM evt e
+            LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
+            GROUP BY 1
+        )
+        SELECT c.code,
+               coalesce(n.concept_name, r.source_name, s.source_code, c.code) AS description,
                CAST([] AS VARCHAR[]) AS parent_codes,
-               CASE WHEN min(omop_concept_id) IS NOT NULL THEN 'OMOP' ELSE 'SOURCE' END
+               CASE WHEN c.omop_concept_id IS NOT NULL THEN 'OMOP' ELSE 'SOURCE' END
                    AS source_vocabulary,
-               min(omop_concept_id) AS omop_concept_id,
-               CASE WHEN min(omop_concept_id) IS NOT NULL THEN 'mapped' ELSE 'unmapped' END
+               c.omop_concept_id,
+               CASE WHEN c.omop_concept_id IS NOT NULL THEN 'mapped' ELSE 'unmapped' END
                    AS mapping_status,
-               min(event_kind) AS event_kind,
-               count(*) AS n_events
-        FROM read_parquet('{rows_path}')
-        GROUP BY code ORDER BY code
+               c.event_kind,
+               c.n_events
+        FROM counted c
+        LEFT JOIN concept_names n ON n.concept_id = c.omop_concept_id
+        LEFT JOIN representative r ON r.code = c.code
+        LEFT JOIN coded s ON s.code = c.code
+        ORDER BY c.code
         """
     ).arrow().read_all().cast(CODE_METADATA_SCHEMA)
     meds_spec.CodeMetadataSchema.validate(table)
@@ -420,7 +520,11 @@ def _dataset_metadata(cfg: DatasetConfig, vocabulary) -> dict[str, Any]:
         "meds_version": getattr(meds_spec, "__version__", "0.4.1"),
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "license": "not specified: research use, derived from identifiable source data",
-        "extension_columns": [f.name for f in MEDS_SCHEMA][5:],
+        "extension_columns": [f.name for f in MEDS_SCHEMA][REQUIRED_MEDS_COLUMNS:],
+        "extension_columns_version": EXTENSION_COLUMNS_VERSION,
+        "extension_columns_added": {
+            version: list(columns) for version, columns in EXTENSION_COLUMNS_ADDED.items()
+        },
         "vocabulary_version": vocabulary.version,
         "notes": (
             "available_time is the field that prevents time leakage: an as-of view must "

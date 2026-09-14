@@ -101,8 +101,6 @@ class BuildStats:
 
 
 def build_omop(cfg: DatasetConfig, layout: WorkLayout, vocabulary_dir: Path | None = None) -> dict[str, Any]:
-    import duckdb
-
     vocabulary = Vocabulary.open(vocabulary_dir or _env_vocabulary_dir())
     mappings = MappingRegistry.load(mappings_directory())
 
@@ -111,7 +109,7 @@ def build_omop(cfg: DatasetConfig, layout: WorkLayout, vocabulary_dir: Path | No
         # Rebuilt from scratch rather than updated in place: incremental writes are how
         # a published layer drifts away from the lineage that explains it.
         db_path.unlink()
-    con = duckdb.connect(str(db_path))
+    con = _connect(db_path)
     try:
         _create_schema(con)
         _register_sources(con, layout)
@@ -233,6 +231,29 @@ def _build_term_map(con, vocabulary, mappings: MappingRegistry,
 QUANTITY_LIMIT = 10**15
 
 
+def _known_units() -> frozenset[str] | None:
+    """The unit spellings a ``number + unit`` cell may end in, or None if there is no table.
+
+    Remediation plan T1.9: the value parser accepts a numeric cell with a trailing word
+    as a number and a unit only when the word is in the unit table under
+    ``reference/units/``. A dose string is parsed by the same rule, so a dose whose tail
+    is not a unit stays whole in ``sig`` instead of becoming a quantity with an invented
+    unit. Without the table -- a checkout that predates it -- every tail is accepted, as
+    it was before, and the returned None says so.
+
+    TODO(remediation T1.9, reconcile at merge): the core branch adds
+    ``ehr2trace.reference.load_units()``, the merged ``reference/units/*.csv`` table
+    keyed by source spelling (compared case-insensitively) with the UCUM code as value.
+    Replace the guarded import with a plain one once that branch is in, and if the core
+    branch spells the rule as a ``parse_value`` argument instead, pass the table there.
+    """
+    try:
+        from ehr2trace.reference import load_units
+    except ImportError:
+        return None
+    return frozenset(str(spelling).strip().lower() for spelling in load_units())
+
+
 def _build_dose_map(con) -> None:
     """Parse each distinct dose string once, with the same parser the rest uses.
 
@@ -242,6 +263,9 @@ def _build_dose_map(con) -> None:
     eighteen-digit integer, which reads as an identifier that leaked into a measurement
     column; 500110360505613004 mcg is not a dose anyone administered. Rounding it to
     fit would invent a quantity, and failing the build would lose the other 34 million.
+
+    A dose whose trailing word is not in the unit table gets the same treatment (see
+    :func:`_known_units`): no quantity, and the string kept whole.
     """
     from ehr2trace.canonical.values import parse_value
     from ehr2trace.errors import QuarantineRow
@@ -252,6 +276,7 @@ def _build_dose_map(con) -> None:
     rows = con.execute(
         "SELECT DISTINCT dose_source FROM evt WHERE dose_source IS NOT NULL"
     ).fetchall()
+    known = _known_units()
     payload = []
     for (dose,) in rows:
         try:
@@ -259,12 +284,95 @@ def _build_dose_map(con) -> None:
         except QuarantineRow:
             payload.append((dose, None, None))
             continue
-        number = parsed.number
+        number, unit = parsed.number, parsed.unit
+        if (
+            parsed.form == "number_unit"
+            and known is not None
+            and (unit or "").strip().lower() not in known
+        ):
+            number, unit = None, None
         if number is not None and abs(number) >= QUANTITY_LIMIT:
             number = None
-        payload.append((dose, number, parsed.unit))
+        payload.append((dose, number, unit))
     if payload:
         con.executemany("INSERT INTO dose_map VALUES (?, ?, ?)", payload)
+
+
+def _build_unit_map(con, vocabulary, mappings: MappingRegistry) -> None:
+    """Unit concept per distinct (source spelling, UCUM code) pair (T1.5, P-C3).
+
+    The audit found every measurement carrying ``unit_concept_id = 0`` because the
+    column was a literal in the SQL. The concept now comes, in this order, from an
+    approved mapping of the source spelling, an approved mapping of the normalized
+    UCUM code (``mappings/unit.csv``, code system ``UNIT``), the vocabulary's own UCUM
+    entry for the normalized code, or that entry for the source spelling; and it is
+    used only if the vocabulary places it in the Unit domain. Anything else is 0 with
+    the source spelling preserved, like every other concept in this layer.
+
+    Resolved once per distinct pair rather than per row: a hundred million measurements
+    carry a few hundred spellings.
+    """
+    con.execute(
+        "CREATE TABLE unit_map (unit_source VARCHAR, unit_normalized VARCHAR, concept_id BIGINT)"
+    )
+    normalized = _optional(_evt_columns(con), "unit_normalized", "VARCHAR")
+    rows = con.execute(
+        f"""
+        SELECT DISTINCT e.unit_source, {normalized} AS unit_normalized
+        FROM evt e
+        WHERE e.unit_source IS NOT NULL OR {normalized} IS NOT NULL
+        ORDER BY 1, 2
+        """
+    ).fetchall()
+    memo: dict[tuple[str | None, str | None], int] = {}
+    payload = []
+    for unit_source, unit_normalized in rows:
+        key = (unit_source, unit_normalized)
+        if key not in memo:
+            memo[key] = _unit_concept(vocabulary, mappings, unit_source, unit_normalized)
+        payload.append((unit_source, unit_normalized, memo[key]))
+    if payload:
+        con.executemany("INSERT INTO unit_map VALUES (?, ?, ?)", payload)
+
+
+def _unit_concept(vocabulary, mappings: MappingRegistry, unit_source: str | None,
+                  unit_normalized: str | None) -> int:
+    """The Unit-domain concept for one (spelling, UCUM code) pair, or 0."""
+    for text in (unit_source, unit_normalized):
+        approved = mappings.get("UNIT", text) if text else None
+        if approved is not None and vocabulary.domain_of(int(approved.concept_id)) == "Unit":
+            return int(approved.concept_id)
+    for text in (unit_normalized, unit_source):
+        match = vocabulary.lookup_code("UCUM", text) if text else None
+        if match is not None and match.domain_id == "Unit":
+            return int(match.concept_id)
+    return 0
+
+
+def _build_discharge_map(con, vocabulary, mappings: MappingRegistry) -> None:
+    """Where a visit discharged to, resolved once per distinct source value.
+
+    An approved mapping (``mappings/discharge.csv``, code system ``DISCHARGE``) whose
+    concept the loaded vocabulary has; otherwise 0 with the source value kept on the
+    row. The domain is the reviewer's to get right when the decision is compiled.
+    """
+    con.execute("CREATE TABLE discharge_map (discharged_to VARCHAR, concept_id BIGINT)")
+    if "discharged_to" not in _evt_columns(con):
+        return
+    rows = con.execute(
+        "SELECT DISTINCT discharged_to FROM evt WHERE discharged_to IS NOT NULL ORDER BY 1"
+    ).fetchall()
+    payload = []
+    for (value,) in rows:
+        approved = mappings.get("DISCHARGE", value)
+        concept = (
+            int(approved.concept_id)
+            if approved is not None and vocabulary.concept_exists(int(approved.concept_id))
+            else 0
+        )
+        payload.append((value, concept))
+    if payload:
+        con.executemany("INSERT INTO discharge_map VALUES (?, ?)", payload)
 
 
 def _build_attribute_map(con, vocabulary, mappings: MappingRegistry) -> None:
@@ -309,6 +417,7 @@ def _type_concept_map(con, mappings: MappingRegistry) -> None:
         "death",
         "observation",
         "observation_period",
+        "visit_detail",
     )
     con.execute("CREATE TABLE type_concept (key VARCHAR, concept_id BIGINT)")
     con.executemany(
@@ -337,6 +446,8 @@ def _publish_all(con, cfg: DatasetConfig, layout: WorkLayout, vocabulary, mappin
         cfg.terminology.drug_name_truncated_at,
     )
     _build_dose_map(con)
+    _build_unit_map(con, vocabulary, mappings)
+    _build_discharge_map(con, vocabulary, mappings)
     _build_attribute_map(con, vocabulary, mappings)
     _type_concept_map(con, mappings)
 
@@ -353,6 +464,9 @@ def _publish_all(con, cfg: DatasetConfig, layout: WorkLayout, vocabulary, mappin
         GROUP BY person_id, visit_source_value
         """
     )
+    # After the visits and their lookup: a detail is published under its parent visit
+    # or not at all.
+    counts["visit_detail"] = _publish_visit_detail(con)
 
     counts["condition_occurrence"] = _stage_and_load(
         con, "condition_occurrence", "condition_occurrence_id", _condition_sql(con)
@@ -364,7 +478,7 @@ def _publish_all(con, cfg: DatasetConfig, layout: WorkLayout, vocabulary, mappin
     counts["measurement"] = _stage_and_load(con, "measurement", "measurement_id", _measurement_sql(con, cfg))
     counts["observation"] = _stage_and_load(con, "observation", "observation_id", _observation_sql(con))
     counts["note"] = _stage_and_load(con, "note", "note_id", _note_sql(con))
-    counts["death"] = _publish_death(con)
+    counts["death"] = _publish_death(con, cfg)
     counts["observation_period"] = _publish_observation_periods(con)
     counts["cdm_source"] = _publish_cdm_source(con, cfg, vocabulary)
     counts["_lineage"] = _count(con, "etl_audit.lineage")
@@ -543,10 +657,13 @@ DOMAIN_TABLE = {
     "Observation": "observation",
 }
 
-#: Event kinds whose rows are routed by domain. Visits, notes and deaths are built from
-#: their own structure rather than from a mapped code, so they are not re-routed: a
-#: visit's table is decided by it being a visit.
-ROUTED_KINDS = ("condition", "drug_order", "drug_admin", "procedure", "measurement", "demographic")
+#: Event kinds whose rows are routed by domain. Visits, visit details, notes and deaths
+#: are built from their own structure rather than from a mapped code, so they are not
+#: re-routed: a visit's table is decided by it being a visit.
+ROUTED_KINDS = (
+    "condition", "drug_order", "drug_admin", "procedure", "measurement", "observation",
+    "demographic",
+)
 
 #: The term_map join used by every routed table. A concept whose domain has no table
 #: here cannot be published faithfully anywhere -- OMOP 5.4 has an EPISODE table and this
@@ -611,6 +728,7 @@ def _routes_here(table: str, kinds: tuple[str, ...]) -> str:
 
 
 def _visit_sql(con) -> str:
+    discharged_to = _optional(_evt_columns(con), "discharged_to", "VARCHAR")
     return f"""
         SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS visit_occurrence_id,
                p.person_id,
@@ -626,8 +744,8 @@ def _visit_sql(con) -> str:
                CAST(coalesce(m.source_concept_id, 0) AS INTEGER) AS visit_source_concept_id,
                0 AS admitted_from_concept_id,
                CAST(NULL AS VARCHAR) AS admitted_from_source_value,
-               0 AS discharged_to_concept_id,
-               CAST(NULL AS VARCHAR) AS discharged_to_source_value,
+               CAST(coalesce(dm.concept_id, 0) AS INTEGER) AS discharged_to_concept_id,
+               substr({discharged_to}, 1, 50) AS discharged_to_source_value,
                CAST(NULL AS INTEGER) AS preceding_visit_occurrence_id,
                e.event_id
         FROM evt e
@@ -637,7 +755,122 @@ def _visit_sql(con) -> str:
         -- they are dangling references with a patient's data attached.
         JOIN person pr ON pr.person_id = p.person_id
         LEFT JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
+        LEFT JOIN discharge_map dm ON dm.discharged_to = {discharged_to}
         WHERE e.event_kind = '{EventKind.visit}'
+    """
+
+
+#: How a visit detail finds the visit it belongs to (remediation plan T1.13, D-R14),
+#: in order: the same person's visit carrying the detail's encounter id; failing that,
+#: the same person's visit whose span contains the detail's start, the one that began
+#: latest -- the innermost -- and among equals the shortest, then the lower id so the
+#: choice is total. A detail neither rule can place is not published: a VISIT_DETAIL row
+#: with no parent is invalid CDM, and inventing a visit to hold it would be worse.
+VISIT_DETAIL_PARENT_RULES = ("encounter", "containment")
+
+
+def _publish_visit_detail(con) -> int:
+    """VISIT_DETAIL: transfers, service changes and ICU stays under their visit.
+
+    Before this table existed every such record was published as a visit of its own,
+    which is how 86% of one export's visits came to carry no concept: a ward transfer
+    is not a visit type. The parent is resolved once per detail into a temp table that
+    the publish and the audit rows both read, so the row published and the row reported
+    as unparented are decided by the same query.
+    """
+    cols = _evt_columns(con)
+    discharged_to = _optional(cols, "discharged_to", "VARCHAR")
+    con.execute(
+        f"""
+        CREATE OR REPLACE TEMP TABLE visit_detail_candidates AS
+        SELECT e.event_id, e.subject_id, p.person_id, e.source_id, e.encounter_id,
+               e.code_system, e.source_code, e.event_time,
+               coalesce(e.end_time, e.event_time) AS end_time,
+               {discharged_to} AS discharged_to
+        FROM evt e
+        JOIN pmap p ON p.subject_id = e.subject_id
+        -- A patient withheld from PERSON is withheld entirely, details included.
+        JOIN person pr ON pr.person_id = p.person_id
+        WHERE e.event_kind = '{EventKind.visit_detail}' AND e.event_time IS NOT NULL
+        """
+    )
+    con.execute(
+        """
+        CREATE OR REPLACE TEMP TABLE visit_detail_parent AS
+        WITH by_encounter AS (
+            SELECT c.event_id, v.visit_occurrence_id
+            FROM visit_detail_candidates c
+            JOIN visit_lookup v ON v.person_id = c.person_id AND v.visit_source_value = c.encounter_id
+        ),
+        by_containment AS (
+            SELECT event_id, visit_occurrence_id FROM (
+                SELECT c.event_id, v.visit_occurrence_id,
+                       row_number() OVER (
+                           PARTITION BY c.event_id
+                           ORDER BY v.visit_start_datetime DESC, v.visit_end_datetime ASC,
+                                    v.visit_occurrence_id
+                       ) AS rank
+                FROM visit_detail_candidates c
+                JOIN visit_occurrence v
+                  ON v.person_id = c.person_id
+                 AND v.visit_start_datetime <= c.event_time
+                 AND c.event_time <= v.visit_end_datetime
+                WHERE NOT EXISTS (SELECT 1 FROM by_encounter b WHERE b.event_id = c.event_id)
+            ) WHERE rank = 1
+        )
+        SELECT event_id, visit_occurrence_id FROM by_encounter
+        UNION ALL
+        SELECT event_id, visit_occurrence_id FROM by_containment
+        """
+    )
+    con.execute(
+        """
+        INSERT INTO etl_audit.quality_issue
+        SELECT 'VISIT_DETAIL_UNPARENTED', 'warning', 'omop', c.subject_id, NULL, c.event_id,
+               NULL, c.source_id,
+               'no visit of this person carries the encounter id or contains the start time; '
+               'the detail was not published'
+        FROM visit_detail_candidates c
+        WHERE NOT EXISTS (SELECT 1 FROM visit_detail_parent v WHERE v.event_id = c.event_id)
+        ORDER BY c.event_id
+        """
+    )
+    n = _stage_and_load(con, "visit_detail", "visit_detail_id", _visit_detail_sql(con))
+    con.execute("DROP TABLE visit_detail_parent")
+    con.execute("DROP TABLE visit_detail_candidates")
+    return n
+
+
+def _visit_detail_sql(con) -> str:
+    # Its own type concept where the registry names one; otherwise the visit's, because
+    # a detail is an encounter record of the same kind as the visit that holds it.
+    type_concept = _type_id(con, "visit_detail") or _type_id(con, "visit")
+    return f"""
+        SELECT CAST(row_number() OVER (ORDER BY c.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS visit_detail_id,
+               c.person_id,
+               CAST(coalesce(m.concept_id, 0) AS INTEGER) AS visit_detail_concept_id,
+               CAST(c.event_time AS DATE) AS visit_detail_start_date,
+               c.event_time AS visit_detail_start_datetime,
+               CAST(c.end_time AS DATE) AS visit_detail_end_date,
+               c.end_time AS visit_detail_end_datetime,
+               {type_concept} AS visit_detail_type_concept_id,
+               CAST(NULL AS INTEGER) AS provider_id,
+               CAST(NULL AS INTEGER) AS care_site_id,
+               substr(coalesce(c.source_code, c.encounter_id), 1, 50) AS visit_detail_source_value,
+               CAST(coalesce(m.source_concept_id, 0) AS INTEGER) AS visit_detail_source_concept_id,
+               0 AS admitted_from_concept_id,
+               CAST(NULL AS VARCHAR) AS admitted_from_source_value,
+               -- the DDL orders these two the other way round from VISIT_OCCURRENCE
+               substr(c.discharged_to, 1, 50) AS discharged_to_source_value,
+               CAST(coalesce(dm.concept_id, 0) AS INTEGER) AS discharged_to_concept_id,
+               CAST(NULL AS INTEGER) AS preceding_visit_detail_id,
+               CAST(NULL AS INTEGER) AS parent_visit_detail_id,
+               pv.visit_occurrence_id,
+               c.event_id
+        FROM visit_detail_candidates c
+        JOIN visit_detail_parent pv ON pv.event_id = c.event_id
+        LEFT JOIN term_map m ON m.code_system = c.code_system AND m.source_code = c.source_code
+        LEFT JOIN discharge_map dm ON dm.discharged_to = c.discharged_to
     """
 
 
@@ -674,13 +907,40 @@ def _condition_sql(con) -> str:
     """
 
 
+#: The width of DRUG_EXPOSURE.sig in the DDL; everything written there is cut to it.
+SIG_LIMIT = 250
+
+#: How an infusion rate reaches DRUG_EXPOSURE (remediation decision D-R15). OMOP has no
+#: column for a rate, and ``sig`` -- the directions on the order -- is borrowed for it
+#: on purpose, with a fixed shape so a reader can take it apart again:
+#:
+#:     "<dose text>; rate <rate as written, else the parsed number> <rate unit>"
+#:
+#: The dose text is the source's dose string (the same text ``sig`` already held when
+#: the dose could not be published as a quantity), left out when there is none; the
+#: unit is left out when there is none; the whole is cut at ``SIG_LIMIT``. The
+#: structured rate itself is not in OMOP: it stays on the canonical event and in the
+#: MEDS ``rate``/``rate_unit`` columns, which are the columns to compute with.
+SIG_RATE_SEPARATOR = "; "
+SIG_RATE_PREFIX = "rate "
+SIG_RATE_FORMAT = f"<dose text>{SIG_RATE_SEPARATOR}{SIG_RATE_PREFIX}<rate> <rate unit>"
+
+
 def _drug_sql(con) -> str:
     """Orders and administrations share a table; the type concept keeps them apart.
 
     The source status of an order has no home in the OMOP core, so it stays on the
     canonical event that the lineage points at. It is not dropped, and it is not forced
     into ``stop_reason``, which means something else.
+
+    ``dose_unit_source_value`` is the unit parsed out of the dose text, else the event's
+    own unit: a source that keeps the unit in a column of its own (remediation T1.4,
+    P-C6) used to publish every dose without one.
     """
+    cols = _evt_columns(con)
+    rate = _optional(cols, "rate", "DOUBLE")
+    rate_source = _optional(cols, "rate_source", "VARCHAR")
+    rate_unit = _optional(cols, "rate_unit", "VARCHAR")
     return f"""
         SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS drug_exposure_id,
                p.person_id,
@@ -697,7 +957,15 @@ def _drug_sql(con) -> str:
                CAST(NULL AS INTEGER) AS refills,
                d.quantity,
                CAST(NULL AS INTEGER) AS days_supply,
-               CASE WHEN d.quantity IS NULL THEN substr(e.dose_source, 1, 250) END AS sig,
+               CASE
+                   WHEN {rate} IS NOT NULL OR {rate_source} IS NOT NULL THEN substr(
+                       concat_ws('{SIG_RATE_SEPARATOR}', e.dose_source,
+                                 '{SIG_RATE_PREFIX}' || concat_ws(' ',
+                                     coalesce({rate_source}, CAST({rate} AS VARCHAR)),
+                                     {rate_unit})),
+                       1, {SIG_LIMIT})
+                   WHEN d.quantity IS NULL THEN substr(e.dose_source, 1, {SIG_LIMIT})
+               END AS sig,
                0 AS route_concept_id,
                CAST(NULL AS VARCHAR) AS lot_number,
                CAST(NULL AS INTEGER) AS provider_id,
@@ -706,7 +974,7 @@ def _drug_sql(con) -> str:
                substr(e.source_code, 1, 50) AS drug_source_value,
                CAST(coalesce(m.source_concept_id, 0) AS INTEGER) AS drug_source_concept_id,
                substr(e.route_source, 1, 50) AS route_source_value,
-               substr(d.dose_unit, 1, 50) AS dose_unit_source_value,
+               substr(coalesce(d.dose_unit, e.unit_source), 1, 50) AS dose_unit_source_value,
                e.event_id
         FROM evt e
         JOIN pmap p ON p.subject_id = e.subject_id
@@ -791,7 +1059,7 @@ def _measurement_sql(con, cfg: DatasetConfig) -> str:
                0 AS operator_concept_id,
                e.value_number AS value_as_number,
                0 AS value_as_concept_id,
-               0 AS unit_concept_id,
+               CAST(coalesce(u.concept_id, 0) AS INTEGER) AS unit_concept_id,
                {range_low} AS range_low,
                {range_high} AS range_high,
                CAST(NULL AS INTEGER) AS provider_id,
@@ -818,8 +1086,19 @@ def _measurement_sql(con, cfg: DatasetConfig) -> str:
         JOIN person pr ON pr.person_id = p.person_id
         {ROUTABLE_JOIN}
         LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
+        {_unit_join(con)}
         WHERE {_routes_here('measurement', (str(EventKind.measurement),))}
     """
+
+
+def _unit_join(con) -> str:
+    """The join that turns a unit spelling into its concept, shared by every table
+    with a ``unit_concept_id`` (see :func:`_build_unit_map`)."""
+    normalized = _optional(_evt_columns(con), "unit_normalized", "VARCHAR")
+    return (
+        "LEFT JOIN unit_map u ON u.unit_source IS NOT DISTINCT FROM e.unit_source\n"
+        f"                     AND u.unit_normalized IS NOT DISTINCT FROM {normalized}"
+    )
 
 
 def _observation_sql(con) -> str:
@@ -831,14 +1110,17 @@ def _observation_sql(con) -> str:
     rows sat in a review queue that no reviewer could have emptied, because the question
     was never "what does this code mean" but "which table does this kind of fact go in".
 
-    No row reaches this table without a mapped concept: an unmapped event stays in the
-    table its source column implies, so nothing arrives here merely because it failed to
-    resolve elsewhere.
+    A row of another kind reaches this table only through a mapped concept: an unmapped
+    condition stays in the table its source column implies, so nothing arrives here
+    merely because it failed to resolve elsewhere. An event declared as an
+    ``observation`` (a follow-up contact, a documented date) is the exception, and the
+    same rule every other kind gets: unmapped, it stays in its own table with
+    ``concept_id = 0`` and its source value intact, rather than being withheld.
     """
     return f"""
         SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS observation_id,
                p.person_id,
-               CAST(m.concept_id AS INTEGER) AS observation_concept_id,
+               CAST(coalesce(m.concept_id, 0) AS INTEGER) AS observation_concept_id,
                CAST(e.event_time AS DATE) AS observation_date,
                e.event_time AS observation_datetime,
                {_type_id(con, 'observation')} AS observation_type_concept_id,
@@ -846,7 +1128,7 @@ def _observation_sql(con) -> str:
                substr(e.value_text, 1, 60) AS value_as_string,
                0 AS value_as_concept_id,
                0 AS qualifier_concept_id,
-               0 AS unit_concept_id,
+               CAST(coalesce(u.concept_id, 0) AS INTEGER) AS unit_concept_id,
                CAST(NULL AS INTEGER) AS provider_id,
                v.visit_occurrence_id,
                CAST(NULL AS INTEGER) AS visit_detail_id,
@@ -864,10 +1146,10 @@ def _observation_sql(con) -> str:
         -- pointing at a person who was never published are not a CDM instance,
         -- they are dangling references with a patient's data attached.
         JOIN person pr ON pr.person_id = p.person_id
-        JOIN term_map m ON m.code_system = e.code_system AND m.source_code = e.source_code
+        {ROUTABLE_JOIN}
         LEFT JOIN visit_lookup v ON v.person_id = p.person_id AND v.visit_source_value = e.encounter_id
-        WHERE e.event_kind IN ({", ".join(repr(k) for k in ROUTED_KINDS)})
-          AND m.domain_id = 'Observation'
+        {_unit_join(con)}
+        WHERE {_routes_here('observation', (str(EventKind.observation),))}
           AND e.event_time IS NOT NULL
     """
 
@@ -904,21 +1186,49 @@ def _note_sql(con) -> str:
     """
 
 
-def _publish_death(con) -> int:
-    """DEATH, one row per person, and only where the sources agree.
+def _publish_death(con, cfg: DatasetConfig) -> int:
+    """DEATH, one row per person, and only where the sources agree on the day.
 
-    Where they agree the event already collapsed to one by content. Where they
-    disagree, both survive in canonical and neither is published here: choosing the
-    earlier or the later date would be inventing the answer to a question a human has
-    to settle.
+    Agreement is on the calendar date in the dataset's declared zone, not on the
+    timestamp (remediation plan T1.8, decision D-R11). A registry records a death as a
+    date and an admission record as a time of day; both are the same death, and read as
+    instants they can never be equal -- a date-only death is local midnight, and a time
+    of day that evening falls on the next UTC day. Comparing timestamps withheld 11,402
+    MIMIC-IV deaths of which 11,401 agreed on the day. The canonical layer already
+    merges the same-day pair into one event; this comparison is what makes a file that
+    has not been rebuilt under that rule publish the same rows.
+
+    Where the dates agree the most precise event is published: one with a time of day
+    over one at local midnight, the earlier among equals. Where they disagree, both
+    survive in canonical and neither is published here: choosing the earlier or the
+    later date would be inventing the answer to a question a human has to settle.
+
+    With no zone declared the stored times are compared as they are, which is right for
+    a layer stored naive and flagged, and a documented approximation otherwise.
     """
+    local_time = _local_time("e.event_time", cfg.time.timezone_assumption)
     con.execute(
         f"""
         CREATE OR REPLACE TEMP TABLE death_candidates AS
-        SELECT e.subject_id, count(DISTINCT e.event_time) AS variants,
-               min(e.event_time) AS death_time, min(e.event_id) AS event_id
-        FROM evt e WHERE e.event_kind = '{EventKind.death}' AND e.event_time IS NOT NULL
-        GROUP BY e.subject_id
+        WITH local AS (
+            SELECT e.subject_id, e.event_id, e.event_time, {local_time} AS local_time
+            FROM evt e WHERE e.event_kind = '{EventKind.death}' AND e.event_time IS NOT NULL
+        ),
+        dates AS (
+            SELECT subject_id, count(DISTINCT CAST(local_time AS DATE)) AS variants
+            FROM local GROUP BY subject_id
+        ),
+        ranked AS (
+            SELECT subject_id, event_id, event_time,
+                   row_number() OVER (
+                       PARTITION BY subject_id
+                       ORDER BY CAST(local_time AS TIME) = TIME '00:00:00', event_time, event_id
+                   ) AS precision_rank
+            FROM local
+        )
+        SELECT d.subject_id, d.variants, r.event_time AS death_time, r.event_id
+        FROM dates d
+        JOIN ranked r ON r.subject_id = d.subject_id AND r.precision_rank = 1
         """
     )
     con.execute(
@@ -1082,6 +1392,48 @@ def _columns(con, table: str) -> list[str]:
 
 def _count(con, table: str) -> int:
     return int(con.execute(f"SELECT count(*) FROM {table}").fetchone()[0])
+
+
+def _connect(db_path: Path):
+    """The target database, with its session clock pinned to UTC.
+
+    ``evt.event_time`` is a naive UTC instant. DuckDB resolves every implicit cast to a
+    zoned type against the session's TimeZone, which defaults to the machine's, so a
+    build in Denver and one in London would read the same file differently the moment
+    a query touched ``timestamptz``. The one place a zone belongs is the explicit
+    conversion in :func:`_local_time`.
+    """
+    import duckdb
+
+    con = duckdb.connect(str(db_path))
+    con.execute("SET TimeZone = 'UTC'")
+    return con
+
+
+def _evt_columns(con) -> frozenset[str]:
+    return frozenset(_columns(con, "evt"))
+
+
+def _optional(columns: frozenset[str], name: str, sql_type: str, alias: str = "e") -> str:
+    """``alias.name`` when the canonical file has the column, else a typed NULL.
+
+    A file written under canonical schema version 1 lacks the columns version 2 added
+    (normalized value and unit, rate, action, discharge destination). It is still a
+    valid input, and reads as one that carries nulls there.
+    """
+    return f"{alias}.{name}" if name in columns else f"CAST(NULL AS {sql_type})"
+
+
+def _local_time(expr: str, zone: str | None) -> str:
+    """SQL for ``expr``, a naive UTC timestamp, on the wall clock of ``zone``.
+
+    The inner call stamps the naive value as UTC; the outer one moves it to the zone
+    and drops the stamp, so the result is a plain timestamp whose date and time are the
+    local ones. With no zone the expression is returned unchanged.
+    """
+    if not zone:
+        return expr
+    return f"timezone('{zone.replace(chr(39), chr(39) * 2)}', timezone('UTC', {expr}))"
 
 
 def _env_vocabulary_dir() -> Path | None:

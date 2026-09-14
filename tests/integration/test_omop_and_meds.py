@@ -56,8 +56,8 @@ def test_the_official_ddl_defines_the_tables(published):
     c = con(layout)
     try:
         tables = {r[0] for r in c.execute("SHOW TABLES").fetchall()}
-        assert {"person", "visit_occurrence", "condition_occurrence", "drug_exposure",
-                "measurement", "note", "death", "observation_period", "cdm_source"} <= tables
+        assert {"person", "visit_occurrence", "visit_detail", "condition_occurrence", "drug_exposure",
+                "measurement", "observation", "note", "death", "observation_period", "cdm_source"} <= tables
         columns = {r[0] for r in c.execute("DESCRIBE person").fetchall()}
         assert "membership_label" not in columns, "no custom column may be added to a core table"
     finally:
@@ -71,10 +71,13 @@ def test_every_published_row_has_lineage(published):
         for table, pk in (
             ("person", "person_id"),
             ("visit_occurrence", "visit_occurrence_id"),
+            ("visit_detail", "visit_detail_id"),
             ("condition_occurrence", "condition_occurrence_id"),
             ("drug_exposure", "drug_exposure_id"),
             ("measurement", "measurement_id"),
+            ("observation", "observation_id"),
             ("note", "note_id"),
+            ("death", "person_id"),
         ):
             orphans = c.execute(
                 f"SELECT count(*) FROM {table} t WHERE NOT EXISTS ("
