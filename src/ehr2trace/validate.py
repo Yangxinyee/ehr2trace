@@ -3432,14 +3432,25 @@ def _unit_value_plausible(l: Layers) -> CheckResult:
     empty; the ranges live in ``reference/plausible_ranges/<dataset>.csv``.
 
     Reads the events' code, unit, value and flags against the dataset's range table,
-    through ``ehr2trace.reference``. A build that normalized its units is judged on the
-    normalized unit and value. A build that predates normalization is judged on its
-    source spelling resolved through the unit table and converted by the conversion
-    table, so a temperature written in Fahrenheit is held to the Celsius range it would
-    have been normalized to, and one written as Celsius is held to that range whatever
-    its values say. A value with no unit meets a range declared with an empty unit.
-    Fails on any value outside its range without the IMPLAUSIBLE flag. Always reports
-    the value ranges of temperature-like codes. Skips without a range table.
+    through ``ehr2trace.reference``.
+
+    A build that normalized its units is judged on the normalized unit and value. A row
+    the converter flagged IMPLAUSIBLE counts as outside: the converter judged it against
+    this same table and withheld its normalized value, and the raw value left beside it is
+    in the unit it was read in, not the unit the range is declared for -- a Celsius reading
+    under a Fahrenheit override is 37.2 raw and about 2.9 once converted, and reading the
+    raw number against the Celsius range would count it plausible. So a raw value is never
+    compared with a normalized-unit range. A row with a normalized unit, no normalized value
+    and no flag cannot be judged; it is counted and reported.
+
+    A build that predates normalization is judged on its source spelling resolved through
+    the unit table and converted by the conversion table, so a temperature written in
+    Fahrenheit is held to the Celsius range it would have been normalized to, and one
+    written as Celsius is held to that range whatever its values say. A value with no unit
+    meets a range declared with an empty unit.
+
+    Fails on any value outside its range without the IMPLAUSIBLE flag. Always reports the
+    value ranges of temperature-like codes. Skips without a range table.
     """
     if l.events_path is None:
         return _skip("canonical layer not built")
@@ -3467,15 +3478,18 @@ def _unit_value_plausible(l: Layers) -> CheckResult:
         rows = con.execute(
             f"""
             WITH spelled AS (
-                SELECT code_system, source_code, quality_flags, value_number,
+                SELECT code_system, source_code, value_number,
                        {"value_number_normalized" if normalized else "CAST(NULL AS DOUBLE)"} AS vn,
                        lower(trim(unit_source)) AS u,
-                       {"unit_normalized" if normalized else "CAST(NULL AS VARCHAR)"} AS un
+                       {"unit_normalized" if normalized else "CAST(NULL AS VARCHAR)"} AS un,
+                       coalesce(list_contains(quality_flags, '{QualityFlag.IMPLAUSIBLE}'), false) AS implausible
                 FROM evt
                 WHERE value_number IS NOT NULL{" OR value_number_normalized IS NOT NULL" if normalized else ""}
             ), resolved AS (
-                SELECT s.code_system, s.source_code, s.quality_flags,
-                       CASE WHEN s.un IS NOT NULL THEN coalesce(s.vn, s.value_number)
+                SELECT s.code_system, s.source_code, s.implausible,
+                       -- A normalized row is read only in its normalized unit; its raw number
+                       -- is in another unit whenever the normalized value was withheld.
+                       CASE WHEN s.un IS NOT NULL THEN s.vn
                             WHEN c.from_ucum IS NOT NULL THEN s.value_number * c.factor + c.shift
                             ELSE s.value_number END AS v,
                        CASE WHEN s.un IS NOT NULL THEN s.un
@@ -3485,29 +3499,38 @@ def _unit_value_plausible(l: Layers) -> CheckResult:
                 LEFT JOIN umap m ON m.spelling = s.u
                 LEFT JOIN conv c ON c.from_ucum = m.ucum AND s.un IS NULL
             )
-            SELECT r.code_system, r.source_code, r.ucum, count(*),
-                   count(*) FILTER (WHERE e.v < r.low OR e.v > r.high),
-                   count(*) FILTER (WHERE (e.v < r.low OR e.v > r.high)
-                                      AND NOT list_contains(e.quality_flags, '{QualityFlag.IMPLAUSIBLE}'))
+            SELECT r.code_system, r.source_code, r.ucum,
+                   count(*) FILTER (WHERE e.v IS NOT NULL OR e.implausible),
+                   count(*) FILTER (WHERE e.implausible OR e.v < r.low OR e.v > r.high),
+                   count(*) FILTER (WHERE NOT e.implausible AND (e.v < r.low OR e.v > r.high)),
+                   count(*) FILTER (WHERE e.implausible AND e.v IS NULL),
+                   count(*) FILTER (WHERE e.v IS NULL AND NOT e.implausible)
             FROM resolved e JOIN rng r ON r.code_system = e.code_system AND r.source_code = e.source_code AND r.ucum = e.ucum
-            WHERE e.v IS NOT NULL
             GROUP BY 1, 2, 3 ORDER BY 6 DESC, 5 DESC, 4 DESC
             """
         ).fetchall()
-    judged = [{"code_system": s, "source_code": c, "unit": u, "rows": int(n), "outside": int(o), "unflagged": int(f)}
-              for s, c, u, n, o, f in rows]
+    judged = [{"code_system": s, "source_code": c, "unit": u, "rows": int(n), "outside": int(o), "unflagged": int(f),
+               "withheld_by_converter": int(w), "not_judged": int(x)}
+              for s, c, u, n, o, f, w, x in rows]
+    total = sum(j["rows"] for j in judged)
     unflagged = sum(j["unflagged"] for j in judged)
     outside = sum(j["outside"] for j in judged)
+    withheld = sum(j["withheld_by_converter"] for j in judged)
+    not_judged = sum(j["not_judged"] for j in judged)
+    notes = (f" ({withheld:,} of them withheld by the converter)" if withheld else "") + (
+        f"; {not_judged:,} rows carry a normalized unit, no normalized value and no flag, and were not judged"
+        if not_judged else "")
     return CheckResult(
         "",
         unflagged == 0,
-        f"{sum(j['rows'] for j in judged):,} values judged against {len(tables.ranges)} declared ranges "
-        f"({'normalized' if normalized else 'source'} units); {outside:,} lie outside and every one is flagged"
+        f"{total:,} values judged against {len(tables.ranges)} declared ranges "
+        f"({'normalized' if normalized else 'source'} units); {outside:,} lie outside and every one is flagged" + notes
         if unflagged == 0
         else f"{unflagged:,} values lie outside their declared plausible range and are not flagged: "
-        + "; ".join(f"{j['source_code']} [{j['unit']}] {j['unflagged']:,}" for j in judged[:5] if j["unflagged"]),
+        + "; ".join(f"{j['source_code']} [{j['unit']}] {j['unflagged']:,}" for j in judged[:5] if j["unflagged"]) + notes,
         {"ranges_declared": len(tables.ranges), "judged_on": "normalized" if normalized else "source",
-         "judged": judged[:20], "outside": outside, "unflagged": unflagged, "temperature_like": temperatures},
+         "judged": judged[:20], "values_judged": total, "outside": outside, "unflagged": unflagged,
+         "withheld_by_converter": withheld, "not_judged": not_judged, "temperature_like": temperatures},
     )
 
 
