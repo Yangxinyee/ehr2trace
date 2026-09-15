@@ -300,6 +300,14 @@ def _code_sql(event: str = "e", term: str = "m") -> str:
                    END"""
 
 
+#: Lineage links collapsed in one pass. A grouped ``list()`` cannot spill, and on
+#: MIMIC-IV's 801 million links it exhausted a 195 GiB budget on its own. The links are
+#: therefore collapsed in hash buckets of ``event_id``, each small enough to hold; every
+#: event lands in exactly one bucket, and the final ordering makes the published rows
+#: independent of how many buckets there were.
+LINKS_PER_BUCKET = 50_000_000
+
+
 def _materialize_rows(con, out_path: Path, scratch_dir: Path) -> None:
     """Join, code and order every event once, out of core.
 
@@ -313,16 +321,25 @@ def _materialize_rows(con, out_path: Path, scratch_dir: Path) -> None:
     itself, and written to disk before the join reads it back, each half fits.
     """
     assumed = str(QualityFlag.AVAILABILITY_ASSUMED)
-    links_path = scratch_dir / "links.parquet"
-    links_path.parent.mkdir(parents=True, exist_ok=True)
-    con.execute(
-        f"""
-        COPY (
-            SELECT event_id, list_sort(list(source_row_id)) AS source_row_ids
-            FROM lnk GROUP BY event_id
-        ) TO '{links_path}' (FORMAT PARQUET, COMPRESSION ZSTD)
-        """
-    )
+    import shutil
+
+    links_dir = scratch_dir / "links"
+    if links_dir.exists():
+        shutil.rmtree(links_dir)  # buckets a failed run left behind would be read twice
+    links_dir.mkdir(parents=True, exist_ok=True)
+    total = int(con.execute("SELECT count(*) FROM lnk").fetchone()[0])
+    buckets = max(1, -(-total // LINKS_PER_BUCKET))
+    for bucket in range(buckets):
+        where = f"WHERE hash(event_id) % {buckets} = {bucket}" if buckets > 1 else ""
+        con.execute(
+            f"""
+            COPY (
+                SELECT event_id, list_sort(list(source_row_id)) AS source_row_ids
+                FROM lnk {where} GROUP BY event_id
+            ) TO '{links_dir / f"part-{bucket:04d}.parquet"}' (FORMAT PARQUET, COMPRESSION ZSTD)
+            """
+        )
+    links_path = links_dir / "*.parquet"
     # A canonical file written under schema version 1 lacks the version-2 columns; it
     # is still a valid input and publishes nulls there.
     present = {r[0] for r in con.execute("DESCRIBE evt").fetchall()}
