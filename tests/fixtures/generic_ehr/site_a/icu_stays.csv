@@ -1,0 +1,3 @@
+patient_ref,care_unit,entered_on,stay_days
+PX-1,Medical ICU,2021-01-05,0.25
+PX-1,Medical ICU,2021-01-05,1.75

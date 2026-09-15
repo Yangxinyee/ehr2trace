@@ -5,3 +5,4 @@ SOURCE,NA,mmol/L,100,180,"serum sodium compatible with life; the fixture writes 
 SOURCE,WBC,10*3/uL,0,200,"white cell count; the fixture writes 38.62 K/cu mm, which converts to this unit"
 SOURCE,DDIMER,ug/mL{FEU},0,100,"D-dimer in fibrinogen-equivalent units; the fixture's value is a comparator"
 SOURCE,RVSP,mm[Hg],0,200,"right ventricular systolic pressure; the fixture's value is a range"
+SOURCE,TEMP,Cel,25,45,"body temperature from deep hypothermia to extreme hyperthermia; the fixture's 98.6 and 101.3 read as [degF] convert inside it, and its 37.2 read as [degF] does not"

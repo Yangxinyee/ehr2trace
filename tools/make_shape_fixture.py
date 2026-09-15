@@ -87,6 +87,7 @@ EKG_COMPONENTS = [
     ("Q-T  INTERVAL", "1", "392"),
     ("DIAGNOSIS", "1", "SINUS TACHYCARDIA"),
     ("DIAGNOSIS", "2", "RIGHT AXIS DEVIATION"),
+    ("DIAGNOSIS", "3", "2 SINUS TACHYCARDIA"),  # trap 10, NUMBERED_DIAGNOSIS below
 ]
 
 LAB_RESULTS = [
@@ -96,6 +97,38 @@ LAB_RESULTS = [
     ("K", "POTASSIUM", "see below", "mmol/L"),
     ("CREAT", "CREATININE", "<0.50", "mg/dL"),
 ]
+
+# -- traps from the conversion audit (remediation plan T1.12) --------------------------
+#
+# Each is a shape a real delivery had and a converter mishandled, placed on fabricated
+# rows so the regression lives in the repository. The tests that read them, and the
+# declarations that settle them, are in tests/integration/test_fixture_traps_ctpe_shape.py.
+
+#: Trap 1 (T1.1). This patient's first order is written a second time in the same minute,
+#: for the same drug, at twice the dose. They are two orders; an event identity that left
+#: the dose out made them one, and the merge kept whichever dose it met first.
+SECOND_DOSE_PATIENT = "SUBJ-2"
+SECOND_DOSE = "20 mg"
+
+#: Trap 12 (T1.3, D-R5). The white cell count one batch saw 35 minutes after the other
+#: did: later in batch 2 for one patient and in batch 1 for the other, so neither extract
+#: is always the one that saw a result first.
+LATE_RESULT = {("2", "SUBJ-1"), ("1", "SUBJ-2")}
+LATE_RESULT_CODE = "WBC"
+LATE_BY = timedelta(minutes=35)
+
+#: Trap 8 (D-R6, P-J2, P-J11). The asthma entry's status where a batch does not record it
+#: as Active: an empty cell in one batch against Active in the other, which is one
+#: recorded status, and Active in one against Resolved in the other, which is a
+#: contradiction the merge must flag...
+PROBLEM_STATUS = {("1", "SUBJ-1"): "", ("2", "SUBJ-2"): "Resolved"}
+#: ...and an entry the clinician deleted, which is not a diagnosis the patient had. The
+#: patient is one OMOP publishes, so its absence there is not an accident of withholding.
+DELETED_PROBLEM = ("SUBJ-2", "R06.02", "Shortness of breath", "2018-06-11 00:00:00.000")
+
+#: Trap 10 (T1.9, P-C8). The ECG's third diagnosis line: words with a number in front.
+#: Read with no unit table it was a measurement of 2 in units of "SINUS TACHYCARDIA".
+NUMBERED_DIAGNOSIS = "2 SINUS TACHYCARDIA"
 
 
 def write_text(path: Path, header: list[str], rows: list[list[str]], bom: bool) -> None:
@@ -124,10 +157,13 @@ def build_partition(partition_id: str) -> None:
     # -- all_rx: ordering intent, including rows with no ordering date at all --------
     rx_rows = []
     for patient in patients:
-        for i, moment in enumerate(event_times(f"rx{patient}", 4)):
+        moments = event_times(f"rx{patient}", 4)
+        for i, moment in enumerate(moments):
             # every fourth order has no date and must be quarantined, never dated
             ordering = "NULL" if i == 3 else moment
             rx_rows.append([patient, f"ENC-{patient}-1", "TESTDRUG 10 mg tablet", "10 mg", ordering, "Dispensed"])
+        if patient == SECOND_DOSE_PATIENT:
+            rx_rows.append([patient, f"ENC-{patient}-1", "TESTDRUG 10 mg tablet", SECOND_DOSE, moments[0], "Dispensed"])
     write_text(
         root / f"{prefix}_all_rx.txt",
         ["MRN", "Encounter_CSN", "Medication_Name", "HV_Discrete_Dose", "Ordering_Date", "Order_Status"],
@@ -138,9 +174,12 @@ def build_partition(partition_id: str) -> None:
     # -- problem_list: byte-order mark deliberately inconsistent ---------------------
     problem_rows = []
     for patient in patients:
-        problem_rows.append([patient, "J45.909", "Unspecified asthma uncomplicated", "2017-04-02 00:00:00.000", "Active"])
+        status = PROBLEM_STATUS.get((batch, patient), "Active")
+        problem_rows.append([patient, "J45.909", "Unspecified asthma uncomplicated", "2017-04-02 00:00:00.000", status])
         # dated after the death date below: must be flagged, never deleted or re-dated
         problem_rows.append([patient, "E11.9", "Type 2 diabetes mellitus", "2031-09-14 00:00:00.000", "Active"])
+        if patient == DELETED_PROBLEM[0]:
+            problem_rows.append([*DELETED_PROBLEM, "Deleted"])
     write_text(
         root / f"{prefix}_problem_list.txt",
         ["MRN", "Diagnosis_Code", "Diagnosis_Name", "First_Noted_Date", "Status"],
@@ -170,9 +209,10 @@ def build_partition(partition_id: str) -> None:
                 )
             for i, (code, name, value, unit) in enumerate(LAB_RESULTS):
                 collection = lab_times[i]
-                result = (datetime.strptime(collection, "%Y-%m-%d %H:%M:%S.%f") + timedelta(minutes=22)).strftime(
-                    "%Y-%m-%d %H:%M:%S.000"
-                )
+                seen = datetime.strptime(collection, "%Y-%m-%d %H:%M:%S.%f") + timedelta(minutes=22)
+                if code == LATE_RESULT_CODE and (batch, patient) in LATE_RESULT:
+                    seen += LATE_BY
+                result = seen.strftime("%Y-%m-%d %H:%M:%S.000")
                 # one lab per patient has no collection time: the flagged fallback path
                 lab_rows.append(
                     [patient, anchor, f"ENC-{patient}-1", result,

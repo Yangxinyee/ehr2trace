@@ -1,3 +1,4 @@
 ﻿MRN	Diagnosis_Code	Diagnosis_Name	First_Noted_Date	Status
-SUBJ-2	J45.909	Unspecified asthma uncomplicated	2017-04-02 00:00:00.000	Active
+SUBJ-2	J45.909	Unspecified asthma uncomplicated	2017-04-02 00:00:00.000	Resolved
 SUBJ-2	E11.9	Type 2 diabetes mellitus	2031-09-14 00:00:00.000	Active
+SUBJ-2	R06.02	Shortness of breath	2018-06-11 00:00:00.000	Deleted
