@@ -106,6 +106,13 @@ sources:
           first inclusion procedure, with no time of its own -- 124,367 of 127,955
           rows carry one -- so every one is quarantined rather than dated by the CT.
           The source's shape, not a conversion fault.
+      UNTIMED_VITAL_STATUS:
+        max_share: 0.8
+        reason: >-
+          A living patient has a vital status and no date it was true as of: 99,806 of
+          127,955 rows (78.0%, full build of 2026-09-14) state one with no death date,
+          and a status with no time cannot be an event. The share is the living part
+          of the cohort, not a conversion fault.
     ignored_columns:
       mrn: >-
         the hospital's medical record number, delivered beside the export's own
@@ -335,6 +342,14 @@ sources:
     encounter_in_identity: false
     merge_rules:
       encounter_id: {rule: prefer_linked}
+      # The copies of one note do not always name its author the same way: 792 merged
+      # notes carry two author names and 54 two author services (full build of
+      # 2026-09-14). 149 of the 792 differ only in case or punctuation and 359 more are
+      # one name extended by the other (a middle name, a credential); the rest name two
+      # different authors. One note is one event, so the survivor's author is kept, the
+      # event is flagged, and every row stays in the lineage with the author it names.
+      note_author:   {rule: keep_all_flag, flag: NAME_VARIANTS_MERGED}
+      AuthorService: {rule: keep_all_flag, flag: NAME_VARIANTS_MERGED}
     expected_encounter_link_rate:
       # 2.6% of the notes' (patient, encounter) pairs, 2.0% of note rows on the 1-in-200
       # sample of 2026-09-14 (338 of 16,977): the floor sits under both readings.
@@ -354,7 +369,14 @@ sources:
       # flowsheets or procedures; a lookup the preparation step made, read by the
       # prefer_linked rule above and by nothing else.
       encounter_linked: {from: [encounter_linked]}
-    keep_columns: [AuthorService, note_author, source_file]
+    keep_columns: [AuthorService, note_author]
+    ignored_columns:
+      source_file: >-
+        which delivered note file the row came from, written by tools/prepare_cu.py.
+        The same note is delivered in more than one file, so the copies of one note
+        differ here by construction (967,563 merged notes span two or more files on
+        the full build of 2026-09-14); the prepared row each lineage link names still
+        carries it
 
   # -- outcomes as visits ---------------------------------------------------------
   icu_stays:
@@ -396,22 +418,24 @@ sources:
     # never that it was an inpatient one, so the visit concept stays 0 -- an honest
     # "the source did not say" rather than an invented Inpatient Visit.
     #
-    # The 7/30/90/180/365-day flags are the export's own derivations. They are kept in
-    # the source layer as attributes and never become events: a flag is a label someone
-    # computed, not something that happened to the patient at a time. What they were
-    # computed against is inferred, not stated -- see owner_answers.readmission_index_event:
-    # one row per admission x CTPA scan, the scan column dropped on export, so an
-    # admission date can carry several flag vectors here, of which the one for the first
-    # scan recomputes from cta_time.
+    # The 7/30/90/180/365-day flags are the export's own derivations, and nothing reads
+    # them (2026-09-14). A flag is a label someone computed, not something that happened
+    # to the patient at a time, and what it was computed against is inferred, not stated
+    # -- see owner_answers.readmission_index_event: one row per admission x CTPA scan,
+    # the scan column dropped on export. One readmission is one visit, and 32,932 of the
+    # 186,349 visits merge more than one such row: 24,375 of them disagree on the
+    # one-year flag and 2,376 even on the seven-day one (full build). No vector is the
+    # visit's own, so keeping the first one met would publish a label for a scan no row
+    # names. The vector for the first scan recomputes from cta_time and the visit date.
     fields:
       person_id:  {from: [arb_person_id], required: true}
       event_time: {from: [readmission_date], required: true}
-    keep_columns:
-      - readmission_flag_7day
-      - readmission_flag_30day
-      - readmission_flag_90day
-      - readmission_flag_6months
-      - readmission_flag_1year
+    ignored_columns:
+      readmission_flag_7day: "export-derived, one vector per admission x scan with the scan dropped; not the visit's own (see above)"
+      readmission_flag_30day: "export-derived, one vector per admission x scan with the scan dropped; not the visit's own (see above)"
+      readmission_flag_90day: "export-derived, one vector per admission x scan with the scan dropped; not the visit's own (see above)"
+      readmission_flag_6months: "export-derived, one vector per admission x scan with the scan dropped; not the visit's own (see above)"
+      readmission_flag_1year: "export-derived, one vector per admission x scan with the scan dropped; not the visit's own (see above)"
 
 anchors:
   anchor_type: ctpa
@@ -453,15 +477,20 @@ execution:
   chunk_rows: 200000
 
 validation:
-  # Thresholds at their defaults. One caveat for ENCOUNTER_RESOLVES: this export
-  # delivers no encounter table, and neither visit source (ICU stays, readmissions)
-  # carries an arb_encounter_id, so an encounter id here can only ever be matched to
-  # another clinical event of the same patient, never to a visit. The notes declare
-  # their own rate; if the check resolves against visits alone, every source of this
-  # dataset needs a declaration, and this note is where that decision starts.
+  # Thresholds at their defaults but one. This export delivers no encounter table and
+  # neither visit source (ICU stays, readmissions) carries an arb_encounter_id, so
+  # ENCOUNTER_RESOLVES matches an encounter id only to another source's events of the
+  # same patient, and judges only the sources that declare a rate (the notes do).
+  #
+  # visit_concept_coverage_min is 0: VISIT_OCCURRENCE here is the readmissions and
+  # nothing else, and a readmission date never says what kind of visit it was, so every
+  # row carries concept 0 by the decision recorded on that source. The ICU stays are
+  # visit details and are judged at the default.
+  visit_concept_coverage_min: 0.0
   note: >-
-    defaults; no visit of this export carries an encounter id, so a visit-based
-    encounter link rate is 0 for every source by construction (see the comment)
+    visit_concept_coverage_min is 0 because the only VISIT_OCCURRENCE rows are the
+    untyped readmissions, concept 0 by decision (see readmissions); every other
+    threshold is the default
 
 # Files under the prepared root and the raw delivery that no source reads, each with
 # its reason, so RAW_COVERAGE_DECLARED can tell "unread on purpose" from "forgotten".
