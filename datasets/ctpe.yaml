@@ -109,6 +109,21 @@ sources:
       MISSING_EVENT_TIME:
         max_share: 0.05
         reason: "534,610 of 15,117,445 order rows carry no Ordering_Date in the export; the source has no date for them (W1)"
+    # 1,064 merged orders carry one dose written two ways: the same number, spelled
+    # differently, under the same lower-cased unit -- which is all the identity keys a
+    # drug's dose on (T1.1), so they are one order. 375 of them span the two extraction
+    # batches and the rest repeat inside one. The survivor's spelling is kept, the order
+    # is flagged, and every spelling stays in the lineage (full build of 2026-09-14).
+    merge_rules:
+      dose: {rule: keep_all_flag, flag: NAME_VARIANTS_MERGED}
+    # The encounter ids this source names resolve to a delivered visit or ADT stay
+    # for 63.7% of its orders. The rest name encounters the export never delivered:
+    # none links once the id's format is normalized and none names another patient's
+    # visit (full build of 2026-09-14). The Outcome sheet holds only the admissions this
+    # extract was built around, so the gap is in the delivery, not the parsing.
+    expected_encounter_link_rate:
+      min_rate: 0.6
+      reason: "5,929,050 of 9,308,573 orders (63.7%) name an encounter delivered as a visit or ADT stay; the others name none that was delivered (measured 2026-09-14)"
 
   medication_admin:
     # One logical source, two physical forms: a standalone file in one partition, a
@@ -132,6 +147,14 @@ sources:
       source_name:  {from: [Medication_Name]}
       dose:         {from: [Dose]}
       route:        {from: [Route]}
+    # The encounter ids this source names resolve to a delivered visit or ADT stay
+    # for 80.4% of its administrations. The rest name encounters the export never delivered:
+    # none links once the id's format is normalized and none names another patient's
+    # visit (full build of 2026-09-14). The Outcome sheet holds only the admissions this
+    # extract was built around, so the gap is in the delivery, not the parsing.
+    expected_encounter_link_rate:
+      min_rate: 0.75
+      reason: "1,932,032 of 2,404,496 administrations (80.4%) name an encounter delivered as a visit or ADT stay; the others name none that was delivered (measured 2026-09-14)"
 
   labs:
     adapter: delimited
@@ -170,8 +193,24 @@ sources:
     # P-J3). Declared even though it is the default, so that the choice is visible here.
     merge_rules:
       available_time: {rule: earliest}
+      # 65 merged results carry two display names for one Base_Name code; the code is
+      # the result's identity, so the survivor's name is kept, the result is flagged, and
+      # every name stays in the lineage. 2 results carry two lower and 3 two upper
+      # reference bounds: two ranges for one result contradict each other, so neither is
+      # published and both are quarantined (full build of 2026-09-14).
+      source_name: {rule: keep_all_flag, flag: NAME_VARIANTS_MERGED}
+      value_low:   {rule: null_and_flag}
+      value_high:  {rule: null_and_flag}
     ignored_columns:
       rn: "an extraction-time row number, 1 to 5,532, filled on every row and unique neither within a patient nor within a code; it says where the row sat in the extract, not anything about the patient"
+    # The encounter ids this source names resolve to a delivered visit or ADT stay
+    # for 69.6% of its results. The rest name encounters the export never delivered:
+    # none links once the id's format is normalized and none names another patient's
+    # visit (full build of 2026-09-14). The Outcome sheet holds only the admissions this
+    # extract was built around, so the gap is in the delivery, not the parsing.
+    expected_encounter_link_rate:
+      min_rate: 0.65
+      reason: "6,298,963 of 9,044,430 results (69.6%) name an encounter delivered as a visit or ADT stay; the others name none that was delivered (measured 2026-09-14)"
 
   problem_list:
     adapter: delimited
@@ -217,6 +256,10 @@ sources:
     # flagged STATUS_CONFLICT (D-R6, P-J2).
     merge_rules:
       status_source: {rule: priority, order: [Resolved, Active], conflict_when: [[Active, Resolved]]}
+      # 54,516 merged entries carry two names for one ICD-10 code. The code is what the
+      # entry records and what it maps by; the survivor's name is kept, the entry is
+      # flagged, and every name stays in the lineage (full build of 2026-09-14).
+      source_name: {rule: keep_all_flag, flag: NAME_VARIANTS_MERGED}
 
   echo:
     adapter: delimited
@@ -237,6 +280,14 @@ sources:
       result_category: {from: [Rad_Result_type]}
       text_line:       {from: [LINE]}
       text:            {from: [NARRATIVE]}
+    # The encounter ids this source names resolve to a delivered visit or ADT stay
+    # for 71.0% of its echo report events. The rest name encounters the export never delivered:
+    # none links once the id's format is normalized and none names another patient's
+    # visit (full build of 2026-09-14). The Outcome sheet holds only the admissions this
+    # extract was built around, so the gap is in the delivery, not the parsing.
+    expected_encounter_link_rate:
+      min_rate: 0.65
+      reason: "67,556 of 95,100 echo report events (71.0%) name an encounter delivered as a visit or ADT stay; the others name none that was delivered (measured 2026-09-14)"
 
   ekg:
     adapter: delimited
@@ -303,6 +354,14 @@ sources:
     # unit -- `2 to 1 AV block` became 2 `to 1 AV block` (P-J8). None of those tails is a
     # unit in `reference/units/`, so they stop parsing as values once T1.9 lands; nothing
     # is declared here to make that happen.
+    # The encounter ids this source names resolve to a delivered visit or ADT stay
+    # for 87.9% of its ECG values. The rest name encounters the export never delivered:
+    # none links once the id's format is normalized and none names another patient's
+    # visit (full build of 2026-09-14). The Outcome sheet holds only the admissions this
+    # extract was built around, so the gap is in the delivery, not the parsing.
+    expected_encounter_link_rate:
+      min_rate: 0.85
+      reason: "6,151,538 of 6,994,520 ECG values (87.9%) name an encounter delivered as a visit or ADT stay; the others name none that was delivered (measured 2026-09-14)"
 
   demographics:
     adapter: excel
@@ -354,6 +413,13 @@ sources:
       # A masked duration string; kept verbatim, never parsed as a duration.
       duration_masked: {from: [Time_Difference]}
       death_time:      {from: [Death_Date]}
+    # 8,032 admissions arrive in two extracts with two different masked durations. A
+    # masked string cannot be compared or ordered, so neither is chosen: the visit
+    # publishes no duration, both values are quarantined, and the visit is flagged --
+    # the rule the ADT stays already use for the same field (D-R4; full build of
+    # 2026-09-14).
+    merge_rules:
+      duration_masked: {rule: null_and_flag}
 
   pft_narrative:
     adapter: excel
@@ -375,6 +441,14 @@ sources:
       result_category: {from: [Rad_Result_type]}
       text_line:       {from: [LINE]}
       text:            {from: [NARRATIVE]}
+    # The encounter ids this source names resolve to a delivered visit or ADT stay
+    # for 12.2% of its PFT report events. The rest name encounters the export never delivered:
+    # none links once the id's format is normalized and none names another patient's
+    # visit (full build of 2026-09-14). The Outcome sheet holds only the admissions this
+    # extract was built around, so the gap is in the delivery, not the parsing.
+    expected_encounter_link_rate:
+      min_rate: 0.1
+      reason: "3,708 of 30,272 PFT report events (12.2%) name an encounter delivered as a visit or ADT stay; the others name none that was delivered (measured 2026-09-14)"
 
   pft_values:
     adapter: excel
@@ -525,6 +599,14 @@ sources:
     # someone with the report can say which, rather than being guessed at here.
     # The remaining unitless codes are the four procedure names (JHOC/BAYVIEW/GSS/JHCP
     # PULMONARY FUNCTION TEST(S) and the paediatric one), which carry no value.
+    # The encounter ids this source names resolve to a delivered visit or ADT stay
+    # for 17.6% of its PFT values. The rest name encounters the export never delivered:
+    # none links once the id's format is normalized and none names another patient's
+    # visit (full build of 2026-09-14). The Outcome sheet holds only the admissions this
+    # extract was built around, so the gap is in the delivery, not the parsing.
+    expected_encounter_link_rate:
+      min_rate: 0.15
+      reason: "20,662 of 117,370 PFT values (17.6%) name an encounter delivered as a visit or ADT stay; the others name none that was delivered (measured 2026-09-14)"
 
   # -- delivered in the second tree, All_kinds/, and projected by tools/prepare_ctpe.py --
   #
@@ -674,8 +756,8 @@ validation:
   # (the other 8 flagged as ICU are named by building and floor, and are in the review
   # queue). Lowering the number would hide a real gap; the queue is where it gets closed.
   note: >-
-    visit_concept_coverage_min is expected to fail for `visit_detail` until the ADT
-    department names are reviewed: 14 of 241 are mapped as of 2026-09-14.
+    visit_detail_concept_coverage_min is expected to fail until the ADT department
+    names are reviewed: 14 of 241 are mapped as of 2026-09-14.
 
 # Delivered tables this conversion deliberately does not read (D-R12, decided 2026-09-13).
 # Paths are under the second delivery tree, `All_kinds/`, beside the two tables
