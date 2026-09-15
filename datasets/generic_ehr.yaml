@@ -106,6 +106,12 @@ sources:
           One order in the fixture was written with no ordering time, the way a real
           order entered on paper and keyed in later arrives. It is a property of the
           delivery, and an order with no time is quarantined rather than dated.
+    ignored_columns:
+      # Trap 11 (plan T1.12): a delivered column no role reads. RAW_COVERAGE_DECLARED
+      # fails on it until it is named here with the reason it is left alone.
+      order_channel: >-
+        how the order was entered, electronically or verbally: a fact about the ordering
+        workflow rather than the drug, and no OMOP or MEDS field holds it
 
   administrations:
     adapter: delimited
@@ -174,6 +180,42 @@ sources:
       source_code:    {from: [component], required: true}
       text_line:      {from: [line_no]}
       value:          {from: [component_value]}
+
+  # Trap 2 (plan T1.12). A vital-sign table delivered wide, one column per sign, and
+  # declared as though it were long: a component name and a value on every row. It has
+  # neither, so the shape quarantines every row for having no component name and the
+  # source yields no event -- the state one export's emergency-department vital signs
+  # were published in, counted as present because their rows were parsed. The emptiness
+  # is declared rather than silent: SOURCE_YIELDS_EVENTS fails on this source unless
+  # `expected_empty` says why.
+  vitals_wide:
+    adapter: delimited
+    file_glob: "vitals_wide.csv"
+    options: {delimiter: ",", encoding: "utf-8", quoting: minimal}
+    shape: component_measurements
+    event_kind: measurement
+    required: false
+    fields:
+      person_id:    {from: [patient_ref], required: true}
+      encounter_id: {from: [visit_ref]}
+      event_time:   {from: [charted_at], required: true}
+      source_code:  {from: [vital_name]}
+      value:        {from: [vital_value]}
+    expected_empty: >-
+      The table is wide, one column per vital sign, and this declaration reads rows of a
+      component name and a value that it does not have. Every row is quarantined for
+      having no component name until a preparation step melts the table into such rows.
+    expected_quarantine:
+      UNPARSEABLE_VALUE:
+        max_share: 1.0
+        reason: >-
+          Every row of the wide table lacks the component name the declared shape needs,
+          so the share is the whole table by construction.
+    ignored_columns:
+      heart_rate: "a vital sign held as a column of the wide table; no shape reads a column as a component"
+      resp_rate: "a vital sign held as a column of the wide table; no shape reads a column as a component"
+      spo2_pct: "a vital sign held as a column of the wide table; no shape reads a column as a component"
+      temp_f: "a vital sign held as a column of the wide table; no shape reads a column as a component"
 
 # No anchors block: this source has no anchor concept, and the pipeline must not
 # require one.
