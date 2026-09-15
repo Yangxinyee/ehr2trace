@@ -145,6 +145,14 @@ sources:
       source_name:    {from: [analyte_label]}
       value:          {from: [result]}
       unit:           {from: [units]}
+    # Trap 4 (plan T1.12, decision D-R1). The unit column says Celsius on every
+    # temperature row and the values are Fahrenheit, the way one export wrote its body
+    # temperatures: a median of 98 under a Celsius label. The source's string stays in
+    # `unit_source`; normalization reads the values as [degF], converts them to Cel and
+    # flags UNIT_OVERRIDDEN. One reading is Celsius after all -- 37.2 among readings of
+    # 98 -- and converts to a temperature nobody has, which the plausible range withholds.
+    unit_override:
+      TEMP: "[degF]"
 
   reports:
     adapter: delimited

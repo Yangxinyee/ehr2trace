@@ -1,3 +1,4 @@
 patient_ref,visit_ref,analyte,analyte_label,observed_at,released_at,result,units
 PX-2,V-1002,WBC,White blood cell count,2021-05-29 06:00:00,2021-05-29 07:10:00,38.62,K/cu mm
 PX-4,V-2001,CREAT,"Creatinine, serum",2021-08-19 13:40:00,2021-08-19 15:00:00,0.98,mg/dL
+PX-4,V-2001,TEMP,Body temperature,2021-08-19 14:05:00,2021-08-19 14:06:00,37.2,degree Celsius

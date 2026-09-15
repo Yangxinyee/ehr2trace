@@ -5,3 +5,5 @@ PX-1,V-1001,RVSP,Right ventricular systolic pressure,2021-01-05 14:00:00,2021-01
 PX-2,V-1002,K,"Potassium, serum",2021-05-29 06:00:00,2021-05-29 07:10:00,see below,mmol/L
 PX-2,V-1002,WBC,White blood cell count,2021-05-29 06:00:00,2021-05-29 07:10:00,38.62,K/cu mm
 PX-3,V-1003,NA,"Sodium, serum",2021-02-11 18:22:00,,138,mmol/L
+PX-1,V-1001,TEMP,Body temperature,2021-01-04 10:15:00,2021-01-04 10:16:00,101.3,degree Celsius
+PX-1,V-1001,TEMP,Body temperature,2021-01-05 06:00:00,2021-01-05 06:01:00,98.6,degree Celsius

@@ -21,7 +21,8 @@ import json
 import polars as pl
 import pytest
 
-from ehr2trace.schema import QuarantineReason
+from ehr2trace.config import load_dataset_config
+from ehr2trace.schema import QualityFlag, QuarantineReason
 from tests.integration.test_generic_ehr_pipeline import CONFIG, FIXTURE
 from tests.integration.trap_builds import Build, build, edited
 
@@ -29,6 +30,19 @@ from tests.integration.trap_builds import Build, build, edited
 @pytest.fixture(scope="module")
 def after(tmp_path_factory) -> Build:
     return build(CONFIG, FIXTURE, tmp_path_factory.mktemp("generic_traps_after"))
+
+
+@pytest.fixture(scope="module")
+def before(tmp_path_factory) -> Build:
+    """The same raw files, built without the declarations that change what a build produces.
+
+    One build carries every such removal. Each touches a different source, and each test
+    below reads only its own trap's source.
+    """
+    cfg = load_dataset_config(CONFIG)
+    # Trap 4: the temperatures without their unit override.
+    cfg = edited(cfg, "results", unit_override={})
+    return build(cfg, FIXTURE, tmp_path_factory.mktemp("generic_traps_before"), publish=False)
 
 
 def _manifest(b: Build) -> dict:
@@ -66,6 +80,55 @@ def test_without_expected_empty_the_silent_source_fails(after):
     result = after.checks("SOURCE_YIELDS_EVENTS", cfg=undeclared)["SOURCE_YIELDS_EVENTS"]
     assert not result.passed
     assert result.metrics["silent"] == ["site_a/vitals_wide (3 rows parsed)"]
+
+
+# -- trap 4: Fahrenheit readings under a Celsius label -------------------------------------------
+
+
+def _temperatures(b: Build) -> dict[float, dict]:
+    rows = b.canonical().filter((pl.col("source_id") == "results") & (pl.col("source_code") == "TEMP"))
+    return {row["value_number"]: row for row in rows.iter_rows(named=True)}
+
+
+def test_a_temperature_labelled_celsius_is_normalized_as_the_fahrenheit_it_is(after):
+    """Trap 4 (P-C4, P-CU2, D-R1). Fault VALUE_IN_A_DIFFERENT_UNIT_THAN_ITS_LABEL covers the same ground on a built layer.
+
+    Every temperature row says ``degree Celsius``; two hold Fahrenheit readings and one a
+    Celsius reading. The override reads the code's values as [degF]: the Fahrenheit
+    readings convert to body temperatures, and the Celsius one converts to a temperature
+    nobody has, so it is withheld from the normalized column as implausible. The source's
+    label and value stay as written.
+    """
+    temperatures = _temperatures(after)
+    assert set(temperatures) == {98.6, 101.3, 37.2}
+    for row in temperatures.values():
+        assert (row["unit_source"], row["unit_normalized"]) == ("degree Celsius", "Cel")
+        assert str(QualityFlag.UNIT_OVERRIDDEN) in row["quality_flags"]
+    assert temperatures[98.6]["value_number_normalized"] == 37.0
+    assert temperatures[101.3]["value_number_normalized"] == 38.5
+    assert str(QualityFlag.IMPLAUSIBLE) not in temperatures[98.6]["quality_flags"]
+    misfiled = temperatures[37.2]
+    assert misfiled["value_number_normalized"] is None
+    assert str(QualityFlag.IMPLAUSIBLE) in misfiled["quality_flags"]
+
+    result = after.checks("UNIT_VALUE_PLAUSIBLE")["UNIT_VALUE_PLAUSIBLE"]
+    assert result.passed, result.detail
+
+
+def test_without_the_override_real_temperatures_are_withheld_and_the_misfiled_one_published(before):
+    """Trap 4, before: the same rows built without ``unit_override``.
+
+    Read as the Celsius their label claims, both Fahrenheit readings are implausible and
+    neither reaches the normalized column, while the one reading that really was Celsius
+    is the only temperature published. Nothing says a unit was overridden.
+    """
+    temperatures = _temperatures(before)
+    for value in (98.6, 101.3):
+        row = temperatures[value]
+        assert row["unit_normalized"] == "Cel" and row["value_number_normalized"] is None
+        assert str(QualityFlag.IMPLAUSIBLE) in row["quality_flags"]
+    assert temperatures[37.2]["value_number_normalized"] == 37.2
+    assert not any(str(QualityFlag.UNIT_OVERRIDDEN) in row["quality_flags"] for row in temperatures.values())
 
 
 # -- trap 11: a delivered column that no role reads ---------------------------------------------
