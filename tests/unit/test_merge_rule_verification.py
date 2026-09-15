@@ -252,3 +252,74 @@ def test_result_times_in_the_repeated_hour_are_placed_as_the_converter_places_th
     report = merge_disagreements(results_config(), manifest, links, con)["results"]
     assert report["ruled_disagreements"] == {"available_time": 3}
     assert report["rules_not_applied"] == {"available_time": 1}
+
+
+def range_config(rules: dict) -> DatasetConfig:
+    return DatasetConfig.model_validate({
+        "dataset_id": "range_check",
+        "identity": {"person_key": "PID"},
+        "partitions": [{"id": "p1", "dir": "p1"}, {"id": "p2", "dir": "p2"}],
+        "time": {"timezone_assumption": "UTC"},
+        "sources": {
+            "labs": {
+                "adapter": "parquet", "shape": "point_event", "event_kind": "measurement",
+                "fields": {
+                    "person_id": {"from": ["PID"]}, "event_time": {"from": ["T"]}, "source_code": {"from": ["K"]},
+                    "value": {"from": ["V"]}, "value_low": {"from": ["REF_LOW"]}, "value_high": {"from": ["REF_HIGH"]},
+                },
+                "merge_rules": rules,
+            },
+        },
+    })
+
+
+def range_layer(root: Path):
+    """Two results each reported by two batches whose laboratory reference intervals differ.
+
+    "settled" disagrees on the low end and carries the flag null_and_flag writes; "unsettled"
+    disagrees on the high end and carries nothing.
+    """
+    source = root / "labs.parquet"
+    pl.DataFrame({
+        "source_row_id": ["r1", "r2", "r3", "r4"],
+        "col__PID": ["A"] * 4, "col__T": ["2020-01-01 10:00:00"] * 4, "col__K": ["NA"] * 4, "col__V": ["138"] * 4,
+        "col__REF_LOW": ["135", "136", "135", "135"],
+        "col__REF_HIGH": ["145", "145", "145", "146"],
+    }).write_parquet(source)
+    links = root / "event_source.parquet"
+    pl.DataFrame({"event_id": ["settled", "settled", "unsettled", "unsettled"],
+                  "source_row_id": ["r1", "r2", "r3", "r4"], "partition_id": ["p1", "p2"] * 2}).write_parquet(links)
+    events = root / "events.parquet"
+    pl.DataFrame(
+        {"event_id": ["settled", "unsettled"], "source_id": ["labs"] * 2, "event_kind": ["measurement"] * 2,
+         "quality_flags": [["VALUE_CONFLICT"], []]},
+        schema={"event_id": pl.String, "source_id": pl.String, "event_kind": pl.String, "quality_flags": pl.List(pl.String)},
+    ).write_parquet(events)
+    con = duckdb.connect()
+    con.execute(f"CREATE VIEW evt AS SELECT * FROM read_parquet('{events}')")
+    manifest = {"inputs": [{"source_id": "labs", "partition_id": "p1", "output_path": str(source), "rows_parsed": 4}]}
+    return manifest, links, con
+
+
+def test_a_rule_keyed_by_the_reference_range_field_settles_the_range_roles_cells(tmp_path: Path):
+    manifest, links, con = range_layer(tmp_path)
+    rules = {"range_low": "null_and_flag", "range_high": "null_and_flag"}
+    report = merge_disagreements(range_config(rules), manifest, links, con)["labs"]
+
+    assert report["ruled"] == ["range_high", "range_low"]
+    assert report["ruled_disagreements"] == {"range_high": 1, "range_low": 1}
+    # The low end was settled and flagged; the high end reached the merge and shows nothing.
+    assert report["rules_not_applied"] == {"range_high": 1}
+    # A ruled role is never also an unruled disagreement.
+    assert "value_low" not in report["disagreements"] and "value_high" not in report["disagreements"]
+
+
+def test_a_rule_keyed_by_the_ranged_result_field_is_not_read_from_the_reference_range(tmp_path: Path):
+    """``value_low`` as a field is a result written as a range, not the laboratory's interval."""
+    manifest, links, con = range_layer(tmp_path)
+    report = merge_disagreements(range_config({"value_low": "null_and_flag"}), manifest, links, con)["labs"]
+
+    assert report["rules_unverifiable"] == ["value_low"]
+    assert "value_low" not in report.get("ruled_disagreements", {})
+    # The reference range's other end has no rule, so its disagreement is still reported.
+    assert report["disagreements"] == {"value_high": 1}

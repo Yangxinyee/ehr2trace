@@ -102,6 +102,10 @@ READ_COLUMNS: dict[str, tuple[str, ...]] = {
         # Named by the merge-disagreement helper as the role a source may keep out of
         # its identity; loaded so the whitelist stays complete.
         "encounter_id",
+        # Named by the merge-rule map: the fields a reference-range rule is keyed by, and
+        # the ranged-result fields no rule may be read from; two float columns each,
+        # loaded so the whitelist stays complete.
+        "range_low", "range_high", "value_low", "value_high",
     ),
     "anchors": ("subject_id", "anchor_date", "anchor_time", "anchor_time_known", "partition_id"),
     "cohort_membership": ("subject_id", "partition_id", "membership_label", "label_scope"),
@@ -1907,6 +1911,16 @@ MERGEABLE_SHAPES = frozenset({"point_event", "visit"})
 #: Canonical field names a merge rule may be keyed on, and the role they come from.
 FIELD_TO_ROLE = {f"{role}_source": role for role in ("status", "route", "dose", "rate", "unit")}
 FIELD_TO_ROLE["value_text"] = "text"
+#: A result's laboratory reference interval arrives through the ``value_low`` and
+#: ``value_high`` roles and is stored in the canonical ``range_low`` and ``range_high``
+#: fields, so a rule keyed by either field settles that role's cells.
+FIELD_TO_ROLE["range_low"] = "value_low"
+FIELD_TO_ROLE["range_high"] = "value_high"
+#: Canonical fields no role's cell holds as written. ``value_low`` and ``value_high`` as
+#: fields are a result written as a range, parsed out of the value, which every row of one
+#: event shares; a rule keyed by them cannot be checked against raw cells, and must not be
+#: checked against the reference-range roles that happen to share their names.
+FIELDS_WITHOUT_A_ROLE = frozenset({"value_low", "value_high"})
 
 DRUG_KINDS = (str(EventKind.drug_order), str(EventKind.drug_admin), str(EventKind.drug_dispense))
 VISIT_KINDS = (str(EventKind.visit), str(EventKind.visit_detail))
@@ -2360,6 +2374,10 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
         ruled_names: set[str] = set()
         unverifiable: list[str] = []
         for key, rule in spec.merge_rules.items():
+            if key in FIELDS_WITHOUT_A_ROLE:
+                ruled_names.add(key.strip().lower())
+                unverifiable.append(key)
+                continue
             role = FIELD_TO_ROLE.get(key, key)
             ruled_names |= {key.strip().lower(), role.strip().lower()}
             if role in role_columns:
