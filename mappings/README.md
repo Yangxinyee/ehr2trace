@@ -19,6 +19,25 @@ Columns are the same in every file:
 source_string,code_system,concept_id,concept_name,domain_id,vocabulary_id,mapping_version,decided_by,decided_on,note
 ```
 
+## How `compile` merges
+
+`review/decisions.csv` is a log. A decision stays in it after the row it produced has
+been corrected, and the correction may have come from another work root: one row serves
+every dataset that writes the same string. Compiling must not undo the correction, so
+each accepted decision is compared by `decided_on` with the row its term already has, in
+whichever file holds it:
+
+| The decision was made | `compile` |
+|---|---|
+| on a later day than the row | replaces the row |
+| on an earlier day | leaves the row and reports the decision as superseded |
+| the same day, and differs | leaves the row, reports a conflict and exits non-zero; `--replace <decision id>` applies it |
+
+To restore a decision that a later row replaced, record it again, dated the day it is
+decided. An accepted decision without a reviewer and a `YYYY-MM-DD` date is not compiled.
+`compile` prints every row it adds, replaces or declines to replace, and rewrites a file
+only when a row in it changed.
+
 ## Type concepts
 
 `type_concepts.csv` uses `TYPE_CONCEPT` as its `code_system` and one of these keys as

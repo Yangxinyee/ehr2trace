@@ -24,10 +24,14 @@ from __future__ import annotations
 
 import csv
 import json
+import re
+from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Collection, Sequence
 
 from ehr2trace.config import DatasetConfig
+from ehr2trace.errors import Ehr2TraceError
 from ehr2trace.hashing import sha256_hex
 from ehr2trace.paths import WorkLayout
 from ehr2trace.terminology import normalize_term
@@ -164,20 +168,83 @@ def read_decisions(layout: WorkLayout) -> dict[str, dict[str, str]]:
         return {row["id"]: row for row in csv.DictReader(fh) if row.get("id")}
 
 
-def compile_decisions(layout: WorkLayout, mappings_dir: Path) -> int:
+#: What compile did with one accepted decision.
+ADDED = "added"  # the term had no row
+REPLACED = "replaced"  # decided on a later day than the row it replaced
+UNCHANGED = "unchanged"  # the row already says this
+SUPERSEDED = "superseded"  # the row was decided on a later day, so the row stands
+CONFLICTING = "conflicting"  # decided the same day as a row that says something else
+INCOMPLETE = "incomplete"  # no reviewer, no date or no term: nothing can be written
+OUTCOMES = (ADDED, REPLACED, UNCHANGED, SUPERSEDED, CONFLICTING, INCOMPLETE)
+
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+class CompileOverrideError(Ehr2TraceError):
+    """``replace`` named a decision that has no same-day conflict to settle."""
+
+
+@dataclass(frozen=True)
+class CompiledDecision:
+    """One accepted decision, the row it writes, and what compile did with it."""
+
+    decision_id: str
+    outcome: str
+    #: the mapping file, without ``.csv``, that holds the term's row or would hold it
+    file: str
+    row: dict[str, str]
+    #: the row the decision was measured against, if its term had one
+    standing: dict[str, str] | None = None
+    #: a same-day conflict that a person settled by naming the decision in ``replace``
+    confirmed: bool = False
+
+
+@dataclass
+class CompileResult:
+    decisions: list[CompiledDecision] = field(default_factory=list)
+    written: list[Path] = field(default_factory=list)
+
+    def of(self, outcome: str) -> list[CompiledDecision]:
+        return [d for d in self.decisions if d.outcome == outcome]
+
+    @property
+    def complete(self) -> bool:
+        """Every accepted decision is in mappings/ or was superseded by a later row."""
+        return not self.of(CONFLICTING) and not self.of(INCOMPLETE)
+
+
+def compile_decisions(
+    layout: WorkLayout, mappings_dir: Path, *, replace: Collection[str] = ()
+) -> CompileResult:
     """decisions.csv -> mappings/<domain>.csv.
 
     Only accepted decisions with a concept id are compiled. An undecided or deferred
     item stays undecided: it must not reach a published layer, and there is no path
     here that turns a proposal into a mapping without a person saying so.
+
+    decisions.csv is a log, not a snapshot. A decision stays in it after its row has
+    been corrected, and the correction may come from another work root, since one row
+    serves every dataset that writes the same string. Replaying the log must not undo
+    the correction, so a decision replaces a row only if it was decided on a later day.
+    An older decision is superseded and changes nothing. A same-day one that differs is
+    a conflict -- the dates cannot say which came second -- and is applied only if its
+    id is in ``replace``: a person saying so, one row at a time.
+
+    An accepted decision without a reviewer and a YYYY-MM-DD date is not compiled. It
+    could only write a row that cannot say who approved it and when.
+
+    Every outcome is returned, and a file is rewritten only if one of its rows changed.
     """
     pending = {row["id"]: row for row in read_pending(layout)}
-    decisions = read_decisions(layout)
-    mappings_dir.mkdir(parents=True, exist_ok=True)
+    files = _read_mapping_files(mappings_dir)
+    # The registry reads every file under one key, so a decision meets its term's row
+    # wherever that row is, not only in the file the decision's domain would pick.
+    where = {key: name for name, rows in files.items() for key in rows}
+    confirmed = set(replace)
+    result = CompileResult()
+    changed: set[str] = set()
 
-    by_domain: dict[str, list[dict[str, str]]] = {}
-    written = 0
-    for item_key, decision in sorted(decisions.items()):
+    for item_key, decision in sorted(read_decisions(layout).items()):
         if decision.get("decision", "").strip().lower() != "accept":
             continue
         concept_id = (decision.get("concept_id") or "").strip()
@@ -185,37 +252,164 @@ def compile_decisions(layout: WorkLayout, mappings_dir: Path) -> int:
             continue
         source = pending.get(item_key, {})
         domain = (decision.get("domain_id") or source.get("event_kind") or "misc").strip().lower()
-        by_domain.setdefault(domain or "misc", []).append(
-            {
-                "source_string": source.get("source_string", ""),
-                "code_system": source.get("code_system", ""),
-                "concept_id": concept_id,
-                "concept_name": decision.get("concept_name", ""),
-                "domain_id": decision.get("domain_id", ""),
-                "vocabulary_id": decision.get("vocabulary_id", ""),
-                "mapping_version": "1",
-                "decided_by": decision.get("reviewer", ""),
-                "decided_on": decision.get("decided_on", ""),
-                "note": decision.get("note", ""),
-            }
-        )
-        written += 1
+        row = {
+            "source_string": source.get("source_string", ""),
+            "code_system": source.get("code_system", ""),
+            "concept_id": concept_id,
+            "concept_name": decision.get("concept_name", ""),
+            "domain_id": decision.get("domain_id", ""),
+            "vocabulary_id": decision.get("vocabulary_id", ""),
+            "mapping_version": "1",
+            "decided_by": decision.get("reviewer", ""),
+            "decided_on": decision.get("decided_on", ""),
+            "note": decision.get("note", ""),
+        }
+        key = _mapping_key(row)
+        held_in = where.get(key)
+        standing = files[held_in][key] if held_in else None
+        outcome = _outcome(row, standing)
+        settled = outcome == CONFLICTING and item_key in confirmed
+        if settled:
+            outcome = REPLACED
+        # A replacement stays in the file that holds the row; only a new term goes by domain.
+        name = held_in or domain or "misc"
+        if outcome in (ADDED, REPLACED):
+            files.setdefault(name, {})[key] = row
+            where[key] = name
+            changed.add(name)
+        result.decisions.append(CompiledDecision(item_key, outcome, name, row, standing, settled))
 
-    for domain, rows in sorted(by_domain.items()):
-        path = mappings_dir / f"{domain}.csv"
-        merged: dict[tuple[str, str], dict[str, str]] = {}
-        if path.exists():
-            with open(path, newline="", encoding="utf-8") as fh:
-                for row in csv.DictReader(fh):
-                    merged[(row.get("code_system", ""), normalize_term(row.get("source_string")))] = row
-        for row in rows:
-            merged[(row["code_system"], normalize_term(row["source_string"]))] = row
-        with open(path, "w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=MAPPING_FIELDS)
-            writer.writeheader()
-            for key in sorted(merged):
-                writer.writerow({k: merged[key].get(k, "") for k in MAPPING_FIELDS})
-    return written
+    unsettled = confirmed - {d.decision_id for d in result.decisions if d.confirmed}
+    if unsettled:
+        found = {d.decision_id: d.outcome for d in result.decisions}
+        raise CompileOverrideError(
+            "nothing was written: replace settles only a decision that conflicts with a row "
+            "decided the same day, and "
+            + "; ".join(f"{i} is {found.get(i, 'not an accepted decision')}" for i in sorted(unsettled))
+            + ". A decision older than its row is restored by recording it again, dated the "
+            "day it is decided."
+        )
+
+    for name in sorted(changed):
+        path = mappings_dir / f"{name}.csv"
+        _write_mapping_file(path, files[name])
+        result.written.append(path)
+    return result
+
+
+def describe_compile(result: CompileResult) -> list[str]:
+    """What compile did, one line per row it changed or declined to change.
+
+    Unchanged rows are only counted. Everything else is listed with both sides, because
+    a diff of the file shows it poorly: the row count does not move, and a rewritten
+    file is re-sorted.
+    """
+    counts = ", ".join(f"{len(result.of(outcome))} {outcome}" for outcome in OUTCOMES)
+    lines = [f"accepted decisions with a concept id: {len(result.decisions)} ({counts})"]
+    for outcome in OUTCOMES:
+        if outcome != UNCHANGED:
+            lines.extend(f"{outcome}: {_describe(item)}" for item in result.of(outcome))
+    names = ", ".join(path.name for path in result.written)
+    lines.append(f"wrote {names}" if names else "no mapping file changed")
+    return lines
+
+
+def _outcome(row: dict[str, str], standing: dict[str, str] | None) -> str:
+    """Where an accepted decision stands against the row its term already has, if any."""
+    if _missing(row):
+        return INCOMPLETE
+    if standing is None:
+        return ADDED
+    if not _differing_fields(standing, row):
+        return UNCHANGED
+    decided, standing_decided = _iso_date(row["decided_on"]), _iso_date(standing.get("decided_on"))
+    if standing_decided is None or decided == standing_decided:
+        return CONFLICTING
+    return REPLACED if decided > standing_decided else SUPERSEDED
+
+
+def _missing(row: dict[str, str]) -> list[str]:
+    """What an accepted decision lacks to write a row that says who approved it and when."""
+    missing = []
+    if not normalize_term(row.get("source_string")):
+        missing.append("a pending item naming its term")
+    if not (row.get("decided_by") or "").strip():
+        missing.append("a reviewer")
+    if _iso_date(row.get("decided_on")) is None:
+        missing.append("a YYYY-MM-DD decided_on")
+    return missing
+
+
+def _iso_date(text: str | None) -> date | None:
+    """``decided_on`` as a date, if it is written the way every row writes it."""
+    text = (text or "").strip()
+    if not _ISO_DATE.fullmatch(text):
+        return None
+    try:
+        return date.fromisoformat(text)
+    except ValueError:  # the right shape, but not a day: 2026-02-30
+        return None
+
+
+def _differing_fields(standing: dict[str, str], row: dict[str, str]) -> list[str]:
+    """The fields a decision's row changes. The source string's spelling is not one of
+    them: the key already matched, and two spellings of one key are one term."""
+    return [
+        name
+        for name in MAPPING_FIELDS
+        if name != "source_string" and (standing.get(name) or "").strip() != (row.get(name) or "").strip()
+    ]
+
+
+def _mapping_key(row: dict[str, str]) -> tuple[str, str]:
+    """The key the registry reads a row under (``MappingRegistry.load``)."""
+    return ((row.get("code_system") or "").strip(), normalize_term(row.get("source_string")))
+
+
+def _read_mapping_files(mappings_dir: Path) -> dict[str, dict[tuple[str, str], dict[str, str]]]:
+    """Every mapping file by name without ``.csv``, its rows keyed as the registry keys them."""
+    files: dict[str, dict[tuple[str, str], dict[str, str]]] = {}
+    if not mappings_dir.is_dir():
+        return files
+    for path in sorted(mappings_dir.glob("*.csv")):
+        with open(path, newline="", encoding="utf-8") as fh:
+            files[path.stem] = {_mapping_key(row): row for row in csv.DictReader(fh)}
+    return files
+
+
+def _write_mapping_file(path: Path, rows: dict[tuple[str, str], dict[str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".csv.partial")
+    with open(tmp, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=MAPPING_FIELDS)
+        writer.writeheader()
+        for key in sorted(rows):
+            writer.writerow({k: rows[key].get(k, "") for k in MAPPING_FIELDS})
+    tmp.replace(path)
+
+
+def _describe(item: CompiledDecision) -> str:
+    term = f"{item.file}.csv {item.row['code_system']}/{item.row['source_string']} [{item.decision_id}]"
+    decision = _describe_row(item.row)
+    if item.outcome == INCOMPLETE:
+        return f"{term}: {decision} lacks {', '.join(_missing(item.row))}"
+    if item.standing is None:
+        return f"{term}: {decision}"
+    row = _describe_row(item.standing)
+    differs = ", ".join(_differing_fields(item.standing, item.row))
+    if item.outcome == REPLACED:
+        verb = "confirmed over" if item.confirmed else "replaces"
+        return f"{term}: {decision} {verb} {row}; differs in {differs}"
+    if item.outcome == SUPERSEDED:
+        return f"{term}: {decision} is older than {row}; differs in {differs}"
+    if _iso_date(item.standing.get("decided_on")) is None:
+        return f"{term}: {decision} cannot be ordered against the undated {row}; differs in {differs}"
+    return f"{term}: {decision} was decided the same day as {row}; differs in {differs}"
+
+
+def _describe_row(row: dict[str, str]) -> str:
+    concept = " ".join(part for part in (row.get("concept_id"), row.get("concept_name")) if part)
+    return f"{concept} ({row.get('decided_by') or 'no reviewer'}, {row.get('decided_on') or 'undated'})"
 
 
 def undecided_ids(layout: WorkLayout) -> set[str]:

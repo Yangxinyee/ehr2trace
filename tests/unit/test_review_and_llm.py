@@ -14,8 +14,16 @@ import pytest
 from ehr2trace.llm import CandidateRanking, LlmCall, LlmClient, is_safe_sample, load_template
 from ehr2trace.paths import WorkLayout
 from ehr2trace.review import (
+    ADDED,
+    CONFLICTING,
+    INCOMPLETE,
     PENDING_FIELDS,
+    REPLACED,
+    SUPERSEDED,
+    UNCHANGED,
+    CompileOverrideError,
     compile_decisions,
+    describe_compile,
     item_id,
     read_decisions,
     read_pending,
@@ -142,7 +150,8 @@ def test_only_accepted_decisions_compile_into_mappings(layout: WorkLayout, tmp_p
     # J45.909 is left undecided entirely
 
     mappings = tmp_path / "mappings"
-    assert compile_decisions(layout, mappings) == 1
+    result = compile_decisions(layout, mappings)
+    assert [(d.decision_id, d.outcome) for d in result.decisions] == [(rows["I50.9"], ADDED)]
     compiled = list(csv.DictReader((mappings / "condition.csv").open(encoding="utf-8")))
     assert [r["source_string"] for r in compiled] == ["I50.9"]
     assert compiled[0]["decided_by"] == "clinician"
@@ -151,7 +160,7 @@ def test_only_accepted_decisions_compile_into_mappings(layout: WorkLayout, tmp_p
 def test_an_accepted_decision_without_a_concept_id_is_not_compiled(layout: WorkLayout, tmp_path: Path):
     write_pending(layout, [proposal("I50.9")])
     write_decision(layout, read_pending(layout)[0]["id"], decision="accept", concept_id="")
-    assert compile_decisions(layout, tmp_path / "mappings") == 0
+    assert compile_decisions(layout, tmp_path / "mappings").decisions == []
 
 
 def test_undecided_items_are_reported_as_such(layout: WorkLayout):
@@ -164,13 +173,132 @@ def test_undecided_items_are_reported_as_such(layout: WorkLayout):
 def test_compiled_mappings_are_what_the_registry_reads_back(layout: WorkLayout, tmp_path: Path):
     write_pending(layout, [proposal("I50.9")])
     write_decision(layout, read_pending(layout)[0]["id"], decision="accept", concept_id="316139",
-                   concept_name="Heart failure", domain_id="Condition", vocabulary_id="SNOMED")
+                   concept_name="Heart failure", domain_id="Condition", vocabulary_id="SNOMED",
+                   reviewer="clinician", decided_on="2026-08-20")
     mappings = tmp_path / "mappings"
     compile_decisions(layout, mappings)
     registry = MappingRegistry.load(mappings)
     match = registry.get("ICD10CM", "I50.9")
     assert match is not None and match.concept_id == 316139
     assert registry.get("ICD10CM", "E11.9") is None
+
+
+# -- recompiling a log ----------------------------------------------------------
+#
+# decisions.csv keeps every decision a work root has made, including ones corrected
+# since, and one mapping row serves every dataset that writes the same string. So
+# compile has to order a decision against the row it meets, not replay the file.
+
+
+def decide(layout: WorkLayout, source_string: str, concept_id: str, decided_on: str, **fields) -> str:
+    """Propose one term in a work root and accept a concept for it; returns the item id."""
+    write_pending(layout, [proposal(source_string)])
+    item = next(r["id"] for r in read_pending(layout) if r["source_string"] == source_string)
+    accepted = {"decision": "accept", "concept_id": concept_id, "concept_name": f"concept {concept_id}",
+                "domain_id": "Condition", "vocabulary_id": "SNOMED", "reviewer": "clinician",
+                "decided_on": decided_on}
+    write_decision(layout, item, **{**accepted, **fields})
+    return item
+
+
+def another_work_root(tmp_path: Path) -> WorkLayout:
+    """A second dataset whose data writes some of the same strings."""
+    return WorkLayout(root=tmp_path / "work" / "u", dataset_id="u").ensure()
+
+
+def test_a_stale_decision_cannot_revert_a_newer_row(layout: WorkLayout, tmp_path: Path):
+    """Recompiling an older work root used to put back a concept a later decision replaced.
+
+    Nothing showed it: the row count stayed the same and the change sat in a re-sorted file.
+    """
+    mappings = tmp_path / "mappings"
+    stale = decide(layout, "I50.9", "316139", "2026-09-02")
+    compile_decisions(layout, mappings)
+    other = another_work_root(tmp_path)
+    decide(other, "I50.9", "319835", "2026-09-11", note="the first concept was retired")
+    assert [d.outcome for d in compile_decisions(other, mappings).decisions] == [REPLACED]
+
+    before = (mappings / "condition.csv").read_bytes()
+    replay = compile_decisions(layout, mappings)
+
+    assert [(d.decision_id, d.outcome) for d in replay.decisions] == [(stale, SUPERSEDED)]
+    assert (mappings / "condition.csv").read_bytes() == before, "the newer row was rewritten"
+    assert replay.written == []
+    assert MappingRegistry.load(mappings).get("ICD10CM", "I50.9").concept_id == 319835
+    assert replay.complete, "a superseded decision is history, not unfinished review"
+    report = "\n".join(describe_compile(replay))
+    assert "superseded" in report and "316139" in report and "319835" in report, report
+
+
+def test_recompiling_an_unchanged_log_rewrites_no_file(layout: WorkLayout, tmp_path: Path):
+    """A recompile that changes nothing must look like it: no rewritten, re-sorted file to read."""
+    mappings = tmp_path / "mappings"
+    decide(layout, "I50.9", "316139", "2026-09-02")
+    assert compile_decisions(layout, mappings).written == [mappings / "condition.csv"]
+    again = compile_decisions(layout, mappings)
+    assert [d.outcome for d in again.decisions] == [UNCHANGED]
+    assert again.written == []
+
+
+def test_a_same_day_disagreement_waits_for_a_person_to_name_it(layout: WorkLayout, tmp_path: Path):
+    """Two decisions dated the same day cannot say which came second, so whichever work
+    root compiles last must not be what decides. The row stands until someone chooses."""
+    mappings = tmp_path / "mappings"
+    decide(layout, "I50.9", "316139", "2026-09-13")
+    compile_decisions(layout, mappings)
+    other = another_work_root(tmp_path)
+    item = decide(other, "I50.9", "319835", "2026-09-13")
+
+    refused = compile_decisions(other, mappings)
+    assert [d.outcome for d in refused.decisions] == [CONFLICTING]
+    assert not refused.complete and refused.written == []
+    assert MappingRegistry.load(mappings).get("ICD10CM", "I50.9").concept_id == 316139
+
+    confirmed = compile_decisions(other, mappings, replace={item})
+    assert [(d.outcome, d.confirmed) for d in confirmed.decisions] == [(REPLACED, True)]
+    assert MappingRegistry.load(mappings).get("ICD10CM", "I50.9").concept_id == 319835
+
+
+def test_naming_a_decision_with_no_conflict_to_settle_writes_nothing(layout: WorkLayout, tmp_path: Path):
+    """Naming a superseded decision must not restore it -- that would date the reversal to
+    the old decision's day -- and a mistyped id must not pass unnoticed."""
+    mappings = tmp_path / "mappings"
+    other = another_work_root(tmp_path)
+    decide(other, "I50.9", "319835", "2026-09-11")
+    compile_decisions(other, mappings)
+    stale = decide(layout, "I50.9", "316139", "2026-09-02")
+    decide(layout, "E11.9", "201826", "2026-09-02")  # a new term the same compile would add
+    before = (mappings / "condition.csv").read_bytes()
+
+    for named in ({stale}, {"0000000000000000"}):
+        with pytest.raises(CompileOverrideError):
+            compile_decisions(layout, mappings, replace=named)
+        assert (mappings / "condition.csv").read_bytes() == before
+
+
+@pytest.mark.parametrize("gap", [{"reviewer": ""}, {"decided_on": ""}, {"decided_on": "13/09/2026"}])
+def test_a_decision_that_cannot_say_who_approved_it_and_when_is_not_compiled(
+    layout: WorkLayout, tmp_path: Path, gap: dict
+):
+    """Every row in mappings/ records who approved it and when, and the date is what orders it."""
+    item = decide(layout, "I50.9", "316139", **{"decided_on": "2026-09-02", **gap})
+    result = compile_decisions(layout, tmp_path / "mappings")
+    assert [(d.decision_id, d.outcome) for d in result.decisions] == [(item, INCOMPLETE)]
+    assert not result.complete
+    assert not (tmp_path / "mappings" / "condition.csv").exists()
+
+
+def test_a_stale_decision_meets_its_row_in_whichever_file_holds_it(layout: WorkLayout, tmp_path: Path):
+    """The registry reads every file under one key. A stale decision that names another
+    domain must not get past the dates by writing a second row for the term elsewhere."""
+    mappings = tmp_path / "mappings"
+    other = another_work_root(tmp_path)
+    decide(other, "I50.9", "319835", "2026-09-11")
+    compile_decisions(other, mappings)
+    decide(layout, "I50.9", "316139", "2026-09-02", domain_id="Observation")
+
+    assert [d.outcome for d in compile_decisions(layout, mappings).decisions] == [SUPERSEDED]
+    assert not (mappings / "observation.csv").exists()
 
 
 # -- the model boundary ---------------------------------------------------------
