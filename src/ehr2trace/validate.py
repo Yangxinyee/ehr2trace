@@ -4098,6 +4098,15 @@ def _code_description_representative(l: Layers) -> CheckResult:
     SOURCE rule is enforced on a MEDS layer written under extension column version 2 and
     reported on an older one, whose publisher did not yet promise it. Skips when MEDS is
     not built.
+
+    Names are ranked the way the publisher ranks them: each name counted as written,
+    death events left out (they carry the reserved death code), most occurrences first
+    and ties broken alphabetically. A source code's name is counted over every spelling
+    that normalizes to it; where that disagrees with the description, the count is taken
+    again over only the spellings the MEDS rows actually file under the code, since a
+    spelling the vocabulary mapped belongs to an OMOP code instead. The metrics count the
+    codes that tie on their most frequent name and the codes that only agree once the
+    mapped spellings are left out.
     """
     import json
 
@@ -4122,16 +4131,21 @@ def _code_description_representative(l: Layers) -> CheckResult:
     with _engine(l) as con:
         rows = con.execute(
             "SELECT source_id, source_code, source_name, count(*) FROM evt "
-            "WHERE source_code IS NOT NULL GROUP BY 1, 2, 3"
+            f"WHERE source_name IS NOT NULL AND event_kind IS DISTINCT FROM '{EventKind.death}' GROUP BY 1, 2, 3"
         ).fetchall()
     from collections import Counter
 
+    #: names per (source, normalized code), and per (source, spelling) for the second count
     names: dict[tuple[str, str], Counter] = {}
+    by_spelling: dict[tuple[str, str | None], Counter] = {}
     for source_id, code, name, n in rows:
         key = (str(source_id), normalize_term(code) or "unspecified")
-        counter = names.setdefault(key, Counter())
-        if name is not None and str(name).strip():
-            counter[str(name).strip()] += int(n)
+        names.setdefault(key, Counter())[str(name)] += int(n)
+        by_spelling.setdefault((str(source_id), None if code is None else str(code)), Counter())[str(name)] += int(n)
+
+    def representative(counter: Counter) -> str:
+        """The publisher's choice: most occurrences, then the alphabetically first name."""
+        return min(counter.items(), key=lambda item: (-item[1], item[0]))[0]
 
     def fold(text: str | None) -> str:
         return " ".join(str(text or "").split()).lower()
@@ -4160,6 +4174,9 @@ def _code_description_representative(l: Layers) -> CheckResult:
 
     wrong_omop: list[str] = []
     wrong_source: list[str] = []
+    #: SOURCE codes whose description differs from the name counted over every spelling
+    recount: dict[str, tuple[str, str]] = {}
+    ties = 0
     examined = 0
     for row in codes.iter_rows(named=True):
         code, description = str(row["code"]), row.get("description")
@@ -4183,10 +4200,30 @@ def _code_description_representative(l: Layers) -> CheckResult:
             if not fold(description):
                 wrong_source.append(f"{code}: empty description")
             continue
-        commonest = counter.most_common(1)[0][0]
+        top = max(counter.values())
+        ties += sum(1 for n in counter.values() if n == top) > 1
+        commonest = representative(counter)
         if fold(description) != fold(commonest):
-            wrong_source.append(f"{code}: described as {str(description)[:40]!r}, commonest name {commonest[:40]!r}")
+            recount[code] = (parts[1], str(description))
     enforced_source = version >= 2
+    # The second count, only for the codes that disagree: which spellings the rows file
+    # under each code, from the published shards, and the names of those spellings alone.
+    resolved_by_published_spellings = 0
+    if recount:
+        spellings: dict[str, set[str | None]] = {}
+        wanted = ", ".join(_sql_str(code) for code in sorted(recount))
+        for code, spelling in _meds_query(files, f"SELECT DISTINCT code, source_code FROM meds WHERE code IN ({wanted})"):
+            spellings.setdefault(str(code), set()).add(None if spelling is None else str(spelling))
+        for code, (source_id, description) in sorted(recount.items()):
+            filed = Counter()
+            for spelling in spellings.get(code, ()):
+                filed.update(by_spelling.get((source_id, spelling), Counter()))
+            if filed and fold(description) == fold(representative(filed)):
+                resolved_by_published_spellings += 1
+                continue
+            counter = filed or names.get((source_id, code.split("/", 2)[2]), Counter())
+            commonest = representative(counter) if counter else ""
+            wrong_source.append(f"{code}: described as {description[:40]!r}, commonest name {commonest[:40]!r}")
     failures = wrong_omop + (wrong_source if enforced_source else [])
     return CheckResult(
         "",
@@ -4198,7 +4235,10 @@ def _code_description_representative(l: Layers) -> CheckResult:
         if not failures
         else f"{len(failures):,} of {examined:,} code descriptions are not representative, e.g. {failures[:3]}",
         {"codes": examined, "wrong_omop": len(wrong_omop), "wrong_source": len(wrong_source),
-         "source_rule_enforced": enforced_source, "vocabulary_used": vocabulary_used, "examples": failures[:10]},
+         "source_rule_enforced": enforced_source, "vocabulary_used": vocabulary_used,
+         "source_codes_tied_on_most_frequent_name": ties,
+         "source_codes_agreeing_once_mapped_spellings_are_left_out": resolved_by_published_spellings,
+         "examples": failures[:10]},
     )
 
 
