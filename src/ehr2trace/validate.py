@@ -2226,6 +2226,64 @@ def _normalized_cell_sql(column: str, null_literals: Sequence[str]) -> str:
     )
 
 
+def converter_utc_lookup(con, table: str, column: str, lookup: str, cfg: DatasetConfig) -> int:
+    """Raw local times of ``table.column`` that fall on a day the dataset's zone changes its
+    offset, each with the UTC instant the converter gives it; returns how many.
+
+    The converter places a wall time with ``timeutil.to_utc`` -- zoneinfo, fold=0 -- so an
+    ambiguous time is its first occurrence and a skipped one keeps the earlier offset. The
+    days are found with the same zone, one year at a time over the years the column holds;
+    the times are read once each, converted in Python, and handed back as a table. Nothing
+    but the timestamps is read.
+    """
+    from datetime import date, datetime, time, timedelta
+
+    import pyarrow as pa
+
+    from ehr2trace.timeutil import TimeContext, to_utc
+
+    ctx = TimeContext(formats=tuple(cfg.time.formats), null_literals=tuple(cfg.time.null_literals),
+                      timezone_name=cfg.time.timezone_assumption)
+    con.execute(f"CREATE OR REPLACE TEMP TABLE {lookup} (raw VARCHAR, utc TIMESTAMP)")
+    zone = ctx.zone
+    if zone is None:
+        return 0
+    years = sorted(int(y) for (y,) in con.execute(
+        f"SELECT DISTINCT year(try_cast({column} AS TIMESTAMP)) FROM {table} WHERE try_cast({column} AS TIMESTAMP) IS NOT NULL"
+    ).fetchall() if y is not None and 1 <= int(y) <= 9998)
+    days: list[date] = []
+    for year in years:
+        day = date(year, 1, 1)
+        while day.year == year:
+            following = day + timedelta(days=1)
+            if zone.utcoffset(datetime.combine(day, time())) != zone.utcoffset(datetime.combine(following, time())):
+                days.append(day)
+            day = following
+    if not days:
+        return 0
+    con.execute("CREATE OR REPLACE TEMP TABLE offset_change_days (d DATE)")
+    con.executemany("INSERT INTO offset_change_days VALUES (?)", [(d,) for d in days])
+    raws: list[str] = []
+    instants: list[datetime] = []
+    for (raw,) in con.execute(
+        f"SELECT DISTINCT {column} FROM {table} "
+        f"WHERE CAST(try_cast({column} AS TIMESTAMP) AS DATE) IN (SELECT d FROM offset_change_days)"
+    ).fetchall():
+        try:
+            naive = datetime.fromisoformat(str(raw))
+        except ValueError:
+            continue
+        utc, _flags = to_utc(naive, ctx)
+        if utc is not None:
+            raws.append(str(raw))
+            instants.append(utc)
+    if raws:
+        con.register("converter_utc_rows", pa.table({"raw": raws, "utc": pa.array(instants, pa.timestamp("us"))}))
+        con.execute(f"INSERT INTO {lookup} SELECT raw, utc FROM converter_utc_rows")
+        con.unregister("converter_utc_rows")
+    return len(raws)
+
+
 def source_event_kinds(spec) -> set[str]:
     """The event kinds a source declares its rows become: its kind, or every kind its switch can name."""
     kinds: set[str] = set()
@@ -2350,6 +2408,8 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
         verifications: list[tuple[str, str]] = []
         zone = cfg.time.timezone_assumption
         needs_event_time = False
+        #: (column, lookup table) for each availability rule judged in a zone with offset changes
+        converter_lookups: list[tuple[str, str]] = []
         for offset, (key, (_sql, rule)) in enumerate(ruled.items()):
             i = len(expressions) + offset
             d = _sql_ident(f"d{i}")
@@ -2367,10 +2427,24 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
                 # rightly wrote nothing. The raw cell is local time in the dataset's zone, the
                 # event time naive UTC. One aggregate per group, and one more event column.
                 latest = _sql_ident(f"x{i}")
-                minimums.append(f"max(try_cast({_sql_ident(f'f{i}')} AS TIMESTAMP)) AS {latest}")
-                latest_utc = (f"timezone('UTC', timezone({_sql_str(zone)}, {latest}))"
-                              if zone and zone.upper() != "UTC" else latest)
-                reached = f" AND (e.event_time IS NULL OR {latest_utc} > e.event_time)"
+                column = _sql_ident(f"f{i}")
+                if zone and zone.upper() != "UTC":
+                    # On a day the zone changes its offset, a wall time can name two instants
+                    # (the repeated hour) or none (the skipped one), and the query engine's
+                    # time library resolves those differently from the converter, which uses
+                    # zoneinfo with fold=0. Raw times on those days are placed by the
+                    # converter's own function through a small lookup; every other wall time
+                    # names one instant, and the engine converts the group's latest.
+                    lookup = f"converter_utc_{i}"
+                    converter_lookups.append((column, lookup))
+                    shifted = _sql_ident(f"y{i}")
+                    minimums.append(f"max(try_cast({column} AS TIMESTAMP)) FILTER (WHERE {lookup}.raw IS NULL) AS {latest}")
+                    minimums.append(f"max({lookup}.utc) AS {shifted}")
+                    reached = (f" AND (e.event_time IS NULL OR timezone('UTC', timezone({_sql_str(zone)}, {latest})) > e.event_time"
+                               f" OR {shifted} > e.event_time)")
+                else:
+                    minimums.append(f"max(try_cast({column} AS TIMESTAMP)) AS {latest}")
+                    reached = f" AND (e.event_time IS NULL OR {latest} > e.event_time)"
                 needs_event_time = True
             if rule.rule == "priority":
                 if key not in event_columns or not rule.order:
@@ -2403,6 +2477,10 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
             f"CREATE OR REPLACE TEMP TABLE src AS SELECT source_row_id, {select} "
             f"FROM read_parquet({file_list}, union_by_name=true)"
         )
+        lookup_joins = ""
+        for column, lookup in converter_lookups:
+            converter_utc_lookup(con, "src", column, lookup, cfg)
+            lookup_joins += f" LEFT JOIN {lookup} ON {lookup}.raw = s.{column}"
         # Events of another kind that share this source's rows. Most sources' rows each feed
         # one event, and for them this is one aggregate over the lineage and no scan of the
         # events at all.
@@ -2435,7 +2513,7 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
                 f"""
                 WITH g AS (
                     SELECT k.event_id{extra}, count(*) AS n_rows, {distinct}{''.join(', ' + x for x in minimums)}
-                    FROM read_parquet('{links_path}') k JOIN src s USING (source_row_id)
+                    FROM read_parquet('{links_path}') k JOIN src s USING (source_row_id){lookup_joins}
                     GROUP BY k.event_id{extra}
                 )
                 SELECT count(*), count(*) FILTER (WHERE n_rows > 1), {flagged}{checks} FROM g {exclude} {join}
@@ -2458,7 +2536,7 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
                 entry.update(block)
             else:
                 entry[label] = block
-        for table in ("src", "shared_rows", "foreign_kind"):
+        for table in ("src", "shared_rows", "foreign_kind", "offset_change_days", *(lookup for _c, lookup in converter_lookups)):
             con.execute(f"DROP TABLE IF EXISTS {table}")
     return report
 
@@ -3063,7 +3141,8 @@ def _duplicates_agree(l: Layers) -> CheckResult:
     leaves no trace to read is reported as unverifiable. A rule on ``available_time`` is
     asked for its trace only where the rows' availabilities still disagree after the
     converter moves any that precede the event up to the event time, since rows that all
-    precede it reach the merge with one value.
+    precede it reach the merge with one value; raw local times are placed as the converter
+    places them, including on the days the zone changes its offset.
 
     Cells compare in the canonical form the identity hashes them in, so a CSN typed as an
     integer in one workbook and a float in another is one value, while case is a

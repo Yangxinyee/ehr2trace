@@ -204,3 +204,51 @@ def test_result_times_that_all_precede_the_collection_need_no_trace_of_the_rule(
     # "before": both moved to 15:00 UTC, one value, nothing to settle. "after": settled and
     # flagged. "straddle": 15:00 and 15:30 UTC reached the merge, and nothing shows it was settled.
     assert report["rules_not_applied"] == {"available_time": 1}
+
+
+def test_result_times_in_the_repeated_hour_are_placed_as_the_converter_places_them(tmp_path: Path):
+    """On the day New York falls back, 01:30 happens twice. The converter reads it as the first.
+
+    Both result times precede the collection as the converter places them (fold=0), so the
+    merge saw one availability and needs no trace. The query engine's own conversion would
+    have placed them an hour later, after the collection, and asked for one. A pair with one
+    result after the repeated hour did reach the merge unsettled, and is still counted.
+    """
+    from datetime import datetime, timezone as tz
+    from zoneinfo import ZoneInfo
+
+    def utc(wall: datetime) -> datetime:
+        return wall.replace(tzinfo=ZoneInfo("America/New_York"), fold=0).astimezone(tz.utc).replace(tzinfo=None)
+
+    source = tmp_path / "results.parquet"
+    pl.DataFrame({
+        "source_row_id": ["r1", "r2", "r3", "r4", "r5", "r6"],
+        "col__PID": ["A"] * 6,
+        "col__K": ["K"] * 6,
+        "col__COLLECTED": ["2020-11-01 01:50:00"] * 6,
+        "col__RESULTED": ["2020-11-01 01:30:00", "2020-11-01 01:36:00",   # both before, in the repeated hour
+                          "2020-11-01 01:40:00", "2020-11-01 02:20:00",   # one after the repeated hour
+                          "2020-11-01 02:10:00", "2020-11-01 02:30:00"],  # both after, settled
+    }).write_parquet(source)
+    links = tmp_path / "event_source.parquet"
+    pl.DataFrame({
+        "event_id": ["before", "before", "straddle", "straddle", "after", "after"],
+        "source_row_id": ["r1", "r2", "r3", "r4", "r5", "r6"],
+        "partition_id": ["p1", "p2"] * 3,
+    }).write_parquet(links)
+    events = tmp_path / "events.parquet"
+    pl.DataFrame(
+        {"event_id": ["before", "straddle", "after"], "source_id": ["results"] * 3,
+         "event_kind": ["measurement"] * 3, "event_time": [utc(datetime(2020, 11, 1, 1, 50))] * 3,
+         "quality_flags": [["AVAILABILITY_BEFORE_EVENT"], ["AVAILABILITY_BEFORE_EVENT"], ["AVAILABILITY_MERGED"]]},
+        schema={"event_id": pl.String, "source_id": pl.String, "event_kind": pl.String,
+                "event_time": pl.Datetime("us"), "quality_flags": pl.List(pl.String)},
+    ).write_parquet(events)
+    con = duckdb.connect()
+    con.execute("SET TimeZone='UTC'")
+    con.execute(f"CREATE VIEW evt AS SELECT * FROM read_parquet('{events}')")
+    manifest = {"inputs": [{"source_id": "results", "partition_id": "p1", "output_path": str(source), "rows_parsed": 6}]}
+
+    report = merge_disagreements(results_config(), manifest, links, con)["results"]
+    assert report["ruled_disagreements"] == {"available_time": 3}
+    assert report["rules_not_applied"] == {"available_time": 1}
