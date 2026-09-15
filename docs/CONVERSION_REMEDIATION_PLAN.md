@@ -665,6 +665,16 @@
 | `e8b2a70` | 修正 5.3：挂不上就诊的 `visit_detail` 在 OMOP 中不可发布（`visit_occurrence_id` NOT NULL） | T1.13 |
 | `4342a60` | 9.3 合并时判断记录 | T5.5 |
 | `53ed6b9` | CU 影像文件与拷贝脚本声明为"已编目、不读取" | T2.CU7 |
+| `0540613` | 9.4：CU 与 JHU 最终构建前半段（准备、导入、身份）的实测记录 | T3.2、T5.5 |
+| `1f48629` | 合并 MIMIC-IV 分支：33 个 source（含 ICU 模块）、准备脚本 v3（ED 宽表转长表、微生物拆分、药名回填、未读清单）、病区与服务映射 | T2.M1–T2.M13、T4.1–T4.4 |
+| `d1c6d70` | 复配医嘱 MAIN/BASE 两行的药名差异用 `keep_all_flag`，新增标记 `NAME_VARIANTS_MERGED`；MIMIC `execution.bucket_count` 改为 256 | T1.2、T2.M1 |
+| `d734ae2` | 公共单位表 6 个国际单位与 eGFR 代码改为词表写法 | T1.5、T1.6 |
+| `78386bb` | `Emergency Department Observation` 映射改为 9201 | T2.M6 |
+| `e5d8fa9` | 9.3 记录 MIMIC 合并带来的四项判断 | T5.5 |
+| `4063026` | 合并校验分支：15 项新检查、故障注入、审计工具 | T0.1–T0.3 |
+| `2fb3241` | 新旧对比工具 `tools/remediation_compare.py` | T3.3 |
+| `3eb3de5` | CU：笔记作者与科室按 `keep_all_flag` 合并，`source_file` 与再入院标记改为忽略列；声明 `UNTIMED_VITAL_STATUS` 与就诊概念阈值 | T3.2（回到 T1.2、T2.CU3） |
+| `57b8ddc` | JHU：问题列表与检验名称、医嘱剂量写法按 `keep_all_flag`，参考上下限与遮蔽时长按 `null_and_flag`；七个来源声明就诊号可关联率 | T3.2（回到 T1.2、T0.2） |
 
 ### 9.2 CU-CTPA：抽样重建已验证（2026-09-14）
 
@@ -701,6 +711,13 @@
 | 2026-09-14 | `Emergency Department Observation`（MIMIC transfers.careunit，全量 101,347 行）原映射 581385 Observation Room | 改为 9201 | 与共享字符串 `Observation` 及所有 observation 入院类型的 9201 约定一致，一个临床含义只用一个概念；先改 MIMIC 工作根的 review 日志，再编译到临时目录并只取这一行 |
 | 2026-09-14 | 公共单位表 6 个 UCUM 代码在词表里没有概念（`u[iU]/mL`、`m[iU]/mL`、`m[iU]/L`、`m[iU]`、`k[iU]/L`、`mL/min/{1.73_m2}`，共 22 行；MIMIC 抽样中 4,754 条测量因此单位概念为 0） | 改为词表的写法（`10*-6.[iU]/mL`、`mL/min/(173.10*-2.m2)` 等） | 与 `c60c4d1` 同一原则：解析不到概念的单位规范化后一无所得 |
 | 2026-09-14 | MIMIC 纳入 ICU 模块后，按抽样外推规范层在 64 桶、4 进程下需约 390 GB，超过本机 251 GB | `execution.bucket_count` 改为 256 | 运行参数，不进内容地址，只把同样的工作分得更细 |
+| 2026-09-14 | CU 笔记全量规范层：同一笔记的拷贝之间作者名不同 792 个、作者科室不同 54 个、`source_file` 不同 967,563 个，都没有规则 | `note_author`、`AuthorService` 用 `keep_all_flag` 标 `NAME_VARIANTS_MERGED`；`source_file` 从 `keep_columns` 移到 `ignored_columns` | 一条笔记一个事件（D-R2）。792 个中 149 个只差大小写或标点、359 个是一方把另一方写全，作者仍在事件上，所有写法留在溯源。文件名是同一笔记跨文件交付的必然差异，准备后的行仍带着它 |
+| 2026-09-14 | CU 再入院：186,349 个就诊中 32,932 个由多行合并，5 个标记列不一致（1 年 24,375、6 个月 19,916、90 天 14,684、30 天 7,714、7 天 2,376） | 5 个标记列不再保留，列入 `ignored_columns` | 标记按"住院 × CTPA 扫描"计算，扫描列在导出时被丢弃（`owner_answers.readmission_index_event`）。没有一组标记属于这次就诊本身，保留第一组等于发布一个说不出对应哪次扫描的标签 |
+| 2026-09-14 | 5.2 的 CU 药物事件目标"约 4,195,000（全字段相同的 11,263 行仍合并）"复现不出 | 以实测为准：4,206,761 行得到 4,206,761 个事件，不合并任何医嘱 | 准备后的表在 17 个交付列上没有两行完全相同，去掉首尾空白后也没有；只看旧构建带的 14 列也只有 2,789 行重复。11,263 的口径查不到，而"每列都相同才是同一医嘱"的规则已按计划实现（`order_record_key`） |
+| 2026-09-14 | CU 的 `visit_occurrence` 只有未标类型的再入院（186,349 行，概念全为 0）；`UNTIMED_VITAL_STATUS` 占 78.0%，没有声明 | `validation.visit_concept_coverage_min: 0` 并写明理由；`demographics` 声明 `UNTIMED_VITAL_STATUS` 上限 0.8 | 再入院不说是哪类就诊，概念 0 是 readmissions 上已记录的决定；ICU 住院走 `visit_detail`，仍按默认阈值。活着的病人没有状态成立的日期，与 JHU（77.4%，上限 0.8）同理。两项都不进配置哈希 |
+| 2026-09-14 | JHU 全量规范层：`problem_list` 54,516 个合并条目同一 ICD-10 代码两个名称；`labs` 65 个两个名称，参考下限 2 个、上限 3 个不同；`outcome` 8,032 个就诊两个遮蔽时长；`all_rx` 1,064 个医嘱同一剂量两种写法（数值相同，375 个跨两批） | 名称与剂量写法用 `keep_all_flag` 标 `NAME_VARIANTS_MERGED`；参考上下限与遮蔽时长用 `null_and_flag` | 名称和写法不同不是事实不同：身份本来就按代码、按剂量的数值与单位认定同一事件。同一结果的两个参考范围、同一就诊的两个遮蔽时长互相矛盾，与 ADT 住院同一字段的规则一致（D-R4） |
+| 2026-09-14 | JHU 各来源就诊号能对上已交付就诊或 ADT 住院的比例：医嘱 63.7%、给药 80.4%、检验 69.6%、超声 71.0%、心电 88.0%、肺功能报告 12.2%、肺功能数值 17.6%，都低于默认的 95% | 每个来源声明 `expected_encounter_link_rate`，下限略低于实测 | 对不上的就诊号规范格式后没有一个能对上，也没有一个指向别的病人的就诊：交付里没有这些就诊（Outcome 表只有建库围绕的住院），不是解析问题。不进配置哈希 |
+| 2026-09-14 | CU 的 ICU 住院按 D-R14 走 `visit_detail`，但 CU 没有就诊号，只能按时间包含挂到就诊；1/200 抽样的 152 个里 78 个挂不上 | 按 5.3 的修正执行：挂不上的在 OMOP 中不发布，记 `VISIT_DETAIL_UNPARENTED`；规范层与 MEDS 保留全部 39,325 个。**待 Xinye 确认** | CDM 5.4 的 `visit_detail.visit_occurrence_id` 不可为空。若要 OMOP 保留全部 ICU 住院，只能让 CU 的 ICU 住院改走 `visit_occurrence`，相当于对 CU 推翻 D-R14，并需要重建 CU |
 
 ### 9.4 正式构建前半段：准备、ingest、identity（2026-09-14）
 
