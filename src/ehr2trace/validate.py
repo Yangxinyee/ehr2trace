@@ -92,26 +92,42 @@ READ_COLUMNS: dict[str, tuple[str, ...]] = {
         "event_id", "subject_id", "event_kind", "event_time", "available_time",
         "end_time", "code_system", "source_code", "value_number", "value_text",
         "quality_flags", "source_id",
-        # A metric key elsewhere in this module spells the same as this column, and the
-        # whitelist test cannot tell the two apart; loading one float column is cheaper
-        # than teaching it to.
-        "rate",
-        # The normalized value and unit (canonical schema 2): absent from older builds,
-        # where the loader simply leaves them out.
-        "value_number_normalized", "unit_normalized",
-        # Named by the merge-disagreement helper as the role a source may keep out of
-        # its identity; loaded so the whitelist stays complete.
-        "encounter_id",
-        # Named by the merge-rule map: the fields a reference-range rule is keyed by, and
-        # the ranged-result fields no rule may be read from; two float columns each,
-        # loaded so the whitelist stays complete.
-        "range_low", "range_high", "value_low", "value_high",
     ),
     "anchors": ("subject_id", "anchor_date", "anchor_time", "anchor_time_known", "partition_id"),
     "cohort_membership": ("subject_id", "partition_id", "membership_label", "label_scope"),
     "quality_issue": ("issue_type", "source_id"),
     "quarantine": ("partition_id", "source_id", "reason", "person_source_id"),
 }
+
+
+#: Canonical event columns this module names but reads only in the query engine, over the
+#: parquet file, and never from the frame ``Layers.load`` holds -- so they are not loaded.
+#:
+#: They used to be, because the whitelist test matches any quoted name and these are named
+#: as metric keys, merge-rule keys and SQL column checks. On MIMIC-IV's 305 million events
+#: each float column is 2.3 GB in memory and each string column more: 7 GB on the build
+#: this conversion audited and about 19 GB on a schema-3 build, for nothing any check read.
+#: ``test_validate_columns.py`` fails if a check ever reads one of these from a frame.
+ENGINE_ONLY_COLUMNS: frozenset[str] = frozenset({
+    "rate", "value_number_normalized", "unit_normalized", "encounter_id",
+    "range_low", "range_high", "value_low", "value_high",
+})
+
+
+def _apply_operator_memory_cap(con) -> None:
+    """Hold a DuckDB connection opened outside ``analytic_connection`` to the operator's cap.
+
+    Only when ``EHR_DUCKDB_MEMORY_GB`` is set, the way the OMOP publisher applies it; unset,
+    the connection keeps DuckDB's default. Several builds and their validations share one
+    machine, and a cap that bounded the analytical connections but not these would still
+    let validation promise the machine more memory than it has. A value that is not a
+    positive number raises, as ``operator_memory_limit_gb`` does everywhere.
+    """
+    from ehr2trace.analytics import operator_memory_limit_gb
+
+    cap = operator_memory_limit_gb()
+    if cap is not None:
+        con.execute(f"SET memory_limit = '{cap}GB'")
 
 
 @dataclass
@@ -405,6 +421,7 @@ def _rows_accounted(l: Layers) -> CheckResult:
     quarantine_path = l.layout.canonical_path("quarantine")
     con = duckdb.connect()
     try:
+        _apply_operator_memory_cap(con)
         con.execute("PRAGMA preserve_insertion_order = false")
         con.execute(f"CREATE VIEW lnk AS SELECT * FROM read_parquet('{links_path}')")
         if quarantine_path.exists():
@@ -1020,6 +1037,11 @@ def _omop_connection(l: Layers):
 
     con = duckdb.connect(str(path), read_only=True)
     try:
+        _apply_operator_memory_cap(con)
+    except Exception:
+        con.close()
+        raise
+    try:
         populated = con.execute("SELECT count(*) FROM person").fetchone()[0]
     except Exception:
         con.close()
@@ -1524,6 +1546,7 @@ def _meds_query(files: list[str], sql: str, params: dict | None = None) -> list[
 
     con = duckdb.connect()
     try:
+        _apply_operator_memory_cap(con)
         con.execute("PRAGMA preserve_insertion_order = false")
         # The relation API rather than a parameterized CREATE VIEW: DuckDB refuses to
         # prepare a CREATE statement, and hive partitioning stays off so a shard's
