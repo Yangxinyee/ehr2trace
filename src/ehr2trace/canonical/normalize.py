@@ -467,6 +467,25 @@ def dose_identity(ctx: ShapeContext, dose: str | None) -> str | None:
     return dose.strip().lower()
 
 
+def reference_bound(ctx: ShapeContext, row: Row, role: str) -> float | None:
+    """One bound of the reference interval reported with a result, as a number or nothing.
+
+    The `value_low` and `value_high` roles name the laboratory's reference range, which
+    OMOP publishes as the measurement's range_low and range_high. A bound is a plain
+    number: a comparator or a word in the cell is not a bound those columns can hold,
+    so it stays in the source row, where the lineage still reaches it, and is not guessed
+    into one.
+    """
+    text = row.text(role, ctx.null_literals)
+    if text is None:
+        return None
+    try:
+        parsed = parse_value(text, None, ctx.values)
+    except QuarantineRow:
+        return None
+    return parsed.number if parsed.form == "number" else None
+
+
 @dataclass
 class UnitOutcome:
     """What unit normalization decided for one value (T1.6, T1.7; D-R1, D-R10, D-R17)."""
@@ -792,6 +811,8 @@ def shape_point_event(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
                 value_text=value.text,
                 value_low=value.low,
                 value_high=value.high,
+                range_low=reference_bound(ctx, row, "value_low"),
+                range_high=reference_bound(ctx, row, "value_high"),
                 unit_source=units.unit_source,
                 status_source=status_text,
                 route_source=route_text,
@@ -977,6 +998,8 @@ def shape_component_measurements(ctx: ShapeContext, rows: Sequence[Row]) -> Emis
                         value_text=value.text,
                         value_low=value.low,
                         value_high=value.high,
+                        range_low=reference_bound(ctx, row, "value_low"),
+                        range_high=reference_bound(ctx, row, "value_high"),
                         unit_source=units.unit_source,
                         value_number_normalized=units.value_number_normalized,
                         unit_normalized=units.unit_normalized,

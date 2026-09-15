@@ -78,8 +78,13 @@ ROLE_TO_FIELD: dict[str, str] = {
     "unit": "unit_source",
     "rate": "rate_source",
     "text": "value_text",
+    #: a visit's masked duration is stored where a note's text is; a source maps one of them
+    "duration_masked": "value_text",
 }
-FIELD_TO_ROLE: dict[str, str] = {v: k for k, v in ROLE_TO_FIELD.items()}
+#: canonical field -> every role that feeds it, in declaration order
+FIELD_TO_ROLES: dict[str, tuple[str, ...]] = {}
+for _role, _field in ROLE_TO_FIELD.items():
+    FIELD_TO_ROLES[_field] = FIELD_TO_ROLES.get(_field, ()) + (_role,)
 
 
 def rule_field(name: str) -> str | None:
@@ -165,8 +170,8 @@ def _merge_group(
         if len(_distinct(v for v, _ in present)) <= 1:
             continue
         rule = rules.get(name)
-        if rule is None and name in FIELD_TO_ROLE:
-            rule = rules.get(FIELD_TO_ROLE[name])
+        if rule is None:
+            rule = next((rules[role] for role in FIELD_TO_ROLES.get(name, ()) if role in rules), None)
         value, new_flags = _resolve(event_id, name, rule, present, survivor, instances, dataset_id, result)
         survivor[name] = value
         flags.update(new_flags)

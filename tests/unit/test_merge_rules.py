@@ -194,3 +194,25 @@ def test_the_merge_is_the_same_whatever_order_the_rows_arrive_in():
         assert merge_events(shuffled, declared) == reference
     assert reference.events[0]["unit_source"] == "a"
     assert reference.events[0]["encounter_id"] == "E2"
+
+
+def test_a_rule_keyed_by_a_role_that_shares_its_field_with_another_role_settles_that_field():
+    """A visit's masked duration lives in value_text, the field a note's text also feeds.
+
+    On the full JHU-CTPE build the rule was read only from the row payload: the field kept
+    the survivor's duration and the merge recorded 18,858 MERGE_CONFLICT issues beside the
+    VALUE_CONFLICT the rule wrote.
+    """
+    result = merge_events([instance("e", "r1", event_kind="visit", value_text="1 d"),
+                           instance("e", "r2", event_kind="visit", value_text="2 d")],
+                          rules(duration_masked="null_and_flag"), dataset_id="d")
+    survivor = result.events[0]
+    assert survivor["value_text"] is None
+    assert str(QualityFlag.VALUE_CONFLICT) in survivor["quality_flags"]
+    assert str(QualityFlag.MERGE_CONFLICT) not in survivor["quality_flags"]
+    assert result.issues == []
+    assert [q["source_row_id"] for q in result.quarantine] == ["r1", "r2"]
+    text = merge_events([instance("e", "r1", event_kind="note", value_text="a"),
+                         instance("e", "r2", event_kind="note", value_text="b")],
+                        rules(text="keep_all_flag"))
+    assert text.events[0]["value_text"] == "a" and text.issues == []

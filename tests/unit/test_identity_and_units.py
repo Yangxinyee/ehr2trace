@@ -438,3 +438,35 @@ def test_every_event_is_emitted_with_the_row_values_the_merge_needs():
     # a rule keyed by a canonical field or its role compares the event itself; only kept
     # columns and the linked-by role are carried beside it
     assert instance.extra == {"billing": "HB", "encounter_linked": "1"}
+
+
+LAB_SPEC = {
+    "adapter": "delimited",
+    "shape": "point_event",
+    "event_kind": "measurement",
+    "fields": {
+        "person_id": {"from": ["PID"]},
+        "source_code": {"from": ["test"]},
+        "event_time": {"from": ["taken"]},
+        "value": {"from": ["result"]},
+        "unit": {"from": ["units"]},
+        "value_low": {"from": ["ref_low"]},
+        "value_high": {"from": ["ref_high"]},
+    },
+}
+
+
+def test_a_reference_range_reaches_its_own_columns_and_never_the_result():
+    """P-J6: the laboratory's reference interval was mapped and read by nothing."""
+    ctx = ctx_with("labs", LAB_SPEC)
+    row = {"PID": "P1", "test": "NA", "units": "mmol/L"}
+    plain, ranged, words = events_of(ctx, [
+        {**row, "taken": "2020-01-01 08:00:00", "result": "138", "ref_low": "135", "ref_high": "145"},
+        {**row, "taken": "2020-01-01 09:00:00", "result": "5-10", "ref_low": "", "ref_high": ""},
+        {**row, "taken": "2020-01-01 10:00:00", "result": "140", "ref_low": "<135", "ref_high": "NEGATIVE"},
+    ])
+    assert (plain.range_low, plain.range_high) == (135.0, 145.0)
+    assert (plain.value_low, plain.value_high) == (None, None)
+    assert (ranged.range_low, ranged.range_high) == (None, None)
+    assert (ranged.value_low, ranged.value_high) == (5.0, 10.0)
+    assert (words.range_low, words.range_high) == (None, None)

@@ -35,6 +35,8 @@ FIELD_ROLES: frozenset[str] = frozenset(
         # values
         "value",
         "unit",
+        #: the reference interval the laboratory reported with a result: published as the
+        #: measurement's range_low and range_high, never as the result itself
         "value_low",
         "value_high",
         # medication / order attributes

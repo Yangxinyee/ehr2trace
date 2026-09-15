@@ -245,6 +245,11 @@ CANONICAL_EVENT_SCHEMA = pa.schema(
         pa.field("value_text", pa.large_string()),
         pa.field("value_low", pa.float64()),
         pa.field("value_high", pa.float64()),
+        # The reference interval the laboratory reported with this result, read from the
+        # `value_low` and `value_high` roles (schema 3). Not value_low/value_high above,
+        # which hold a result that was itself written as a range.
+        pa.field("range_low", pa.float64()),
+        pa.field("range_high", pa.float64()),
         pa.field("unit_source", pa.string()),
         pa.field("unit_concept_id", pa.int64()),
         pa.field("status_source", pa.string()),
@@ -364,6 +369,8 @@ class CanonicalEvent(BaseModel):
     value_text: str | None = None
     value_low: float | None = None
     value_high: float | None = None
+    range_low: float | None = None
+    range_high: float | None = None
     unit_source: str | None = None
     unit_concept_id: int | None = None
     status_source: str | None = None
