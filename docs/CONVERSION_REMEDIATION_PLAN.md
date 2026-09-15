@@ -682,6 +682,11 @@
 | `9dc98a5` | 9.5：CU 正式构建后半段实测；9.3：OMOP 日期口径与 fixture 合入时机 | T5.5 |
 | `53d9e18` | 合并 fixture 陷阱：12 个陷阱、`zoned_site` 数据集 | T1.12 |
 | `c4b5695` | `CODE_VERSION` 回到 0.7.0，规范层任务哈希折入 `CANONICAL_SCHEMA_VERSION` | T3.2 |
+| `4f87ea7` | 9.1、9.3、9.6：参考范围、合并字段与版本哈希三处修复的记录 | T5.5 |
+| `8c9ca5b` | `DUPLICATES_AGREE`：时钟换日当天的原始可用时间按转换器自己的函数换算（zoneinfo，fold=0） | T0.2 |
+| `041e0ad` | `CODE_DESCRIPTION_IS_REPRESENTATIVE`：按 MEDS 发布器的方式，在每个代码自己的行里给名称排序，并列按字母 | T0.2 |
+| `409f68d` | `DUPLICATES_AGREE`：键为 `range_low`/`range_high` 的规则比对 `value_low`/`value_high` 角色的原始单元格 | T0.2 |
+| `4308116` | `EHR_DUCKDB_MEMORY_GB`：运维上限，约束分析连接与 OMOP 发布连接的内存 | T3.2 |
 
 ### 9.2 CU-CTPA：抽样重建已验证（2026-09-14）
 
@@ -731,6 +736,7 @@
 | 2026-09-14 | JHU ICU 转科与 outcome 的 `duration_masked` 规则只作用在行负载上：该角色与 `text` 共用 `value_text`，合并按字段找规则时找不到，事件保留幸存行的时长，并记下 18,858 个 `MERGE_CONFLICT` | 角色到字段改为一对多映射，规则落到 `value_text` | D-R4 要求冲突的时长置空并隔离，原实现只隔离不置空 |
 | 2026-09-14 | 为了让规范层按新代码重算，先把 `CODE_VERSION` 升到 0.7.1；但它也进入 ingest 与 staging 的地址，规范层随即拒绝三个数据集全部 ingest 输出，包括已跑两小时的 MIMIC ingest | `CODE_VERSION` 回到 0.7.0，规范层任务哈希同时折入已因 schema 3 升级的 `CANONICAL_SCHEMA_VERSION` | 只重算列形状变了的那一层，上游输出不作废：CU 从规范层起重建，JHU 因配置变化从 ingest 起，MIMIC 沿用 0.7.0 的 ingest |
 | 2026-09-14 | 另一个 compile 会话发现：`mappings/` 中 12 行（11 个 PFT 后缀行与 ETHNICITY 4271761，均为 2026-09-11）在任何工作根里都没有对应决定；MIMIC compile 在 `SOURCE/Observation` 与 `SOURCE/Emergency` 上因同日冲突退出 1 | 本次构建不经 compile，直接读 `mappings/`，不受影响；记录在案，**待 Xinye 决定** | `Observation` 的现行取值 9201 是上面的协调者判断，可以推翻 |
+| 2026-09-14 | 三个正式构建同机并行时内存耗尽：MIMIC 规范层 12 个进程占 153–177 GB，内核杀掉了 CU 的 MEDS 阶段和 JHU 的 OMOP 阶段。每个 DuckDB 分析连接默认占物理内存的一半，OMOP 发布连接沿用 DuckDB 的 80% 默认值 | 新增运维上限 `EHR_DUCKDB_MEMORY_GB`；CU 与 JHU 余下的阶段逐个重跑，每步先等可用内存、在 30 GB 上限下运行，并把这些可重跑的进程设为内核优先回收的对象；校验分支的旧构建基线暂停到 MIMIC 规范层完成 | 杀掉一个可重跑的阶段只损失几分钟，杀掉 MIMIC 规范层要损失数小时；上限不改变任何输出或地址 |
 
 ### 9.4 正式构建前半段：准备、ingest、identity（2026-09-14）
 
@@ -776,4 +782,4 @@ CU 与 JHU 的配置修正（`3eb3de5`、`57b8ddc`）提交后从 ingest 起整�
 
 ### 9.6 尚未完成
 
-CU 与 JHU 在规范层 schema 3 上的重建与复验（9.5 中 CU 的数字随之更新）；MIMIC-IV 的规范层、OMOP、MEDS，非哈希声明，以及校验；校验分支余下的两处检查修正（夏令时换算、codes 描述的并列）与 `range_low`/`range_high` 的比对映射；新旧对比文档（T3.3）与验收（T3.4）；README、故障目录与论文数字（T5.2–T5.4，文档分支 `remediation/docs`、论文分支 `remediation-2026-09`）；每个 `P-*` 的最终状态（T5.5）。待 Xinye 决定：OMOP 日期按 UTC 还是本地日历；CU 挂不上就诊的 ICU 住院在 OMOP 中如何发布；`mappings/` 中无决定支撑的 12 行。
+CU 的 MEDS 与校验、JHU 的 OMOP、MEDS 与校验：内存耗尽后在上限下逐个重跑，并更新 9.5 中 CU 的数字、补上 JHU 的；MIMIC-IV 的规范层（进行中）、OMOP、MEDS，非哈希声明，以及校验；校验分支在最终提交上重跑旧构建基线；新旧对比文档（T3.3）与验收（T3.4）；README、故障目录与论文数字（T5.2–T5.4，文档分支 `remediation/docs`、论文分支 `remediation-2026-09`）；每个 `P-*` 的最终状态（T5.5）。待 Xinye 决定：OMOP 日期按 UTC 还是本地日历；CU 挂不上就诊的 ICU 住院在 OMOP 中如何发布；`mappings/` 中无决定支撑的 12 行。
