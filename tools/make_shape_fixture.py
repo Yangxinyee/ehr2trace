@@ -97,6 +97,25 @@ LAB_RESULTS = [
     ("CREAT", "CREATININE", "<0.50", "mg/dL"),
 ]
 
+# -- traps from the conversion audit (remediation plan T1.12) --------------------------
+#
+# Each is a shape a real delivery had and a converter mishandled, placed on fabricated
+# rows so the regression lives in the repository. The tests that read them, and the
+# declarations that settle them, are in tests/integration/test_fixture_traps_ctpe_shape.py.
+
+#: Trap 1 (T1.1). This patient's first order is written a second time in the same minute,
+#: for the same drug, at twice the dose. They are two orders; an event identity that left
+#: the dose out made them one, and the merge kept whichever dose it met first.
+SECOND_DOSE_PATIENT = "SUBJ-2"
+SECOND_DOSE = "20 mg"
+
+#: Trap 12 (T1.3, D-R5). The white cell count one batch saw 35 minutes after the other
+#: did: later in batch 2 for one patient and in batch 1 for the other, so neither extract
+#: is always the one that saw a result first.
+LATE_RESULT = {("2", "SUBJ-1"), ("1", "SUBJ-2")}
+LATE_RESULT_CODE = "WBC"
+LATE_BY = timedelta(minutes=35)
+
 
 def write_text(path: Path, header: list[str], rows: list[list[str]], bom: bool) -> None:
     """Tab-delimited, CRLF, optional byte-order mark — exactly as the real files are."""
@@ -124,10 +143,13 @@ def build_partition(partition_id: str) -> None:
     # -- all_rx: ordering intent, including rows with no ordering date at all --------
     rx_rows = []
     for patient in patients:
-        for i, moment in enumerate(event_times(f"rx{patient}", 4)):
+        moments = event_times(f"rx{patient}", 4)
+        for i, moment in enumerate(moments):
             # every fourth order has no date and must be quarantined, never dated
             ordering = "NULL" if i == 3 else moment
             rx_rows.append([patient, f"ENC-{patient}-1", "TESTDRUG 10 mg tablet", "10 mg", ordering, "Dispensed"])
+        if patient == SECOND_DOSE_PATIENT:
+            rx_rows.append([patient, f"ENC-{patient}-1", "TESTDRUG 10 mg tablet", SECOND_DOSE, moments[0], "Dispensed"])
     write_text(
         root / f"{prefix}_all_rx.txt",
         ["MRN", "Encounter_CSN", "Medication_Name", "HV_Discrete_Dose", "Ordering_Date", "Order_Status"],
@@ -170,9 +192,10 @@ def build_partition(partition_id: str) -> None:
                 )
             for i, (code, name, value, unit) in enumerate(LAB_RESULTS):
                 collection = lab_times[i]
-                result = (datetime.strptime(collection, "%Y-%m-%d %H:%M:%S.%f") + timedelta(minutes=22)).strftime(
-                    "%Y-%m-%d %H:%M:%S.000"
-                )
+                seen = datetime.strptime(collection, "%Y-%m-%d %H:%M:%S.%f") + timedelta(minutes=22)
+                if code == LATE_RESULT_CODE and (batch, patient) in LATE_RESULT:
+                    seen += LATE_BY
+                result = seen.strftime("%Y-%m-%d %H:%M:%S.000")
                 # one lab per patient has no collection time: the flagged fallback path
                 lab_rows.append(
                     [patient, anchor, f"ENC-{patient}-1", result,
