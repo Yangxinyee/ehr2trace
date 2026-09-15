@@ -136,7 +136,12 @@ class Layers:
 
     cfg: DatasetConfig
     layout: WorkLayout
-    events: pl.DataFrame | None
+    #: The events are a lazy scan, projected to ``READ_COLUMNS``, and never held whole.
+    #: Holding them worked until MIMIC-IV's schema-3 build: 799 million events, whose
+    #: `event_id` column alone is 54 GB, and a validation the kernel killed twice near
+    #: 250 GB, hours in. Each check collects only the rows and columns it reads; a frame
+    #: passed in, as the unit tests do, is scanned the same way.
+    events: pl.LazyFrame | None
     #: The link table is not materialised. Its `event_id` column alone is 18 GB on
     #: MIMIC-IV -- 301 million forty-character hashes -- and every check that reads it
     #: joins it against an events column of the same size. Those joins happen in the
@@ -157,6 +162,10 @@ class Layers:
     #: happens once per run rather than once per check.
     cache: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if isinstance(self.events, pl.DataFrame):
+            self.events = self.events.lazy()
+
     @classmethod
     def load(cls, cfg: DatasetConfig, layout: WorkLayout) -> "Layers":
         def read(name: str) -> pl.DataFrame | None:
@@ -171,6 +180,14 @@ class Layers:
             present = set(pl.scan_parquet(path).collect_schema().names())
             return pl.read_parquet(path, columns=[c for c in wanted if c in present])
 
+        def scan(name: str) -> pl.LazyFrame | None:
+            path = layout.canonical_path(name)
+            if not path.exists():
+                return None
+            frame = pl.scan_parquet(path)
+            present = set(frame.collect_schema().names())
+            return frame.select([c for c in READ_COLUMNS[name] if c in present])
+
         import pyarrow.parquet as pq
 
         links_path = layout.canonical_path("event_source")
@@ -179,7 +196,7 @@ class Layers:
         return cls(
             cfg=cfg,
             layout=layout,
-            events=read("events"),
+            events=scan("events"),
             links_path=links_path if links_path.exists() else None,
             link_count=pq.ParquetFile(links_path).metadata.num_rows if links_path.exists() else None,
             events_path=events_path if events_path.exists() else None,
@@ -194,13 +211,18 @@ class Layers:
 def run_checks(cfg: DatasetConfig, layout: WorkLayout, include_slow: bool = False) -> list[CheckResult]:
     layers = Layers.load(cfg, layout)
     results: list[CheckResult] = []
+    progress = layout.runs_dir / "validation.progress"
+    progress.parent.mkdir(parents=True, exist_ok=True)
+    progress.write_text("", encoding="utf-8")
     for check_id, (fn, slow) in CHECKS:
         if slow and not include_slow:
             continue
+        _note_progress(progress, "start", check_id)
         try:
             result = fn(layers)
         except Exception as exc:  # a check that crashes is a failing check
             result = CheckResult(check_id, False, f"check raised {type(exc).__name__}: {exc}")
+        _note_progress(progress, "end", check_id)
         if result is None:
             continue
         result.check_id = check_id
@@ -211,6 +233,40 @@ def run_checks(cfg: DatasetConfig, layout: WorkLayout, include_slow: bool = Fals
         json.dumps([r.__dict__ for r in results], indent=2, sort_keys=True, default=str), encoding="utf-8"
     )
     return results
+
+
+def _note_progress(path: Path, event: str, check_id: str) -> None:
+    """Append which check started or ended, when, and the process's peak memory so far.
+
+    A validation the kernel kills writes no results. MIMIC-IV's was killed twice, hours
+    in, leaving an empty log and nothing to say which check had been running.
+    """
+    import time
+
+    try:
+        import resource
+
+        # ru_maxrss is in KiB on Linux.
+        peak = f" peak_rss_gb={resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024**2:.1f}"
+    except ImportError:
+        peak = ""
+    with path.open("a", encoding="utf-8") as out:
+        out.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {event} {check_id}{peak}\n")
+
+
+def _collect(frame: pl.LazyFrame) -> pl.DataFrame:
+    """Run a query over the events on the streaming engine, which reads the file in batches."""
+    return frame.collect(engine="streaming")
+
+
+def _height(frame: pl.LazyFrame) -> int:
+    return int(_collect(frame.select(pl.len())).item())
+
+
+def _event_count(l: "Layers") -> int:
+    if "event_count" not in l.cache:
+        l.cache["event_count"] = _height(l.events)
+    return l.cache["event_count"]
 
 
 def _skip(reason: str) -> CheckResult:
@@ -355,7 +411,7 @@ def _lineage_complete(l: Layers) -> CheckResult:
         "every canonical event traces to at least one source row"
         if not orphans
         else f"{orphans:,} events have no source row",
-        {"events": l.events.height, "links": l.link_count},
+        {"events": _event_count(l), "links": l.link_count},
     )
 
 
@@ -375,16 +431,17 @@ def _fan_out(l: Layers) -> CheckResult:
     if l.events is None or l.links_path is None:
         return _skip("canonical layer not built")
     _orphans, _dangling, duplicated = _lineage_counts(l)
+    events = _event_count(l)
     return CheckResult(
         "",
         True,
-        f"{l.events.height:,} events from {l.link_count:,} links; "
+        f"{events:,} events from {l.link_count:,} links; "
         f"{duplicated:,} events have more than one source row",
         {
-            "events": l.events.height,
+            "events": events,
             "links": l.link_count,
             "events_with_duplicates": duplicated,
-            "fan_out": round(l.link_count / l.events.height, 4) if l.events.height else 0.0,
+            "fan_out": round(l.link_count / events, 4) if events else 0.0,
         },
     )
 
@@ -552,13 +609,13 @@ def _event_subjects_issued(l: Layers) -> CheckResult:
     issued = pl.read_parquet(path, columns=["subject_id"])
     strays: dict[str, int] = {}
     for name, frame in (("events", l.events), ("anchors", l.anchors), ("cohort_membership", l.memberships)):
-        if frame is None or frame.height == 0 or "subject_id" not in frame.columns:
+        if frame is None or "subject_id" not in frame.lazy().collect_schema().names():
             continue
         # Distinct first, then anti-join. There are a few hundred thousand subjects and
         # a few hundred million events, so materialising one Python object per event to
         # find them would cost three orders of magnitude more than the answer is worth.
-        unknown = (
-            frame.select("subject_id").drop_nulls().unique().join(issued, on="subject_id", how="anti").height
+        unknown = _height(
+            frame.lazy().select("subject_id").drop_nulls().unique().join(issued.lazy(), on="subject_id", how="anti")
         )
         if unknown:
             strays[name] = unknown
@@ -597,7 +654,7 @@ def _anchor_not_the_clock(l: Layers) -> CheckResult:
         .group_by("subject_id")
         .agg(pl.col("t").unique().alias("anchor_times"))
     )
-    events = (
+    events = _collect(
         l.events.select("subject_id", pl.col("event_time").alias("t"))
         .drop_nulls()
         .group_by("subject_id")
@@ -627,15 +684,15 @@ def _anchors_not_events(l: Layers) -> CheckResult:
     if l.events is None or l.anchors is None or l.anchors.height == 0:
         return _skip("no anchors in this dataset")
     anchor_type = l.cfg.anchors.anchor_type if l.cfg.anchors else ""
-    leaked = l.events.filter(pl.col("source_code").str.to_lowercase() == anchor_type.lower())
+    leaked = _height(l.events.filter(pl.col("source_code").str.to_lowercase() == anchor_type.lower()))
     known = int(l.anchors.filter(pl.col("anchor_time_known")).height)
     return CheckResult(
         "",
-        leaked.height == 0,
+        leaked == 0,
         f"{l.anchors.height:,} anchors recorded separately from events "
         f"({known:,} with a known time component)"
-        if leaked.height == 0
-        else f"{leaked.height} events look like fabricated anchor procedures",
+        if leaked == 0
+        else f"{leaked} events look like fabricated anchor procedures",
         {"anchors": l.anchors.height, "anchor_time_known": known},
     )
 
@@ -648,19 +705,19 @@ def _label_not_a_fact(l: Layers) -> CheckResult:
     if not labels:
         return _skip("dataset has no membership labels")
     lowered = {s.lower() for s in labels}
-    hits = l.events.filter(
+    hits = _height(l.events.filter(
         pl.col("event_kind").is_in([str(EventKind.condition), str(EventKind.demographic)])
         & (
             pl.col("source_code").str.to_lowercase().is_in(list(lowered))
             | pl.col("value_text").str.to_lowercase().is_in(list(lowered))
         )
-    )
+    ))
     return CheckResult(
         "",
-        hits.height == 0,
+        hits == 0,
         "no cohort label became a condition or observation"
-        if hits.height == 0
-        else f"{hits.height} events carry a cohort label as a clinical fact",
+        if hits == 0
+        else f"{hits} events carry a cohort label as a clinical fact",
     )
 
 
@@ -699,27 +756,28 @@ def _no_untimed_clinical(l: Layers) -> CheckResult:
     if l.events is None:
         return _skip("canonical layer not built")
     allowed = sorted(TIMELESS_BASELINE_CODES)
-    untimed = l.events.filter(
-        pl.col("event_time").is_null()
-        & (
-            (pl.col("event_kind") != str(EventKind.demographic))
-            | ~pl.col("source_code").is_in(allowed)
+    per_code = _collect(
+        l.events.filter(
+            pl.col("event_time").is_null()
+            & (
+                (pl.col("event_kind") != str(EventKind.demographic))
+                | ~pl.col("source_code").is_in(allowed)
+            )
         )
+        .group_by("source_code")
+        .len()
     )
-    offenders = (
-        untimed.group_by("source_code").len().sort("len", descending=True).head(5)
-        if untimed.height
-        else None
-    )
+    untimed = int(per_code["len"].sum())
+    offenders = per_code.sort("len", descending=True).head(5) if untimed else None
     return CheckResult(
         "",
-        untimed.height == 0,
+        untimed == 0,
         f"every clinical event has a real time; only {len(allowed)} declared baseline "
         f"attributes are timeless"
-        if untimed.height == 0
-        else f"{untimed.height:,} events have no time and are not declared baseline "
+        if untimed == 0
+        else f"{untimed:,} events have no time and are not declared baseline "
         f"attributes: {dict(zip(offenders['source_code'], offenders['len']))}",
-        {"untimed_not_baseline": untimed.height, "baseline_codes": allowed},
+        {"untimed_not_baseline": untimed, "baseline_codes": allowed},
     )
 
 
@@ -739,8 +797,11 @@ def _orders_vs_admin(l: Layers) -> CheckResult:
         str(EventKind.drug_dispense): "dispense",
         str(EventKind.drug_admin): "administration",
     }
+    # One pass over the file for all three stages, then the comparisons in memory over
+    # the drug events' ids rather than every event's.
+    drug = _collect(l.events.filter(pl.col("event_kind").is_in(list(stages))).select("event_kind", "event_id"))
     ids = {
-        kind: l.events.filter(pl.col("event_kind") == kind).select("event_id")
+        kind: drug.filter(pl.col("event_kind") == kind).select("event_id")
         for kind in stages
     }
     counts = {stages[k]: v.height for k, v in ids.items()}
@@ -793,7 +854,7 @@ def _kind_matches_source(l: Layers) -> CheckResult:
             kinds.add(spec.study_event_kind)
         allowed[source_id] = kinds
 
-    seen = l.events.group_by("source_id", "event_kind").len()
+    seen = _collect(l.events.group_by("source_id", "event_kind").len())
     offenders = [
         (row["source_id"], row["event_kind"], row["len"])
         for row in seen.iter_rows(named=True)
@@ -836,7 +897,7 @@ def _declared_text_reaches_the_output(l: Layers) -> CheckResult:
     if not declared:
         return _skip("no source declares a text role")
 
-    published = (
+    published = _collect(
         l.events.filter(pl.col("source_id").is_in(declared))
         .group_by("source_id")
         .agg(
@@ -926,14 +987,14 @@ def _not_administered_excluded(l: Layers) -> CheckResult:
 def _post_death(l: Layers) -> CheckResult:
     if l.events is None:
         return _skip("canonical layer not built")
-    flagged = l.events.filter(
+    flagged = _height(l.events.filter(
         pl.col("quality_flags").list.contains(str(QualityFlag.RECORDED_AFTER_DEATH))
-    )
+    ))
     return CheckResult(
         "",
         True,
-        f"{flagged.height:,} records dated after death, flagged and kept with their original dates",
-        {"recorded_after_death": flagged.height},
+        f"{flagged:,} records dated after death, flagged and kept with their original dates",
+        {"recorded_after_death": flagged},
     )
 
 
@@ -948,23 +1009,26 @@ def _end_before_start(l: Layers) -> CheckResult:
     """
     if l.events is None:
         return _skip("canonical layer not built")
-    inverted = l.events.filter(
-        pl.col("end_time").is_not_null()
-        & pl.col("event_time").is_not_null()
-        & (pl.col("end_time") < pl.col("event_time"))
+    counts = _collect(
+        l.events.filter(
+            pl.col("end_time").is_not_null()
+            & pl.col("event_time").is_not_null()
+            & (pl.col("end_time") < pl.col("event_time"))
+        ).select(
+            pl.len().alias("inverted"),
+            (~pl.col("quality_flags").list.contains(str(QualityFlag.END_BEFORE_START))).sum().alias("unflagged"),
+        )
     )
-    unflagged = inverted.filter(
-        ~pl.col("quality_flags").list.contains(str(QualityFlag.END_BEFORE_START))
-    )
+    inverted, unflagged = int(counts["inverted"][0]), int(counts["unflagged"][0])
     return CheckResult(
         "",
-        unflagged.height == 0,
-        f"{inverted.height:,} events end before they start, each flagged and kept with "
+        unflagged == 0,
+        f"{inverted:,} events end before they start, each flagged and kept with "
         f"the times the source gave"
-        if unflagged.height == 0
-        else f"{unflagged.height:,} of {inverted.height:,} events that end before they "
+        if unflagged == 0
+        else f"{unflagged:,} of {inverted:,} events that end before they "
         f"start carry no {QualityFlag.END_BEFORE_START} flag",
-        {"end_before_start": inverted.height, "unflagged": unflagged.height},
+        {"end_before_start": inverted, "unflagged": unflagged},
     )
 
 
@@ -1202,7 +1266,7 @@ def _terminology_coverage(l: Layers) -> CheckResult:
         if system in vocabularies:
             unmapped[system] = unmapped.get(system, 0) + 1
 
-    totals = (
+    totals = _collect(
         l.events.filter(pl.col("code_system").is_in(sorted(vocabularies)))
         .group_by("code_system")
         .agg(pl.col("source_code").n_unique().alias("codes"))
@@ -1409,9 +1473,9 @@ def _omop_birth_year_reproducible(l: Layers) -> CheckResult:
         # date of birth is not reproducible from a reference year and must not be
         # compared against one.
         with_dates = set(
-            l.events.filter(pl.col("source_code") == "BIRTH_DATE")["subject_id"].to_list()
+            _collect(l.events.filter(pl.col("source_code") == "BIRTH_DATE").select("subject_id"))["subject_id"].to_list()
         )
-        ages = (
+        ages = _collect(
             l.events.filter(pl.col("source_code") == "AGE")
             .filter(~pl.col("subject_id").is_in(list(with_dates)) if with_dates else pl.lit(True))
             .select("event_id", "subject_id", pl.col("value_number").alias("age"))
@@ -3357,9 +3421,9 @@ def _death_published(l: Layers) -> CheckResult:
     """
     if l.events is None:
         return _skip("canonical layer not built")
-    deaths = l.events.filter(
+    deaths = _collect(l.events.filter(
         (pl.col("event_kind") == str(EventKind.death)) & pl.col("event_time").is_not_null()
-    )
+    ))
     if deaths.height == 0:
         return _skip("no death events in this dataset")
     zone = l.cfg.time.timezone_assumption or "UTC"
@@ -3391,7 +3455,9 @@ def _death_published(l: Layers) -> CheckResult:
         finally:
             con.close()
         with_row = {subject_of_event[e] for e in death_events if e in subject_of_event}
-        published = set(l.events.filter(pl.col("event_id").is_in(list(person_events)))["subject_id"].to_list()) if person_events else set()
+        published = set(_collect(
+            l.events.filter(pl.col("event_id").is_in(list(person_events))).select("subject_id")
+        )["subject_id"].to_list()) if person_events else set()
         missing = (expected & published) - with_row
         metrics.update({"omop_death_rows": death_rows, "omop_subjects_missing_death": len(missing)})
         examined += 1
@@ -3451,9 +3517,9 @@ def _unit_concept_coverage(l: Layers) -> CheckResult:
     total, covered = int(total or 0), int(covered or 0)
     declared_total = declared_covered = 0
     if l.events is not None:
-        declared = l.events.filter(
+        declared = _collect(l.events.filter(
             pl.col("quality_flags").list.contains(str(QualityFlag.UNIT_DECLARED))
-        ).select("event_id")
+        ).select("event_id"))
         if declared.height:
             with _engine(l, omop=True) as engine:
                 engine.register("declared", declared.to_arrow())
@@ -3942,14 +4008,14 @@ def _visit_concept_coverage(l: Layers) -> CheckResult:
     canonical_details = None
     if l.events is not None:
         visits = l.events.filter(pl.col("event_kind") == str(EventKind.visit))
-        placeholders = int(visits.filter(
+        placeholders = _height(visits.filter(
             (pl.col("end_time").is_null() | (pl.col("end_time") == pl.col("event_time")))
             & (pl.col("source_code").is_null()
                | pl.col("source_code").str.strip_chars().str.to_lowercase().is_in(sorted(PLACEHOLDER_VALUES)))
-        ).height)
-        canonical_details = int(l.events.filter(
+        ))
+        canonical_details = _height(l.events.filter(
             (pl.col("event_kind") == str(EventKind.visit_detail)) & pl.col("event_time").is_not_null()
-        ).height)
+        ))
     thresholds = {
         "visit_occurrence": l.cfg.validation.visit_concept_coverage_min,
         "visit_detail": l.cfg.validation.visit_detail_concept_coverage_min,
@@ -4074,7 +4140,7 @@ def _encounter_resolves(l: Layers) -> CheckResult:
     unread = unread_encounter_columns(l.cfg, l.manifest)
     mismatched = mismatched_encounter_keys(l.cfg) if against == "visits" else {}
     no_visits = (against == "visits" and l.events is not None
-                 and l.events.filter(pl.col("event_kind").is_in(list(VISIT_KINDS))).height == 0)
+                 and _height(l.events.filter(pl.col("event_kind").is_in(list(VISIT_KINDS)))) == 0)
     rates: dict[str, dict[str, Any]] = {}
     with _engine(l) as con:
         if not no_visits:
