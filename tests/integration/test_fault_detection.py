@@ -14,7 +14,7 @@ from __future__ import annotations
 import pytest
 
 from ehr2trace.config import load_dataset_config
-from ehr2trace.faults import FAULTS, clone_work_tree
+from ehr2trace.faults import FAULTS, clone_work_tree, inject
 from ehr2trace.meds import build_meds
 from ehr2trace.omop import build_omop
 from ehr2trace.paths import WorkLayout
@@ -69,9 +69,15 @@ def test_an_injected_fault_is_detected(clean_build, tmp_path, fault):
     clone_work_tree(source_layout.root, scratch)
     layout = WorkLayout(root=scratch, dataset_id=cfg.dataset_id)
 
-    effect = fault.apply(layout, cfg)
-    if effect.startswith("skipped"):
-        pytest.skip(f"{fault.id}: {effect}")
+    injection = inject(fault, layout, cfg)
+    if injection.error is not None:
+        pytest.fail(
+            f"{fault.id} raised while injecting ({injection.error}). An injection that breaks is not injected, "
+            "and nothing the checks find on its clone may count as detected."
+        )
+    if not injection.injected:
+        pytest.skip(f"{fault.id}: {injection.effect}")
+    effect = injection.effect
 
     after = {r.check_id: r.passed for r in run_checks(cfg, layout, include_slow=True)}
     # A detector passes clean and fails dirty. Anything already failing tells us nothing.

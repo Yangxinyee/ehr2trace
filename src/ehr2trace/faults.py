@@ -59,6 +59,33 @@ class Fault:
 FAULTS: list[Fault] = []
 
 
+@dataclass(frozen=True)
+class Injection:
+    """What applying one fault did."""
+
+    #: whether the corruption is in the clone: False when the fault skipped or raised
+    injected: bool
+    effect: str
+    #: the exception an injection raised, or None
+    error: str | None = None
+
+
+def inject(fault: Fault, layout: WorkLayout, cfg: DatasetConfig) -> Injection:
+    """Apply one fault, telling a corruption that took effect from one that skipped or broke.
+
+    An injection that raises has left its clone in whatever state it reached -- the
+    vocabulary fault once rewrote its shards and then failed to regenerate their code
+    metadata -- and checks run on that state measure the crash, not the fault. So an
+    injection that raises is not injected: nothing a check finds on its clone may be
+    counted as a detection, and a caller should report it as broken.
+    """
+    try:
+        effect = fault.apply(layout, cfg)
+    except Exception as exc:  # the injection broke; the clone is not a fault's state
+        return Injection(False, f"not injected: {type(exc).__name__} while injecting", f"{type(exc).__name__}: {exc}")
+    return Injection(not effect.startswith("skipped"), effect)
+
+
 def fault(fault_id: str, layer: str, origin: str, silent: str, description: str, expect: tuple[str, ...] = ()):
     def deco(fn: Callable[[WorkLayout, DatasetConfig], str]) -> Callable:
         FAULTS.append(Fault(fault_id, layer, origin, silent, description, fn, expect))
@@ -528,6 +555,31 @@ def _truncate_codes(layout: WorkLayout, cfg: DatasetConfig) -> str:
     return f"{codes.height - keep:,} of {codes.height:,} code descriptions removed"
 
 
+def _unresolved_term_stage(con, layout: WorkLayout) -> None:
+    """The connection state ``_write_code_metadata`` reads, as a MEDS stage run without a vocabulary leaves it.
+
+    The stage creates an ``evt`` view over the canonical events and a ``term_map`` with one
+    row per distinct term, spelled as ``_build_term_map`` spells it. Without a vocabulary no
+    term resolves, so every row carries its normalized form and no concept -- which is what
+    makes the codes the metadata computes the same SOURCE/ codes the fault writes into the
+    shards. An empty map would not be that state: every code would become
+    ``SOURCE/<source>/unspecified``, and the regenerated descriptions would drift with it.
+    """
+    from ehr2trace.terminology import normalize_term
+
+    con.execute(f"CREATE OR REPLACE VIEW evt AS SELECT * FROM read_parquet('{layout.canonical_path('events')}')")
+    con.execute(
+        "CREATE OR REPLACE TABLE term_map (code_system VARCHAR, source_code VARCHAR, "
+        "concept_id BIGINT, normalized VARCHAR, concept_name VARCHAR)"
+    )
+    terms = con.execute("SELECT DISTINCT code_system, source_code FROM evt WHERE source_code IS NOT NULL").fetchall()
+    if terms:
+        con.executemany(
+            "INSERT INTO term_map VALUES (?, ?, NULL, ?, NULL)",
+            [(system or "SOURCE", code, normalize_term(code)) for system, code in terms],
+        )
+
+
 @fault(
     "MEDS_BUILT_WITHOUT_VOCABULARY",
     "meds",
@@ -549,8 +601,20 @@ def _meds_without_vocabulary(layout: WorkLayout, cfg: DatasetConfig) -> str:
 
     import pyarrow.parquet as pq
 
+    shards = _meds_shards(layout)
+    if not any(pq.read_table(p, columns=["omop_concept_id"]).column(0).null_count < pq.read_metadata(p).num_rows
+               for p in shards):
+        return "skipped: no mapped concepts to strip"
+    # Everything the metadata needs is set up before a shard is touched, so a failure here
+    # leaves the clone as it was rather than half corrupted.
+    con = duckdb.connect()
+    try:
+        _unresolved_term_stage(con, layout)
+    except Exception:
+        con.close()
+        raise
     changed = 0
-    for path in _meds_shards(layout):
+    for path in shards:
         original = pq.read_table(path)
         shard = pl.from_arrow(original)
         mapped = pl.col("omop_concept_id").is_not_null()
@@ -577,10 +641,9 @@ def _meds_without_vocabulary(layout: WorkLayout, cfg: DatasetConfig) -> str:
         tmp = path.with_suffix(path.suffix + ".mutating")
         pq.write_table(mutated.to_arrow().cast(original.schema), tmp)
         tmp.replace(path)
-    if not changed:
-        return "skipped: no mapped concepts to strip"
-    con = duckdb.connect()
     try:
+        if not changed:
+            return "skipped: no mapped concepts to strip"
         _write_code_metadata(con, str(layout.meds_dir / "data" / "*" / "*.parquet"), layout)
     finally:
         con.close()
