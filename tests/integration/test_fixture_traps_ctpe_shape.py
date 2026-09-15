@@ -404,3 +404,19 @@ def test_declared_the_other_way_the_same_result_is_available_from_the_later(befo
     for patient, trap in _late_results(before).items():
         first, last = trap["seen"]
         assert trap["event"]["available_time"] == last != first, patient
+
+
+# -- all of them, whatever the worker count ---------------------------------------------------
+
+
+def test_four_workers_build_these_traps_exactly_as_one_does(after, tmp_path):
+    """The merges these traps exercise -- two doses, a status priority, availability -- must
+    not depend on which process built which bucket. The generic fixture's traps are held to
+    the same by ``test_reproducibility.py``; this fixture is not built there.
+    """
+    from ehr2trace.digest import changed, fingerprint
+
+    reference = fingerprint(after.layout)
+    assert reference, "nothing was built, so agreement would be vacuous"
+    parallel = build(CONFIG, FIXTURE, tmp_path / "four_workers", workers=4)
+    assert changed(reference, fingerprint(parallel.layout)) == []
