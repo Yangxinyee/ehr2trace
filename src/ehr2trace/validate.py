@@ -2348,6 +2348,8 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
         restrict_kinds = bool(own_kinds) and "event_kind" in event_columns
         minimums: list[str] = []
         verifications: list[tuple[str, str]] = []
+        zone = cfg.time.timezone_assumption
+        needs_event_time = False
         for offset, (key, (_sql, rule)) in enumerate(ruled.items()):
             i = len(expressions) + offset
             d = _sql_ident(f"d{i}")
@@ -2355,6 +2357,21 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
             if not event_columns:
                 unverifiable.append(key)
                 continue
+            reached = ""
+            if FIELD_TO_ROLE.get(key, key) == "available_time" and "event_time" in event_columns:
+                # The converter moves a row's availability up to its event time when the source
+                # says the result was visible before the specimen was taken, and flags the
+                # event AVAILABILITY_BEFORE_EVENT. Rows of one event share its event time, so
+                # after that move their availabilities still disagree exactly when the latest
+                # raw one is later than the event time; otherwise the merge saw one value and
+                # rightly wrote nothing. The raw cell is local time in the dataset's zone, the
+                # event time naive UTC. One aggregate per group, and one more event column.
+                latest = _sql_ident(f"x{i}")
+                minimums.append(f"max(try_cast({_sql_ident(f'f{i}')} AS TIMESTAMP)) AS {latest}")
+                latest_utc = (f"timezone('UTC', timezone({_sql_str(zone)}, {latest}))"
+                              if zone and zone.upper() != "UTC" else latest)
+                reached = f" AND (e.event_time IS NULL OR {latest_utc} > e.event_time)"
+                needs_event_time = True
             if rule.rule == "priority":
                 if key not in event_columns or not rule.order:
                     unverifiable.append(key)
@@ -2373,11 +2390,11 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
                 continue
             accepted = [rule.flag_name] + ([str(QualityFlag.ENCOUNTER_FROM_LINKED_ROW)] if rule.rule == "prefer_linked" else [])
             carried = " OR ".join(f"coalesce(list_contains(e.quality_flags, {_sql_str(f)}), false)" for f in accepted)
-            verifications.append((key, f"{d} > 1 AND e.event_id IS NOT NULL AND NOT ({carried}) AND NOT {conflict}"))
+            verifications.append((key, f"{d} > 1 AND e.event_id IS NOT NULL{reached} AND NOT ({carried}) AND NOT {conflict}"))
         if unverifiable:
             entry["rules_unverifiable"] = sorted(set(unverifiable))
         checks = "".join(f", count(*) FILTER (WHERE {sql}) AS {_sql_ident(f'u{j}')}" for j, (_k, sql) in enumerate(verifications))
-        join = ("LEFT JOIN (SELECT event_id, quality_flags"
+        join = ("LEFT JOIN (SELECT event_id, quality_flags" + (", event_time" if needs_event_time else "")
                 + "".join(f", {_sql_ident(k)}" for k, (_sql, r) in ruled.items() if r.rule == "priority" and k in event_columns)
                 + f" FROM evt WHERE source_id = {_sql_str(source_id)}) e USING (event_id)") if verifications else ""
 
@@ -3043,7 +3060,10 @@ def _duplicates_agree(l: Layers) -> CheckResult:
     carries neither the flag the rule writes nor a MERGE_CONFLICT, or, for a priority, it
     kept a value the order ranks below one its rows hold. That is how a rule declared after
     a build was made shows on that build (P-CU7, P-J2, P-J3). A rule whose application
-    leaves no trace to read is reported as unverifiable.
+    leaves no trace to read is reported as unverifiable. A rule on ``available_time`` is
+    asked for its trace only where the rows' availabilities still disagree after the
+    converter moves any that precede the event up to the event time, since rows that all
+    precede it reach the merge with one value.
 
     Cells compare in the canonical form the identity hashes them in, so a CSN typed as an
     integer in one workbook and a float in another is one value, while case is a
