@@ -68,6 +68,47 @@ Each of these is a test, not a promise: see `tests/test_no_hardcoded_dataset_str
 the lineage checks in `src/ehr2trace/validate.py`, and
 `tests/integration/test_generic_ehr_pipeline.py::test_one_worker_and_four_workers_agree`.
 
+## What a record becomes, and where that is decided
+
+The conversion remediation of September 2026 changed how records become events. The
+[plan](docs/CONVERSION_REMEDIATION_PLAN.md) records the problems, and
+[DECISIONS](docs/DECISIONS.md) records the eighteen decisions. None of these rules names
+a dataset in `src/`: each dataset's YAML declares what applies to it.
+
+- **Two records are one event only if they state the same fact.** The identity of a
+  drug order, dispensing or administration includes its dose (read as a number and a
+  unit), route, status and end time. When the rows behind one event still disagree on
+  a field, the YAML names the rule in `merge_rules` (`earliest`, `latest`,
+  `null_and_flag`, `priority`, `prefer_linked` or `keep_all_flag`), and every row stays
+  in the lineage. A disagreement that no rule covers is flagged `MERGE_CONFLICT` and
+  fails `DUPLICATES_AGREE`. Two availability times for one result merge to the earlier
+  one, flagged `AVAILABILITY_MERGED`.
+- **Units are normalized beside the source values, never over them.** Canonical events
+  and MEDS carry `value_number_normalized` and `unit_normalized`, converted only by the
+  exact rules in `reference/unit_conversions.csv`.
+  - A unit declared or overridden for a source code is flagged `UNIT_DECLARED` or
+    `UNIT_OVERRIDDEN`.
+  - A value outside the range in `reference/plausible_ranges/` keeps its source value,
+    has no normalized value, and is flagged `IMPLAUSIBLE`.
+  - A code that the YAML says mixes units with no exact conversion becomes one code per
+    unit.
+  - OMOP's `unit_concept_id` is looked up rather than written as 0, and
+    `dose_unit_source_value` falls back to the event's own unit.
+- **A stay inside a visit is a visit detail.** Transfers, service changes and ICU stays
+  are published to `VISIT_DETAIL` under the visit that contains them. A detail with no
+  parent visit stays in canonical and MEDS and is withheld from OMOP as
+  `VISIT_DETAIL_UNPARENTED`, because the CDM cannot hold a detail of no visit.
+- **Death dates are compared in the dataset's time zone.** Two records of a death on the
+  same local day become one death with the more precise time (`DEATH_TIME_MERGED`).
+  Records on different days are both kept, flagged `DEATH_DATE_CONFLICT`, and not
+  published to `DEATH`.
+- **Rates, actions and destinations have columns.** MEDS carries `rate`, `rate_unit`,
+  `action` and `discharged_to`. OMOP has no rate column, so `drug_exposure.sig` carries an
+  infusion rate as `<dose text>; rate <rate> <unit>`.
+- **Nothing delivered is silently unread.** Every file and column is read, kept, or
+  declared unread in the YAML with a reason (`ignored_columns`, `out_of_scope`), and
+  `RAW_COVERAGE_DECLARED` checks that.
+
 ## Documents
 
 | File | Contents |
@@ -137,6 +178,20 @@ data and must not be guessed. It exits non-zero while any remain open. That is
 intentional: an open blocker is information, not an error to route around.
 
 ### 3. Convert
+
+Two of the tables `datasets/ctpe.yaml` reads come from the second delivery,
+`All_kinds/`: the most recent follow-up contact, and the ADT department stays, which
+become visit details (D-R12, D-R14). `tools/prepare_ctpe.py` projects them into the
+partition layout first. Before writing anything, it compares a format fingerprint of the
+four cohort groups, so that a difference in how the groups were exported cannot stand in
+for the label, and it stops if they differ:
+
+```bash
+python3 tools/prepare_ctpe.py --all-kinds-root /path/to/All_kinds --out /path/to/ctpe_prepared
+export CTPE_PREPARED_ROOT=/path/to/ctpe_prepared
+```
+
+Then convert:
 
 ```bash
 .venv/bin/ehr2trace ingest    --dataset ctpe --workers 12
@@ -316,7 +371,9 @@ names for every role, no anchor concept at all — and it converts end to end th
 concept ids anywhere in `src/`.
 
 It is also tested against two more real datasets. `datasets/mimiciv.yaml` converts
-MIMIC-IV v3.1 (hosp + ed) and v2.2 notes with no MIMIC-specific conversion code:
+MIMIC-IV v3.1 and v2.2 notes with no MIMIC-specific conversion code. Since the 2026-09
+remediation it reads the `icu` module beside `hosp` and `ed`, 33 sources in all. The
+figures below are from the build before that remediation, which read `hosp` and `ed`:
 
 | | |
 |---|---:|
@@ -333,8 +390,15 @@ The five skips are honest ones: MIMIC has no extraction anchors and no cohort
 partitions, so four checks have nothing to examine, and its birth years come from the
 data rather than from an age, so the fifth has nothing to recompute. Because MIMIC is a normalized relational database and a
 hospital extract is not, `tools/prepare_mimiciv.py` denormalizes it first, using
-projections and lookup joins only, asserting that no join changes cardinality, and
+projections and lookup joins, asserting that no join changes cardinality, and
 writing a manifest of input and output hashes so lineage is unbroken across that step.
+Two exceptions are declared per output rather than buried. A wide row of
+emergency-department vital signs or triage values becomes one row per value, counted as
+`rows_added_by_split`. The microbiology table drives two outputs, cultures and their
+susceptibilities. An administration or pharmacy row that names no drug takes the name
+of the prescription with the same `pharmacy_id`, and is marked as having done so
+(D-R18). The manifest also lists every delivered file and column the script did not
+carry, with the reason. The `icu/` module is read from under `--mimic-root`.
 
 ```bash
 python tools/prepare_mimiciv.py --mimic-root .../mimiciv/3.1 \
@@ -348,7 +412,8 @@ redistributed. The YAML is a recipe, not data.
 
 `datasets/cu_ctpa.yaml` converts the University of Colorado CT pulmonary angiography
 extract: nine tables exported for a study rather than a database, 127,955 patients,
-again with no site-specific conversion code:
+again with no site-specific conversion code. The figures below are from the build before
+the 2026-09 remediation:
 
 | | |
 |---|---:|
@@ -375,6 +440,13 @@ measurement rather than by the owner (see `docs/DECISIONS.md`). `tools/prepare_c
 flattens the export the way `prepare_mimiciv.py` does, with one deliberate exception: a
 blood pressure delivered as one cell, `135/76`, becomes the two measurements OMOP
 records, so that step writes more rows than it reads and its manifest says so.
+Since the 2026-09 remediation the script also does three more things:
+
+- It records the sha256 of every raw input and the rows each step drops.
+- It marks each note whose encounter id another table knows (`encounter_linked`, which
+  the `prefer_linked` merge rule reads; D-R2).
+- It writes a manifest of every CT accession beside the event stream rather than in it
+  (D-R16).
 
 ```bash
 python tools/prepare_cu.py --cu-root .../CU_Data --out $CU_CTPA_DATA_ROOT/cu_ctpa
@@ -416,24 +488,33 @@ mappings record that they depended on ignoring punctuation.
 ## Does the check suite detect anything?
 
 Checks passing on the pipeline that produced the data is weak evidence. The other
-direction is built in: `src/ehr2trace/faults.py` holds nineteen corruptions, each drawn
-from an incident that actually happened here, each silent by construction — row counts
-plausible, schemas valid, a spot check on a few patients clean. Detection means a check
+direction is built in: `src/ehr2trace/faults.py` holds twenty-eight corruptions, each
+drawn from an incident that actually happened here. Nineteen date from building the
+converter, and nine were found by a read-only audit of three finished conversions on
+2026-09-13. Each is silent by construction — row counts plausible, schemas valid, a spot
+check on a few patients clean. Detection means a check
 that passed on the clean build fails on the corrupted one, and `docs/FAULT_CATALOGUE.md`
 says what each fault is for.
 
-Six checks in the registry exist because a fault in that catalogue got past the suite
-first. A detector written in response to a fault is guaranteed to catch it, so the
-catalogue records that order rather than only a score, and the six that were added
-share one shape: a check that compares an artifact against independently stored
-information, which the ones reading a single artifact could not do. The fifth makes the
-shape explicit: `TEXT_SOURCES_PUBLISH_THEIR_TEXT` compares what a source *published*
+Twenty-one checks in the registry exist because a fault in that catalogue got past the
+suite first: six after this experiment missed one, and fifteen after the audit. A
+detector written in response to a fault is guaranteed to catch it, so the catalogue
+records that order rather than only a score. The checks that were added share one
+shape: a check that compares an artifact against independently stored information,
+which the ones reading a single artifact could not do. Of the first six, the fifth makes
+the shape explicit: `TEXT_SOURCES_PUBLISH_THEIR_TEXT` compares what a source *published*
 against what its configuration *said it would publish*, which is how 2,652,887 MIMIC-IV
 notes were shipped with no text in them while every other check passed. The sixth,
 `MEDS_CONCEPTS_ARE_OMOPS`, compares the two targets against each other: a MEDS stage
 rerun by hand without the vocabulary the OMOP stage had published 311 million events with
 every code unmapped, all thirty-nine checks passed, and a digest comparison of a rebuild
-was what noticed. The stage now refuses to build that way, and the check would fail it.
+was what noticed. The stage now refuses to build that way, and the check would fail it. The fifteen
+written after the audit compare in the same way:
+
+- merged rows against the source rows behind them;
+- values and units against reference tables;
+- a published death against the deaths the canonical layer holds;
+- the delivery against what the YAML says it reads.
 
 It runs on the PHI-free fixture, so it reproduces from a clone with no data access, and
 it is a CI gate; the two faults that corrupt concepts need a vocabulary to apply and are
