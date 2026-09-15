@@ -675,6 +675,13 @@
 | `2fb3241` | 新旧对比工具 `tools/remediation_compare.py` | T3.3 |
 | `3eb3de5` | CU：笔记作者与科室按 `keep_all_flag` 合并，`source_file` 与再入院标记改为忽略列；声明 `UNTIMED_VITAL_STATUS` 与就诊概念阈值 | T3.2（回到 T1.2、T2.CU3） |
 | `57b8ddc` | JHU：问题列表与检验名称、医嘱剂量写法按 `keep_all_flag`，参考上下限与遮蔽时长按 `null_and_flag`；七个来源声明就诊号可关联率 | T3.2（回到 T1.2、T0.2） |
+| `e03e91f` | `DUPLICATES_AGREE`：可用时间规则只在转换器把早于采集的结果时间挪到采集时间之后仍不一致时才要求留痕 | T0.2 |
+| `68a4379` | `UNIT_VALUE_PLAUSIBLE`：转换器标为不合理而扣下的值计入越界数 | T0.2 |
+| `2e472bd` | 参考范围进入规范层 `range_low`/`range_high`（schema 3）并由 OMOP 优先采用；按角色键的合并规则经一对多映射落到字段（`duration_masked` → `value_text`） | T3.2（回到 T1.2、T2.J2） |
+| `eccaeed` | JHU：参考范围规则改键为 `range_low`/`range_high`；声明 outcome 的 `VALUE_CONFLICT` 隔离与随访工作簿 28a 表不纳入 | T3.2（回到 T2.J2、T0.2） |
+| `9dc98a5` | 9.5：CU 正式构建后半段实测；9.3：OMOP 日期口径与 fixture 合入时机 | T5.5 |
+| `53d9e18` | 合并 fixture 陷阱：12 个陷阱、`zoned_site` 数据集 | T1.12 |
+| `c4b5695` | `CODE_VERSION` 回到 0.7.0，规范层任务哈希折入 `CANONICAL_SCHEMA_VERSION` | T3.2 |
 
 ### 9.2 CU-CTPA：抽样重建已验证（2026-09-14）
 
@@ -720,6 +727,10 @@
 | 2026-09-14 | CU 的 ICU 住院按 D-R14 走 `visit_detail`，但 CU 没有就诊号，只能按时间包含挂到就诊；1/200 抽样的 152 个里 78 个挂不上 | 按 5.3 的修正执行：挂不上的在 OMOP 中不发布，记 `VISIT_DETAIL_UNPARENTED`；规范层与 MEDS 保留全部 39,325 个。**待 Xinye 确认** | CDM 5.4 的 `visit_detail.visit_occurrence_id` 不可为空。若要 OMOP 保留全部 ICU 住院，只能让 CU 的 ICU 住院改走 `visit_occurrence`，相当于对 CU 推翻 D-R14，并需要重建 CU |
 | 2026-09-14 | OMOP 的日期列按 UTC 日历取日（`CAST(event_time AS DATE)`），日期时间列也是 UTC；fixture 陷阱发现本地晚间的事件在 OMOP 里落到第二天 | 暂保持现状，**待 Xinye 决定** | 实测：JHU 8.9% 的事件日期挪了一天（测量 15.0%、给药 14.8%、就诊开始 17.2%、死亡 4,710 人中 315 人），CU 35.6% 的测量日期挪了一天；只有日期的事件不受影响。改为本地日期只动 OMOP 发布并重跑 OMOP 阶段；MIMIC 若在其 OMOP 阶段开始前决定则无需重跑 |
 | 2026-09-14 | fixture 陷阱 4 在 `reference/plausible_ranges/generic_ehr.csv` 加了一行，而参考表摘要覆盖整个 `reference/` 目录并进入每个数据集的规范层地址 | 在三个数据集的规范层按代码 0.7.1 重建之前合入 | 参考范围与合并规则两处修复本来就要求重建全部规范层，先合入则三个 v07 构建共用同一参考表摘要；这一行只作用于 generic_ehr，不改变真实数据集的内容，也没有检查比对摘要 |
+| 2026-09-14 | JHU 化验与 MIMIC labevents 把参考范围映射到 `value_low`/`value_high` 角色，转换器却从不读取这两个角色：JHU 的 OMOP 15,911,634 条测量没有一条带参考范围。规范层的 `value_low`/`value_high` 表示"结果本身写成范围"，把参考范围填进去会让约一半化验结果显示成范围 | 新增规范层列 `range_low`/`range_high`（schema 3）读取这两个角色；OMOP `range_low`/`range_high` 优先取行内参考范围，没有时取配置的范围；JHU 的两条规则改键为 `range_low`/`range_high` | P-J6 的问题是参考范围没有进入输出，只映射不读取等于没修。MIMIC labevents 495,663 组同身份多行里参考范围全部一致，MIMIC 配置不用改 |
+| 2026-09-14 | JHU ICU 转科与 outcome 的 `duration_masked` 规则只作用在行负载上：该角色与 `text` 共用 `value_text`，合并按字段找规则时找不到，事件保留幸存行的时长，并记下 18,858 个 `MERGE_CONFLICT` | 角色到字段改为一对多映射，规则落到 `value_text` | D-R4 要求冲突的时长置空并隔离，原实现只隔离不置空 |
+| 2026-09-14 | 为了让规范层按新代码重算，先把 `CODE_VERSION` 升到 0.7.1；但它也进入 ingest 与 staging 的地址，规范层随即拒绝三个数据集全部 ingest 输出，包括已跑两小时的 MIMIC ingest | `CODE_VERSION` 回到 0.7.0，规范层任务哈希同时折入已因 schema 3 升级的 `CANONICAL_SCHEMA_VERSION` | 只重算列形状变了的那一层，上游输出不作废：CU 从规范层起重建，JHU 因配置变化从 ingest 起，MIMIC 沿用 0.7.0 的 ingest |
+| 2026-09-14 | 另一个 compile 会话发现：`mappings/` 中 12 行（11 个 PFT 后缀行与 ETHNICITY 4271761，均为 2026-09-11）在任何工作根里都没有对应决定；MIMIC compile 在 `SOURCE/Observation` 与 `SOURCE/Emergency` 上因同日冲突退出 1 | 本次构建不经 compile，直接读 `mappings/`，不受影响；记录在案，**待 Xinye 决定** | `Observation` 的现行取值 9201 是上面的协调者判断，可以推翻 |
 
 ### 9.4 正式构建前半段：准备、ingest、identity（2026-09-14）
 
@@ -765,4 +776,4 @@ CU 与 JHU 的配置修正（`3eb3de5`、`57b8ddc`）提交后从 ingest 起整�
 
 ### 9.6 尚未完成
 
-校验分支（检查、故障注入、审计工具、修复前基线）与 MIMIC-IV 分支（yaml、含 ICU 模块的准备脚本、映射）的合入；fixture 陷阱（T1.12）；CU 与 JHU 的规范层、OMOP、MEDS 与校验；MIMIC-IV 的全量准备与构建；新旧对比（T3.3）；README 与论文数字（T5.2–T5.4）。
+CU 与 JHU 在规范层 schema 3 上的重建与复验（9.5 中 CU 的数字随之更新）；MIMIC-IV 的规范层、OMOP、MEDS，非哈希声明，以及校验；校验分支余下的两处检查修正（夏令时换算、codes 描述的并列）与 `range_low`/`range_high` 的比对映射；新旧对比文档（T3.3）与验收（T3.4）；README、故障目录与论文数字（T5.2–T5.4，文档分支 `remediation/docs`、论文分支 `remediation-2026-09`）；每个 `P-*` 的最终状态（T5.5）。待 Xinye 决定：OMOP 日期按 UTC 还是本地日历；CU 挂不上就诊的 ICU 住院在 OMOP 中如何发布；`mappings/` 中无决定支撑的 12 行。
