@@ -1410,6 +1410,12 @@ def _connect(db_path: Path):
 
     con = duckdb.connect(str(db_path))
     con.execute("SET TimeZone = 'UTC'")
+    from ehr2trace.analytics import operator_memory_limit_gb
+
+    cap = operator_memory_limit_gb()
+    if cap is not None:
+        # Only when an operator asked for one: otherwise the publisher keeps DuckDB's default.
+        con.execute(f"SET memory_limit = '{cap}GB'")
     return con
 
 

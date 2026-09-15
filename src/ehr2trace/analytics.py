@@ -35,8 +35,37 @@ MIN_LIMIT_GB = 2
 HEAVY_THREADS = 8
 
 
+#: An operator's cap, in GB, on what one process's analytical queries may hold before they
+#: spill. Operational only: it changes no output and no address. It exists for a machine
+#: that several builds share, where half of physical memory per process adds up to more
+#: than the machine has.
+OPERATOR_MEMORY_ENV = "EHR_DUCKDB_MEMORY_GB"
+
+
+def operator_memory_limit_gb() -> int | None:
+    """The operator's cap from ``EHR_DUCKDB_MEMORY_GB``, or None when it is not set.
+
+    A value that is not a positive number is refused rather than ignored: a cap that
+    silently did nothing is exactly the failure it exists to prevent.
+    """
+    raw = os.environ.get(OPERATOR_MEMORY_ENV, "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ValueError(f"{OPERATOR_MEMORY_ENV}={raw!r} is not a number of GB") from None
+    if value <= 0:
+        raise ValueError(f"{OPERATOR_MEMORY_ENV}={raw!r} must be a positive number of GB")
+    return max(MIN_LIMIT_GB, int(value))
+
+
 def memory_limit_gb() -> int | None:
-    """Roughly half of physical memory, or None where it cannot be determined."""
+    """The operator's cap when one is set, else roughly half of physical memory, or None
+    where that cannot be determined."""
+    override = operator_memory_limit_gb()
+    if override is not None:
+        return override
     try:
         pages = os.sysconf("SC_PHYS_PAGES")
         page_size = os.sysconf("SC_PAGE_SIZE")

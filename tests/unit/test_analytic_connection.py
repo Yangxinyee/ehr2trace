@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from ehr2trace.analytics import analytic_connection, memory_limit_gb
 
 
@@ -51,3 +53,34 @@ def test_cleanup_happens_even_when_the_query_raises(tmp_path: Path):
     except Exception:
         pass
     assert not scratch.exists()
+
+
+def _gib(setting: str) -> float:
+    number, unit = setting.split()[:2]
+    scale = {"KiB": 1 / 1024**2, "MiB": 1 / 1024, "GiB": 1.0, "TiB": 1024.0,
+             "KB": 1e3 / 1024**3, "MB": 1e6 / 1024**3, "GB": 1e9 / 1024**3, "TB": 1e12 / 1024**3}[unit]
+    return float(number) * scale
+
+
+def test_an_operator_cap_bounds_the_analytical_and_the_omop_connections(tmp_path: Path, monkeypatch):
+    """On 2026-09-14 three builds shared one machine, each process assumed half of it, and
+    the kernel killed two stages. The cap is how an operator says what a process may hold."""
+    monkeypatch.setenv("EHR_DUCKDB_MEMORY_GB", "3")
+    assert memory_limit_gb() == 3
+    with analytic_connection(tmp_path / "s") as con:
+        assert _gib(con.execute("SELECT current_setting('memory_limit')").fetchone()[0]) <= 3.0
+    from ehr2trace.omop import _connect
+    con = _connect(tmp_path / "omop.duckdb")
+    try:
+        assert _gib(con.execute("SELECT current_setting('memory_limit')").fetchone()[0]) <= 3.0
+    finally:
+        con.close()
+
+
+def test_a_malformed_operator_cap_is_refused(monkeypatch):
+    monkeypatch.setenv("EHR_DUCKDB_MEMORY_GB", "plenty")
+    with pytest.raises(ValueError):
+        memory_limit_gb()
+    monkeypatch.setenv("EHR_DUCKDB_MEMORY_GB", "0")
+    with pytest.raises(ValueError):
+        memory_limit_gb()
