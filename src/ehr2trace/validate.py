@@ -956,12 +956,10 @@ def _quarantine_explained(l: Layers) -> CheckResult:
     if l.quarantine is None or l.quarantine.height == 0:
         return CheckResult("", True, "nothing quarantined at the canonical stage")
     unexplained = l.quarantine.filter(pl.col("reason").is_null() | (pl.col("reason") == ""))
-    by_reason = dict(
-        zip(
-            l.quarantine.group_by("reason").len()["reason"].to_list(),
-            l.quarantine.group_by("reason").len()["len"].to_list(),
-        )
-    )
+    # One grouping, read row by row: two groupings of one frame need not come back in the
+    # same order, and pairing their columns once put each count under another reason.
+    counts = l.quarantine.group_by("reason").len().sort("reason", nulls_last=True)
+    by_reason = dict(zip(counts["reason"].to_list(), counts["len"].to_list()))
     return CheckResult(
         "",
         unexplained.height == 0,
@@ -3107,7 +3105,7 @@ def temperature_like_summary(con, columns: set[str]) -> list[dict[str, Any]]:
         WHERE unit_source IS NOT NULL AND {value} IS NOT NULL
           AND (lower(trim(unit_source)) IN ({spellings})
                OR lower(unit_source) LIKE '%celsius%' OR lower(unit_source) LIKE '%fahrenheit%')
-        GROUP BY 1, 2, 3 ORDER BY 4 DESC
+        GROUP BY 1, 2, 3 ORDER BY 4 DESC, 1, 2, 3
         """
     ).fetchall()
     return [
@@ -3603,7 +3601,7 @@ def _unit_value_plausible(l: Layers) -> CheckResult:
                    count(*) FILTER (WHERE e.implausible AND e.v IS NULL),
                    count(*) FILTER (WHERE e.v IS NULL AND NOT e.implausible)
             FROM resolved e JOIN rng r ON r.code_system = e.code_system AND r.source_code = e.source_code AND r.ucum = e.ucum
-            GROUP BY 1, 2, 3 ORDER BY 6 DESC, 5 DESC, 4 DESC
+            GROUP BY 1, 2, 3 ORDER BY 6 DESC, 5 DESC, 4 DESC, 1, 2, 3
             """
         ).fetchall()
     judged = [{"code_system": s, "source_code": c, "unit": u, "rows": int(n), "outside": int(o), "unflagged": int(f),
@@ -3678,7 +3676,7 @@ def _unit_homogeneous_per_code(l: Layers) -> CheckResult:
             "second_family_share": round(second_share, 4),
             "fails": second_share > MIN_SECOND_UNIT_FAMILY_SHARE,
         })
-    mixed.sort(key=lambda m: (-m["fails"], -m["second_family_share"], -m["rows"]))
+    mixed.sort(key=lambda m: (-m["fails"], -m["second_family_share"], -m["rows"], m["code_system"], m["source_code"]))
     failing = [m for m in mixed if m["fails"]]
     return CheckResult(
         "",
@@ -4348,7 +4346,7 @@ def _excluded_status_not_published(l: Layers) -> CheckResult:
                 f"""
                 SELECT source_id, lower(trim(status_source)), count(*) FROM evt
                 WHERE source_id IN ({', '.join(_sql_str(s) for s in with_status)}) AND status_source IS NOT NULL
-                GROUP BY 1, 2 ORDER BY 3 DESC
+                GROUP BY 1, 2 ORDER BY 3 DESC, 1, 2
                 """
             ).fetchall():
                 per = distribution.setdefault(str(sid), {})
