@@ -1,0 +1,4 @@
+patient_ref,visit_ref,procedure_code,procedure_label,performed_at,bill_type
+PX-1,V-1001,CTA-CHEST,CT angiography of the chest,2021-01-04 11:05:00,Facility
+PX-1,V-1001,CTA-CHEST,CT angiography of the chest,2021-01-04 11:05:00,Professional
+PX-2,V-1002,TTE,Transthoracic echocardiogram,2021-05-30 09:40:00,Professional

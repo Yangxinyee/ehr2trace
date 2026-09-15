@@ -137,3 +137,70 @@ def test_a_rule_that_leaves_nothing_to_read_is_reported_unverifiable(tmp_path: P
     report = merge_disagreements(cfg, manifest, links, con)["orders"]
     assert report["rules_unverifiable"] == ["status_source"]
     assert report["rules_not_applied"] == {"end_time": 1}
+
+
+def results_config() -> DatasetConfig:
+    return DatasetConfig.model_validate({
+        "dataset_id": "availability_check",
+        "identity": {"person_key": "PID"},
+        "partitions": [{"id": "p1", "dir": "p1"}, {"id": "p2", "dir": "p2"}],
+        "time": {"timezone_assumption": "America/New_York"},
+        "sources": {
+            "results": {
+                "adapter": "parquet", "shape": "point_event", "event_kind": "measurement",
+                "fields": {
+                    "person_id": {"from": ["PID"]}, "event_time": {"from": ["COLLECTED"]},
+                    "available_time": {"from": ["RESULTED"]}, "source_code": {"from": ["K"]},
+                },
+                "merge_rules": {"available_time": "earliest"},
+            },
+        },
+    })
+
+
+def test_result_times_that_all_precede_the_collection_need_no_trace_of_the_rule(tmp_path: Path):
+    """One result delivered by two batches, reported 6 minutes apart, both before the specimen was taken.
+
+    The converter moves each row's availability up to the collection time and flags the
+    contradiction, so both rows reach the merge with one availability and the merge writes
+    nothing. A result time after the collection is still a disagreement the merge must have
+    settled. Times are local (New York) in the source and naive UTC on the event.
+    """
+    from datetime import datetime
+
+    source = tmp_path / "results.parquet"
+    collected = "2020-01-01 10:00:00"  # 15:00 UTC
+    pl.DataFrame({
+        "source_row_id": ["r1", "r2", "r3", "r4", "r5", "r6"],
+        "col__PID": ["A"] * 6,
+        "col__K": ["K"] * 6,
+        "col__COLLECTED": [collected] * 6,
+        # both before; one before and one after; both after
+        "col__RESULTED": ["2020-01-01 09:50:00", "2020-01-01 09:56:00",
+                          "2020-01-01 09:50:00", "2020-01-01 10:30:00",
+                          "2020-01-01 10:10:00", "2020-01-01 10:20:00"],
+    }).write_parquet(source)
+    links = tmp_path / "event_source.parquet"
+    pl.DataFrame({
+        "event_id": ["before", "before", "straddle", "straddle", "after", "after"],
+        "source_row_id": ["r1", "r2", "r3", "r4", "r5", "r6"],
+        "partition_id": ["p1", "p2"] * 3,
+    }).write_parquet(links)
+    events = tmp_path / "events.parquet"
+    pl.DataFrame(
+        {"event_id": ["before", "straddle", "after"], "source_id": ["results"] * 3,
+         "event_kind": ["measurement"] * 3, "event_time": [datetime(2020, 1, 1, 15, 0)] * 3,
+         "quality_flags": [["AVAILABILITY_BEFORE_EVENT"], ["AVAILABILITY_BEFORE_EVENT"], ["AVAILABILITY_MERGED"]]},
+        schema={"event_id": pl.String, "source_id": pl.String, "event_kind": pl.String,
+                "event_time": pl.Datetime("us"), "quality_flags": pl.List(pl.String)},
+    ).write_parquet(events)
+    con = duckdb.connect()
+    con.execute("SET TimeZone='UTC'")
+    con.execute(f"CREATE VIEW evt AS SELECT * FROM read_parquet('{events}')")
+    manifest = {"inputs": [{"source_id": "results", "partition_id": "p1", "output_path": str(source), "rows_parsed": 6}]}
+
+    report = merge_disagreements(results_config(), manifest, links, con)["results"]
+    assert report["ruled_disagreements"] == {"available_time": 3}, "the raw result times differ in all three"
+    # "before": both moved to 15:00 UTC, one value, nothing to settle. "after": settled and
+    # flagged. "straddle": 15:00 and 15:30 UTC reached the merge, and nothing shows it was settled.
+    assert report["rules_not_applied"] == {"available_time": 1}

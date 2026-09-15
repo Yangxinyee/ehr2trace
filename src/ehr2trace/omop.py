@@ -1030,8 +1030,9 @@ def _measurement_sql(con, cfg: DatasetConfig) -> str:
     A ranged result keeps its original text in ``value_source_value`` with
     ``value_as_number`` empty. It does **not** go to ``range_low``/``range_high``:
     those are the reference range for the test, and a patient's own value there would
-    be a different clinical claim. Reference ranges come from configuration, because
-    the source's own range columns are empty throughout this export.
+    be a different clinical claim. The reference range is the one the source reported
+    with the result (canonical ``range_low``/``range_high``, schema 3), and where the
+    source reported none, the range configured for the code.
     """
     ranges = cfg.reference_ranges
     if ranges:
@@ -1047,6 +1048,8 @@ def _measurement_sql(con, cfg: DatasetConfig) -> str:
         range_high = f"CASE {cases_high} ELSE NULL END"
     else:
         range_low = range_high = "CAST(NULL AS DOUBLE)"
+    range_low = f"coalesce(e.range_low, {range_low})"
+    range_high = f"coalesce(e.range_high, {range_high})"
 
     return f"""
         SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS measurement_id,

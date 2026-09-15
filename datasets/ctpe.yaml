@@ -179,7 +179,10 @@ sources:
       # The reference range the laboratory reported with the result. Filled on
       # 10,009,411 (low) and 10,010,801 (high) of 18,698,432 rows, 53.5%, all but a
       # handful numeric -- not NULL throughout, as an earlier note here claimed
-      # (P-J6, T2.J2, measured 2026-09-14).
+      # (P-J6, T2.J2, measured 2026-09-14). Published as canonical range_low and
+      # range_high and OMOP measurement.range_low/range_high since canonical schema 3;
+      # before that the roles were read by nothing, and a bound that is not a plain
+      # number still stays in the source row.
       value_low:      {from: [Reference_Range_Low]}
       value_high:     {from: [Reference_Range_High]}
     # Arterial pH is the one code whose rows carry no unit at all (332,765 rows); pH is
@@ -199,8 +202,10 @@ sources:
       # reference bounds: two ranges for one result contradict each other, so neither is
       # published and both are quarantined (full build of 2026-09-14).
       source_name: {rule: keep_all_flag, flag: NAME_VARIANTS_MERGED}
-      value_low:   {rule: null_and_flag}
-      value_high:  {rule: null_and_flag}
+      # The reference bounds are the canonical range_low and range_high; a rule keyed
+      # value_low would address the field that holds a result written as a range.
+      range_low:   {rule: null_and_flag}
+      range_high:  {rule: null_and_flag}
     ignored_columns:
       rn: "an extraction-time row number, 1 to 5,532, filled on every row and unique neither within a patient nor within a code; it says where the row sat in the extract, not anything about the patient"
     # The encounter ids this source names resolve to a delivered visit or ADT stay
@@ -420,6 +425,14 @@ sources:
     # 2026-09-14).
     merge_rules:
       duration_masked: {rule: null_and_flag}
+    expected_quarantine:
+      VALUE_CONFLICT:
+        max_share: 0.55
+        reason: >-
+          The rule above quarantines each row's masked duration wherever an admission's
+          two extracts disagree on it: 8,032 admissions, whose rows are 49.5% of this
+          sheet's rows on the full build of 2026-09-14. The visit is still published;
+          only its duration is withheld.
 
   pft_narrative:
     adapter: excel
@@ -809,6 +822,7 @@ out_of_scope:
       - "All_kinds/**/35_*"
       - "All_kinds/Ultrasound/**"
       - "All_kinds/Most Recent Follow-Up/Most Recent Follow-Up/followup.xlsx::28_*"
+      - "All_kinds/Most Recent Follow-Up/Most Recent Follow-Up/followup.xlsx::28a_*"
       - "All_kinds/Most Recent Follow-Up/Most Recent Follow-Up/followup.xlsx::30b_*"
       - "All_kinds/Most Recent Follow-Up/Most Recent Follow-Up/followup.xlsx::33b_*"
       - "All_kinds/Most Recent Follow-Up/Most Recent Follow-Up/followup.xlsx::35_*"

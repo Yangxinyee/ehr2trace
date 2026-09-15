@@ -1,0 +1,6 @@
+patient_ref,visit_ref,note_type,written_on,note_text,visit_known
+PX-1,V-1001,Progress Note,2021-01-05,"Day 2: breathing easier on 2 L nasal cannula, anticoagulation continued.",1
+PX-1,V-1777,Progress Note,2021-01-05,"Day 2: breathing easier on 2 L nasal cannula, anticoagulation continued.",0
+PX-2,V-8801,Nursing Note,2021-05-30,"Tolerating a regular diet, walked the hallway twice.",0
+PX-2,V-8802,Nursing Note,2021-05-30,"Tolerating a regular diet, walked the hallway twice.",0
+PX-3,V-1003,ED Note,2021-02-11,"Wheezing improved after one nebulizer treatment, discharged home.",1

@@ -117,10 +117,16 @@ sources:
       event_time:  {from: [First_Noted_Date], required: true}
       status:      {from: [Status]}
     # A problem list records what was entered and what was taken back. An entry the
-    # clinician deleted is not a diagnosis the patient had, so it never becomes one.
-    # No fixture row carries this status; the declaration is what makes a row that
-    # acquires one detectable.
+    # clinician deleted is not a diagnosis the patient had, so it never becomes one: the
+    # row is dropped before shaping and reaches no layer (trap 8, D-R6).
     excluded_status: ["Deleted"]
+    # The batches disagree on one entry's status the way the reference export's batches
+    # did on 45,348 merged entries: an empty cell in one against Active in the other, and
+    # Active against Resolved. A recorded status outranks an empty one, which is no
+    # disagreement at all; Resolved outranks Active as the later state of the same
+    # problem; Active and Resolved together are a contradiction, flagged STATUS_CONFLICT.
+    merge_rules:
+      status_source: {rule: priority, order: [Resolved, Active], conflict_when: [[Active, Resolved]]}
 
   echo:
     adapter: delimited
@@ -161,6 +167,14 @@ sources:
       source_code:    {from: [Component_Name], required: true}
       text_line:      {from: [Line]}
       value:          {from: [Result_Value]}
+    # Trap 9 (T1.7). The component rows carry no unit column, and an ECG states its rates
+    # in beats per minute and its intervals in milliseconds. Declared per component, each
+    # value reaches a normalized unit, and through it a unit concept, flagged
+    # UNIT_DECLARED. The diagnosis lines are text and declare nothing.
+    declared_units:
+      "VENTRICULAR RATE": bpm
+      "QRS DURATION": ms
+      "Q-T  INTERVAL": ms
 
   demographics:
     adapter: excel
@@ -254,6 +268,10 @@ sources:
       source_code:    {from: [Component_Name], required: true}
       text_line:      {from: [Line]}
       value:          {from: [Result_Value]}
+    # Trap 9 (T1.7): the spirometry component states a percentage of predicted, with no
+    # unit column to say so.
+    declared_units:
+      "FEV1 PCT PRED": "%"
 
 anchors:
   anchor_type: study_anchor

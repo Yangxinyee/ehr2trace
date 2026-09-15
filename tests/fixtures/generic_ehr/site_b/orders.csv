@@ -1,3 +1,3 @@
-patient_ref,visit_ref,drug_label,amount,ordered_at,order_state
-PX-2,V-1002,furosemide (LASIX) 40 mg tablet,40 mg,2021-05-29 07:45:00,Dispensed
-PX-4,V-2001,apixaban (ELIQUIS) 5 mg tablet,5 mg,2021-08-19 14:10:00,Sent
+patient_ref,visit_ref,drug_label,amount,ordered_at,order_state,order_channel
+PX-2,V-1002,furosemide (LASIX) 40 mg tablet,40 mg,2021-05-29 07:45:00,Dispensed,verbal
+PX-4,V-2001,apixaban (ELIQUIS) 5 mg tablet,5 mg,2021-08-19 14:10:00,Sent,electronic

@@ -16,7 +16,11 @@ HASH_RULE_VERSION = "2"
 # Version of the canonical event schema (design section 5.2).
 # "2" on 2026-09-13: normalized value and unit, infusion rate, action and discharge
 # destination columns were added (remediation plan T1.11).
-CANONICAL_SCHEMA_VERSION = "2"
+# "3" on 2026-09-14: range_low and range_high, the reference interval reported with a result.
+# The canonical task hash folds this in, and nothing upstream of canonical does: a change
+# confined to the canonical layer bumps it and recomputes canonical, whereas CODE_VERSION
+# also addresses every ingest output, so bumping that re-ingests every dataset.
+CANONICAL_SCHEMA_VERSION = "3"
 
 # Version of the deterministic mapping rules; recorded on every canonical event.
 DEFAULT_MAPPING_VERSION = "0"

@@ -2348,6 +2348,8 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
         restrict_kinds = bool(own_kinds) and "event_kind" in event_columns
         minimums: list[str] = []
         verifications: list[tuple[str, str]] = []
+        zone = cfg.time.timezone_assumption
+        needs_event_time = False
         for offset, (key, (_sql, rule)) in enumerate(ruled.items()):
             i = len(expressions) + offset
             d = _sql_ident(f"d{i}")
@@ -2355,6 +2357,21 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
             if not event_columns:
                 unverifiable.append(key)
                 continue
+            reached = ""
+            if FIELD_TO_ROLE.get(key, key) == "available_time" and "event_time" in event_columns:
+                # The converter moves a row's availability up to its event time when the source
+                # says the result was visible before the specimen was taken, and flags the
+                # event AVAILABILITY_BEFORE_EVENT. Rows of one event share its event time, so
+                # after that move their availabilities still disagree exactly when the latest
+                # raw one is later than the event time; otherwise the merge saw one value and
+                # rightly wrote nothing. The raw cell is local time in the dataset's zone, the
+                # event time naive UTC. One aggregate per group, and one more event column.
+                latest = _sql_ident(f"x{i}")
+                minimums.append(f"max(try_cast({_sql_ident(f'f{i}')} AS TIMESTAMP)) AS {latest}")
+                latest_utc = (f"timezone('UTC', timezone({_sql_str(zone)}, {latest}))"
+                              if zone and zone.upper() != "UTC" else latest)
+                reached = f" AND (e.event_time IS NULL OR {latest_utc} > e.event_time)"
+                needs_event_time = True
             if rule.rule == "priority":
                 if key not in event_columns or not rule.order:
                     unverifiable.append(key)
@@ -2373,11 +2390,11 @@ def merge_disagreements(cfg: DatasetConfig, manifest: dict[str, Any], links_path
                 continue
             accepted = [rule.flag_name] + ([str(QualityFlag.ENCOUNTER_FROM_LINKED_ROW)] if rule.rule == "prefer_linked" else [])
             carried = " OR ".join(f"coalesce(list_contains(e.quality_flags, {_sql_str(f)}), false)" for f in accepted)
-            verifications.append((key, f"{d} > 1 AND e.event_id IS NOT NULL AND NOT ({carried}) AND NOT {conflict}"))
+            verifications.append((key, f"{d} > 1 AND e.event_id IS NOT NULL{reached} AND NOT ({carried}) AND NOT {conflict}"))
         if unverifiable:
             entry["rules_unverifiable"] = sorted(set(unverifiable))
         checks = "".join(f", count(*) FILTER (WHERE {sql}) AS {_sql_ident(f'u{j}')}" for j, (_k, sql) in enumerate(verifications))
-        join = ("LEFT JOIN (SELECT event_id, quality_flags"
+        join = ("LEFT JOIN (SELECT event_id, quality_flags" + (", event_time" if needs_event_time else "")
                 + "".join(f", {_sql_ident(k)}" for k, (_sql, r) in ruled.items() if r.rule == "priority" and k in event_columns)
                 + f" FROM evt WHERE source_id = {_sql_str(source_id)}) e USING (event_id)") if verifications else ""
 
@@ -3043,7 +3060,10 @@ def _duplicates_agree(l: Layers) -> CheckResult:
     carries neither the flag the rule writes nor a MERGE_CONFLICT, or, for a priority, it
     kept a value the order ranks below one its rows hold. That is how a rule declared after
     a build was made shows on that build (P-CU7, P-J2, P-J3). A rule whose application
-    leaves no trace to read is reported as unverifiable.
+    leaves no trace to read is reported as unverifiable. A rule on ``available_time`` is
+    asked for its trace only where the rows' availabilities still disagree after the
+    converter moves any that precede the event up to the event time, since rows that all
+    precede it reach the merge with one value.
 
     Cells compare in the canonical form the identity hashes them in, so a CSN typed as an
     integer in one workbook and a float in another is one value, while case is a
@@ -3412,14 +3432,25 @@ def _unit_value_plausible(l: Layers) -> CheckResult:
     empty; the ranges live in ``reference/plausible_ranges/<dataset>.csv``.
 
     Reads the events' code, unit, value and flags against the dataset's range table,
-    through ``ehr2trace.reference``. A build that normalized its units is judged on the
-    normalized unit and value. A build that predates normalization is judged on its
-    source spelling resolved through the unit table and converted by the conversion
-    table, so a temperature written in Fahrenheit is held to the Celsius range it would
-    have been normalized to, and one written as Celsius is held to that range whatever
-    its values say. A value with no unit meets a range declared with an empty unit.
-    Fails on any value outside its range without the IMPLAUSIBLE flag. Always reports
-    the value ranges of temperature-like codes. Skips without a range table.
+    through ``ehr2trace.reference``.
+
+    A build that normalized its units is judged on the normalized unit and value. A row
+    the converter flagged IMPLAUSIBLE counts as outside: the converter judged it against
+    this same table and withheld its normalized value, and the raw value left beside it is
+    in the unit it was read in, not the unit the range is declared for -- a Celsius reading
+    under a Fahrenheit override is 37.2 raw and about 2.9 once converted, and reading the
+    raw number against the Celsius range would count it plausible. So a raw value is never
+    compared with a normalized-unit range. A row with a normalized unit, no normalized value
+    and no flag cannot be judged; it is counted and reported.
+
+    A build that predates normalization is judged on its source spelling resolved through
+    the unit table and converted by the conversion table, so a temperature written in
+    Fahrenheit is held to the Celsius range it would have been normalized to, and one
+    written as Celsius is held to that range whatever its values say. A value with no unit
+    meets a range declared with an empty unit.
+
+    Fails on any value outside its range without the IMPLAUSIBLE flag. Always reports the
+    value ranges of temperature-like codes. Skips without a range table.
     """
     if l.events_path is None:
         return _skip("canonical layer not built")
@@ -3447,15 +3478,18 @@ def _unit_value_plausible(l: Layers) -> CheckResult:
         rows = con.execute(
             f"""
             WITH spelled AS (
-                SELECT code_system, source_code, quality_flags, value_number,
+                SELECT code_system, source_code, value_number,
                        {"value_number_normalized" if normalized else "CAST(NULL AS DOUBLE)"} AS vn,
                        lower(trim(unit_source)) AS u,
-                       {"unit_normalized" if normalized else "CAST(NULL AS VARCHAR)"} AS un
+                       {"unit_normalized" if normalized else "CAST(NULL AS VARCHAR)"} AS un,
+                       coalesce(list_contains(quality_flags, '{QualityFlag.IMPLAUSIBLE}'), false) AS implausible
                 FROM evt
                 WHERE value_number IS NOT NULL{" OR value_number_normalized IS NOT NULL" if normalized else ""}
             ), resolved AS (
-                SELECT s.code_system, s.source_code, s.quality_flags,
-                       CASE WHEN s.un IS NOT NULL THEN coalesce(s.vn, s.value_number)
+                SELECT s.code_system, s.source_code, s.implausible,
+                       -- A normalized row is read only in its normalized unit; its raw number
+                       -- is in another unit whenever the normalized value was withheld.
+                       CASE WHEN s.un IS NOT NULL THEN s.vn
                             WHEN c.from_ucum IS NOT NULL THEN s.value_number * c.factor + c.shift
                             ELSE s.value_number END AS v,
                        CASE WHEN s.un IS NOT NULL THEN s.un
@@ -3465,29 +3499,38 @@ def _unit_value_plausible(l: Layers) -> CheckResult:
                 LEFT JOIN umap m ON m.spelling = s.u
                 LEFT JOIN conv c ON c.from_ucum = m.ucum AND s.un IS NULL
             )
-            SELECT r.code_system, r.source_code, r.ucum, count(*),
-                   count(*) FILTER (WHERE e.v < r.low OR e.v > r.high),
-                   count(*) FILTER (WHERE (e.v < r.low OR e.v > r.high)
-                                      AND NOT list_contains(e.quality_flags, '{QualityFlag.IMPLAUSIBLE}'))
+            SELECT r.code_system, r.source_code, r.ucum,
+                   count(*) FILTER (WHERE e.v IS NOT NULL OR e.implausible),
+                   count(*) FILTER (WHERE e.implausible OR e.v < r.low OR e.v > r.high),
+                   count(*) FILTER (WHERE NOT e.implausible AND (e.v < r.low OR e.v > r.high)),
+                   count(*) FILTER (WHERE e.implausible AND e.v IS NULL),
+                   count(*) FILTER (WHERE e.v IS NULL AND NOT e.implausible)
             FROM resolved e JOIN rng r ON r.code_system = e.code_system AND r.source_code = e.source_code AND r.ucum = e.ucum
-            WHERE e.v IS NOT NULL
             GROUP BY 1, 2, 3 ORDER BY 6 DESC, 5 DESC, 4 DESC
             """
         ).fetchall()
-    judged = [{"code_system": s, "source_code": c, "unit": u, "rows": int(n), "outside": int(o), "unflagged": int(f)}
-              for s, c, u, n, o, f in rows]
+    judged = [{"code_system": s, "source_code": c, "unit": u, "rows": int(n), "outside": int(o), "unflagged": int(f),
+               "withheld_by_converter": int(w), "not_judged": int(x)}
+              for s, c, u, n, o, f, w, x in rows]
+    total = sum(j["rows"] for j in judged)
     unflagged = sum(j["unflagged"] for j in judged)
     outside = sum(j["outside"] for j in judged)
+    withheld = sum(j["withheld_by_converter"] for j in judged)
+    not_judged = sum(j["not_judged"] for j in judged)
+    notes = (f" ({withheld:,} of them withheld by the converter)" if withheld else "") + (
+        f"; {not_judged:,} rows carry a normalized unit, no normalized value and no flag, and were not judged"
+        if not_judged else "")
     return CheckResult(
         "",
         unflagged == 0,
-        f"{sum(j['rows'] for j in judged):,} values judged against {len(tables.ranges)} declared ranges "
-        f"({'normalized' if normalized else 'source'} units); {outside:,} lie outside and every one is flagged"
+        f"{total:,} values judged against {len(tables.ranges)} declared ranges "
+        f"({'normalized' if normalized else 'source'} units); {outside:,} lie outside and every one is flagged" + notes
         if unflagged == 0
         else f"{unflagged:,} values lie outside their declared plausible range and are not flagged: "
-        + "; ".join(f"{j['source_code']} [{j['unit']}] {j['unflagged']:,}" for j in judged[:5] if j["unflagged"]),
+        + "; ".join(f"{j['source_code']} [{j['unit']}] {j['unflagged']:,}" for j in judged[:5] if j["unflagged"]) + notes,
         {"ranges_declared": len(tables.ranges), "judged_on": "normalized" if normalized else "source",
-         "judged": judged[:20], "outside": outside, "unflagged": unflagged, "temperature_like": temperatures},
+         "judged": judged[:20], "values_judged": total, "outside": outside, "unflagged": unflagged,
+         "withheld_by_converter": withheld, "not_judged": not_judged, "temperature_like": temperatures},
     )
 
 
