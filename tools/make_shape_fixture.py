@@ -87,6 +87,7 @@ EKG_COMPONENTS = [
     ("Q-T  INTERVAL", "1", "392"),
     ("DIAGNOSIS", "1", "SINUS TACHYCARDIA"),
     ("DIAGNOSIS", "2", "RIGHT AXIS DEVIATION"),
+    ("DIAGNOSIS", "3", "2 SINUS TACHYCARDIA"),  # trap 10, NUMBERED_DIAGNOSIS below
 ]
 
 LAB_RESULTS = [
@@ -115,6 +116,19 @@ SECOND_DOSE = "20 mg"
 LATE_RESULT = {("2", "SUBJ-1"), ("1", "SUBJ-2")}
 LATE_RESULT_CODE = "WBC"
 LATE_BY = timedelta(minutes=35)
+
+#: Trap 8 (D-R6, P-J2, P-J11). The asthma entry's status where a batch does not record it
+#: as Active: an empty cell in one batch against Active in the other, which is one
+#: recorded status, and Active in one against Resolved in the other, which is a
+#: contradiction the merge must flag...
+PROBLEM_STATUS = {("1", "SUBJ-1"): "", ("2", "SUBJ-2"): "Resolved"}
+#: ...and an entry the clinician deleted, which is not a diagnosis the patient had. The
+#: patient is one OMOP publishes, so its absence there is not an accident of withholding.
+DELETED_PROBLEM = ("SUBJ-2", "R06.02", "Shortness of breath", "2018-06-11 00:00:00.000")
+
+#: Trap 10 (T1.9, P-C8). The ECG's third diagnosis line: words with a number in front.
+#: Read with no unit table it was a measurement of 2 in units of "SINUS TACHYCARDIA".
+NUMBERED_DIAGNOSIS = "2 SINUS TACHYCARDIA"
 
 
 def write_text(path: Path, header: list[str], rows: list[list[str]], bom: bool) -> None:
@@ -160,9 +174,12 @@ def build_partition(partition_id: str) -> None:
     # -- problem_list: byte-order mark deliberately inconsistent ---------------------
     problem_rows = []
     for patient in patients:
-        problem_rows.append([patient, "J45.909", "Unspecified asthma uncomplicated", "2017-04-02 00:00:00.000", "Active"])
+        status = PROBLEM_STATUS.get((batch, patient), "Active")
+        problem_rows.append([patient, "J45.909", "Unspecified asthma uncomplicated", "2017-04-02 00:00:00.000", status])
         # dated after the death date below: must be flagged, never deleted or re-dated
         problem_rows.append([patient, "E11.9", "Type 2 diabetes mellitus", "2031-09-14 00:00:00.000", "Active"])
+        if patient == DELETED_PROBLEM[0]:
+            problem_rows.append([*DELETED_PROBLEM, "Deleted"])
     write_text(
         root / f"{prefix}_problem_list.txt",
         ["MRN", "Diagnosis_Code", "Diagnosis_Name", "First_Noted_Date", "Status"],

@@ -265,7 +265,10 @@ def test_every_value_form_lands_where_the_design_says(events):
     assert str(QualityFlag.COMPARATOR_VALUE) in by_code["CREAT"]["quality_flags"]
     assert by_code["K"]["value_number"] is None and by_code["K"]["value_text"] == "see below"
     assert str(QualityFlag.NON_NUMERIC_RESULT) in by_code["K"]["quality_flags"]
-    assert by_code["DIAGNOSIS"]["value_text"] in {"SINUS TACHYCARDIA", "RIGHT AXIS DEVIATION"}
+    # Three diagnosis lines, all text. The third, "2 SINUS TACHYCARDIA", begins with a
+    # number and is still no measurement: trap 10 in test_fixture_traps_ctpe_shape.py.
+    diagnoses = set(measurements.filter(pl.col("source_code") == "DIAGNOSIS")["value_text"].to_list())
+    assert diagnoses == {"SINUS TACHYCARDIA", "RIGHT AXIS DEVIATION", "2 SINUS TACHYCARDIA"}
 
 
 def test_a_missing_collection_time_falls_back_and_says_so(events):
