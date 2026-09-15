@@ -310,6 +310,16 @@ execution:
   workers: 2
   chunk_rows: 1000
 
+validation:
+  # The fixture's visit types are invented ("Inpatient Hospital Stay" under a fabricated
+  # export), so no vocabulary has a concept for them and none can: built with a vocabulary,
+  # every visit carries concept 0. The fixture tests the export's structure, not concept
+  # coverage, which the real datasets are judged on.
+  visit_concept_coverage_min: 0
+  note: >-
+    ctpe_shape's visit types are invented and can have no vocabulary concept; the fixture
+    tests structure, not concept coverage.
+
 owner_answers:
   batch_relationship: "two independent synthetic extraction batches"
   imaging_reports_included: false
