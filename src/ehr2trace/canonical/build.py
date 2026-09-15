@@ -57,7 +57,7 @@ from ehr2trace.schema import (
     QualityFlag,
 )
 from ehr2trace.timeutil import TimeContext
-from ehr2trace.version import CODE_VERSION, DEFAULT_MAPPING_VERSION, HASH_RULE_VERSION
+from ehr2trace.version import CANONICAL_SCHEMA_VERSION, CODE_VERSION, DEFAULT_MAPPING_VERSION, HASH_RULE_VERSION
 
 STAGE_BATCH_ROWS = 100_000
 
@@ -257,10 +257,15 @@ class CanonicalTask:
         # stage applies, and editing one of those tables has to rebuild the events it
         # changes. It sits here rather than in the config hash so that it invalidates
         # canonical alone -- no ingest reads a reference table.
+        #
+        # `CANONICAL_SCHEMA_VERSION` belongs here for the same reason: the columns this
+        # task writes are its output's shape, and a new column has to rebuild the layer
+        # without re-addressing the ingest and staging outputs it reads.
         return task_hash(
             "canonical",
             CODE_VERSION,
             HASH_RULE_VERSION,
+            CANONICAL_SCHEMA_VERSION,
             self.config_hash,
             self.mapping_version,
             self.timezone_name or "",
