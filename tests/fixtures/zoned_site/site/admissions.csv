@@ -1,0 +1,4 @@
+patient_ref,visit_ref,admitted_at,left_at,visit_class,died_at
+ZS-1,ZV-1,2021-03-08 14:00:00,2021-03-10 21:30:00,Inpatient Hospital Stay,2021-03-10 21:30:00
+ZS-2,ZV-2,2021-06-28 10:00:00,2021-07-04 09:15:00,Inpatient Hospital Stay,2021-07-04 09:15:00
+ZS-3,ZV-3,2021-05-05 08:00:00,2021-05-07 12:00:00,Inpatient Hospital Stay,
