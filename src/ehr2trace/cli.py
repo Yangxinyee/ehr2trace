@@ -388,17 +388,38 @@ def propose(
 def compile_mappings(
     dataset: str = DatasetOpt,
     mappings_dir: Optional[Path] = typer.Option(None, "--mappings", help="target mappings directory"),
+    replace: Optional[list[str]] = typer.Option(
+        None, "--replace", help="decision id to apply over a row decided the same day; repeatable"
+    ),
 ) -> None:
-    """review/decisions.csv -> mappings/. Only human decisions are compiled."""
-    from ehr2trace.review import compile_decisions
+    """review/decisions.csv -> mappings/. Only human decisions are compiled.
+
+    decisions.csv is a log, so a decision replaces a row only if it was decided on a
+    later day. An older one is reported as superseded and changes nothing; one decided
+    the same day as a row it disagrees with is a conflict until --replace names it.
+    Every row that changes is printed. A conflict, or an accepted decision without a
+    reviewer and a date, exits non-zero.
+    """
+    from ehr2trace.review import CompileOverrideError, compile_decisions, describe_compile
     from ehr2trace.terminology import mappings_directory
 
     cfg, _path = _load(dataset)
     layout = _layout(cfg)
     target = mappings_dir or mappings_directory()
-    written = compile_decisions(layout, target)
-    typer.echo(f"compiled {written} decisions into {target}")
-    raise typer.Exit(code=0)
+    try:
+        result = compile_decisions(layout, target, replace=replace or ())
+    except CompileOverrideError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--replace") from exc
+    typer.echo(f"compiled {layout.review_dir / 'decisions.csv'} into {target}")
+    for line in describe_compile(result):
+        typer.echo(line)
+    if not result.complete:
+        typer.echo(
+            "not every accepted decision was applied: a conflicting one needs a person to name it "
+            "with --replace ID or to decide it again on a later day; an incomplete one needs a "
+            "reviewer and a YYYY-MM-DD date"
+        )
+    raise typer.Exit(code=0 if result.complete else 1)
 
 
 @app.command()

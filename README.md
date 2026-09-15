@@ -232,7 +232,9 @@ having no vocabulary at all — so they are worth catching up front.
 ```
 
 `mappings/` is the only thing that can turn a source string into a concept id, its only
-writer is `compile`, and `compile` only reads decisions a human accepted.
+writer is `compile`, and `compile` only reads decisions a human accepted. A decision
+replaces a row only if it was decided on a later day than that row, so recompiling an
+older work root cannot undo a correction made since; `mappings/README.md` has the rule.
 
 The queue shrinks as well as grows. When a rerun maps a term without human help, the
 `omop` build marks that row `resolved` and it drops out of the open queue -- the row
