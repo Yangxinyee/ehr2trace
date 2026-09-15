@@ -42,7 +42,28 @@ def before(tmp_path_factory) -> Build:
     cfg = load_dataset_config(CONFIG)
     # Trap 4: the temperatures without their unit override.
     cfg = edited(cfg, "results", unit_override={})
+    # Trap 5: the notes with their encounter id back in the identity.
+    cfg = edited(cfg, "notes", encounter_in_identity=True)
+    # Trap 6: the procedures without the rule for their bill type.
+    cfg = edited(cfg, "procedures", merge_rules={})
+    # Trap 7: the intensive-care stays without their length of stay in the identity.
+    cfg = edited(cfg, "icu_stays", identity_extra_fields=[])
     return build(cfg, FIXTURE, tmp_path_factory.mktemp("generic_traps_before"), publish=False)
+
+
+@pytest.fixture(scope="module")
+def before_rule(tmp_path_factory) -> Build:
+    """Trap 5's other declaration removed alone: the encounter out of the identity, no rule to choose one."""
+    cfg = edited(load_dataset_config(CONFIG), "notes", merge_rules={})
+    return build(cfg, FIXTURE, tmp_path_factory.mktemp("generic_traps_before_rule"), publish=False)
+
+
+def _flagged(frame: pl.DataFrame, flag: QualityFlag) -> list[bool]:
+    return [str(flag) in flags for flags in frame["quality_flags"].to_list()]
+
+
+def _links_of(b: Build, event_ids: list[str]) -> pl.DataFrame:
+    return b.canonical("event_source").filter(pl.col("event_id").is_in(event_ids))
 
 
 def _manifest(b: Build) -> dict:
@@ -129,6 +150,148 @@ def test_without_the_override_real_temperatures_are_withheld_and_the_misfiled_on
         assert str(QualityFlag.IMPLAUSIBLE) in row["quality_flags"]
     assert temperatures[37.2]["value_number_normalized"] == 37.2
     assert not any(str(QualityFlag.UNIT_OVERRIDDEN) in row["quality_flags"] for row in temperatures.values())
+
+
+# -- trap 5: one note filed under two encounter ids (D-R2) --------------------------------------
+
+
+def _notes(b: Build, patient: str) -> pl.DataFrame:
+    return b.canonical().filter((pl.col("source_id") == "notes") & (pl.col("subject_id") == b.subject(patient)))
+
+
+def test_one_note_under_two_encounter_ids_is_one_note_under_the_encounter_other_tables_know(after):
+    """Trap 5 (P-CU4, P-CU12, D-R2). Fault ONE_NOTE_UNDER_TWO_ENCOUNTERS covers the same ground on a built layer.
+
+    PX-1's progress note is filed under V-1001, the admission the encounters table
+    carries, and under V-1777, which no table carries; only the first row is marked as
+    seen elsewhere. PX-2's nursing note is filed under two ids no table carries. Each is
+    one note with both rows linked: the first keeps V-1001 and says it came from the linked
+    row, the second keeps no encounter and says it is unlinked.
+    """
+    linked = _notes(after, "PX-1")
+    assert linked["encounter_id"].to_list() == ["V-1001"]
+    assert _flagged(linked, QualityFlag.ENCOUNTER_FROM_LINKED_ROW) == [True]
+    assert _links_of(after, linked["event_id"].to_list()).height == 2
+
+    unlinked = _notes(after, "PX-2")
+    assert unlinked["encounter_id"].to_list() == [None]
+    assert _flagged(unlinked, QualityFlag.ENCOUNTER_UNLINKED) == [True]
+    assert _links_of(after, unlinked["event_id"].to_list()).height == 2
+
+    results = after.checks("NOTE_TEXT_UNIQUE", "DUPLICATES_AGREE", "ENCOUNTER_RESOLVES")
+    for check_id, result in results.items():
+        assert result.passed, f"{check_id}: {result.detail}"
+    assert results["NOTE_TEXT_UNIQUE"].metrics["per_source"]["notes"]["exact_duplicate_groups"] == 0
+
+
+def test_with_the_encounter_in_the_identity_the_note_is_published_once_per_id(before):
+    """Trap 5, before: the notes built with ``encounter_in_identity`` at its default."""
+    assert sorted(_notes(before, "PX-1")["encounter_id"].to_list()) == ["V-1001", "V-1777"]
+    assert _notes(before, "PX-2").height == 2
+    result = before.checks("NOTE_TEXT_UNIQUE")["NOTE_TEXT_UNIQUE"]
+    assert not result.passed
+    assert result.metrics["per_source"]["notes"]["exact_duplicate_groups"] == 2
+
+
+def test_without_a_rule_for_the_encounter_the_merged_note_is_a_conflict(before_rule):
+    """Trap 5, before, the other declaration: one note each, and nothing to say which encounter it keeps."""
+    notes = pl.concat([_notes(before_rule, "PX-1"), _notes(before_rule, "PX-2")])
+    assert notes.height == 2
+    assert all(_flagged(notes, QualityFlag.MERGE_CONFLICT))
+    result = before_rule.checks("DUPLICATES_AGREE")["DUPLICATES_AGREE"]
+    assert not result.passed
+    assert result.metrics["per_source"]["notes"]["disagreements"] == {"encounter_id": 2}
+
+
+# -- trap 6: one procedure billed twice (D-R3) --------------------------------------------------
+
+
+def _procedures(b: Build, patient: str) -> pl.DataFrame:
+    return b.canonical().filter((pl.col("source_id") == "procedures") & (pl.col("subject_id") == b.subject(patient)))
+
+
+def test_a_procedure_billed_by_facility_and_professional_is_one_procedure(after):
+    """Trap 6 (P-CU7, D-R3). No fault injects this.
+
+    PX-1's CT angiogram is billed once by the facility and once by the professional. It is
+    one procedure published once, both bills stay in its lineage, and the event is flagged
+    BILLING_DUPLICATE; PX-2's procedure, billed once, is not flagged.
+    """
+    billed_twice = _procedures(after, "PX-1")
+    assert billed_twice.height == 1
+    assert _flagged(billed_twice, QualityFlag.BILLING_DUPLICATE) == [True]
+    assert _links_of(after, billed_twice["event_id"].to_list()).height == 2
+    assert _flagged(_procedures(after, "PX-2"), QualityFlag.BILLING_DUPLICATE) == [False]
+
+    published = after.omop(
+        "SELECT count(DISTINCT target_table || ':' || CAST(target_pk AS VARCHAR)) FROM etl_audit.lineage "
+        "WHERE event_id = ?",
+        [billed_twice["event_id"][0]],
+    )
+    assert published == [(1,)], "one published row, not one per bill"
+
+    result = after.checks("DUPLICATES_AGREE")["DUPLICATES_AGREE"]
+    assert result.passed, result.detail
+    assert result.metrics["per_source"]["procedures"]["ruled_disagreements"] == {"bill_type": 1}
+
+
+def test_without_the_billing_rule_the_two_bills_disagree_unannounced(before):
+    """Trap 6, before: the procedures built without their ``keep_all_flag`` rule."""
+    billed_twice = _procedures(before, "PX-1")
+    assert _flagged(billed_twice, QualityFlag.BILLING_DUPLICATE) == [False]
+    result = before.checks("DUPLICATES_AGREE")["DUPLICATES_AGREE"]
+    assert not result.passed
+    assert result.metrics["per_source"]["procedures"]["disagreements"] == {"column:bill_type": 1}
+
+
+# -- trap 7: two intensive-care stays that began on the same day (D-R4) ---------------------------
+
+
+def _stays(b: Build) -> pl.DataFrame:
+    return b.canonical().filter((pl.col("source_id") == "icu_stays") & (pl.col("event_kind") == "visit_detail"))
+
+
+def test_two_stays_that_began_the_same_day_are_two_visit_details_under_their_admission(after):
+    """Trap 7 (P-CU6, D-R4). No fault injects this.
+
+    PX-1 entered intensive care twice on 5 January 2021, for a quarter of a day and for a
+    day and three quarters. They are two stays, each ending when its length says, and each
+    is published under the admission whose span contains its start, since the table names
+    no encounter to place it by.
+    """
+    from datetime import datetime
+
+    stays = _stays(after).sort("end_time")
+    assert stays["event_time"].to_list() == [datetime(2021, 1, 5)] * 2
+    assert stays["end_time"].to_list() == [datetime(2021, 1, 5, 6), datetime(2021, 1, 6, 18)]
+    assert all(_flagged(stays, QualityFlag.DERIVED_END_TIME))
+
+    parents = after.omop(
+        "SELECT DISTINCT d.visit_detail_id, d.visit_occurrence_id FROM visit_detail d "
+        "JOIN etl_audit.lineage l ON l.target_table = 'visit_detail' AND l.target_pk = d.visit_detail_id "
+        "WHERE list_contains(?, l.event_id)",
+        [stays["event_id"].to_list()],
+    )
+    admission = after.omop("SELECT visit_occurrence_id FROM visit_occurrence WHERE visit_source_value = 'V-1001'")
+    assert len(parents) == 2 and {visit for _detail, visit in parents} == {admission[0][0]}
+    assert not after.omop("SELECT 1 FROM etl_audit.quality_issue WHERE issue_type = 'VISIT_DETAIL_UNPARENTED'")
+
+    result = after.checks("DUPLICATES_AGREE")["DUPLICATES_AGREE"]
+    assert result.passed, result.detail
+
+
+def test_without_the_length_of_stay_in_the_identity_two_stays_are_one_that_contradicts_itself(before):
+    """Trap 7, before: the stays built without ``identity_extra_fields``."""
+    stays = _stays(before)
+    assert stays.height == 1
+    assert _flagged(stays, QualityFlag.MERGE_CONFLICT) == [True]
+    issues = before.canonical("quality_issue").filter(
+        (pl.col("issue_type") == str(QualityFlag.MERGE_CONFLICT)) & (pl.col("source_id") == "icu_stays")
+    )
+    assert issues["detail"].to_list() == ["end_time: 2 distinct values across 2 merged rows"]
+    result = before.checks("DUPLICATES_AGREE")["DUPLICATES_AGREE"]
+    assert not result.passed
+    assert result.metrics["per_source"]["icu_stays"]["disagreements"] == {"length_of_stay": 1}
 
 
 # -- trap 11: a delivered column that no role reads ---------------------------------------------

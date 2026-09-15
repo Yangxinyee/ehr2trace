@@ -189,6 +189,73 @@ sources:
       text_line:      {from: [line_no]}
       value:          {from: [component_value]}
 
+  # Trap 5 (plan T1.12, decision D-R2). Whole notes, one per row, where one note's text is
+  # filed under two encounter ids: under the admission the other tables know and under an
+  # id none of them carries, or under two such ids. The copies are one note, so the
+  # encounter leaves the identity; the merge keeps the encounter whose row is marked as
+  # seen elsewhere (`visit_known`, the lookup a preparation step writes), or keeps none
+  # and flags ENCOUNTER_UNLINKED. Without that, the text is published once per id, which
+  # NOTE_TEXT_UNIQUE fails.
+  notes:
+    adapter: delimited
+    file_glob: "notes.csv"
+    options: {delimiter: ",", encoding: "utf-8", quoting: minimal}
+    shape: point_event
+    event_kind: note
+    value_expect: text
+    required: false
+    encounter_in_identity: false
+    merge_rules:
+      encounter_id: {rule: prefer_linked}
+    fields:
+      person_id:        {from: [patient_ref], required: true}
+      encounter_id:     {from: [visit_ref]}
+      source_code:      {from: [note_type], required: true}
+      source_name:      {from: [note_type]}
+      event_time:       {from: [written_on], required: true}
+      text:             {from: [note_text]}
+      encounter_linked: {from: [visit_known]}
+
+  # Trap 6 (plan T1.12, decision D-R3). One procedure billed twice, a facility and a
+  # professional charge for the same service. It is one procedure: both rows stay in the
+  # lineage and the event is flagged BILLING_DUPLICATE, so nothing publishes a quantity of
+  # two. The bill type is kept for a reader, and a kept column that differs between the
+  # copies of one fact needs a rule, or DUPLICATES_AGREE fails.
+  procedures:
+    adapter: delimited
+    file_glob: "procedures.csv"
+    options: {delimiter: ",", encoding: "utf-8", quoting: minimal}
+    shape: point_event
+    event_kind: procedure
+    required: false
+    fields:
+      person_id:    {from: [patient_ref], required: true}
+      encounter_id: {from: [visit_ref]}
+      source_code:  {from: [procedure_code], required: true}
+      source_name:  {from: [procedure_label]}
+      event_time:   {from: [performed_at], required: true}
+    keep_columns: [bill_type]
+    merge_rules:
+      bill_type: {rule: keep_all_flag, flag: BILLING_DUPLICATE}
+
+  # Trap 7 (plan T1.12, decision D-R4). Intensive-care stays recorded by the day they began
+  # and a fractional length, where two stays began on the same day. They are two stays, so
+  # the length of stay is part of the identity. The table names no encounter, so each stay
+  # is placed under the admission that contains its start.
+  icu_stays:
+    adapter: delimited
+    file_glob: "icu_stays.csv"
+    options: {delimiter: ",", encoding: "utf-8", quoting: minimal}
+    shape: visit
+    event_kind: visit_detail
+    required: false
+    identity_extra_fields: [length_of_stay]
+    fields:
+      person_id:      {from: [patient_ref], required: true}
+      event_time:     {from: [entered_on], required: true}
+      length_of_stay: {from: [stay_days]}
+      visit_type:     {from: [care_unit]}
+
   # Trap 2 (plan T1.12). A vital-sign table delivered wide, one column per sign, and
   # declared as though it were long: a component name and a value on every row. It has
   # neither, so the shape quarantines every row for having no component name and the
