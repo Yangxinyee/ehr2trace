@@ -753,6 +753,7 @@
 | 2026-09-16 | MIMIC 的时间戳究竟是什么时区（决定②的前提） | 官方与维护者答案一致：时间戳是 **US/Eastern 本地挂钟时间**，时刻原样保留，只有日期按患者整天偏移到 2100–2200；MIMIC-IV 不再保留星期几与季节。`timezone_assumption: America/New_York` 与本地日历口径因此是正确的 | PhysioNet v3.1："shifted … using an offset measured in days"；mimic-code #970 维护者答复 "All times are stored in US/Eastern"；#644 "time is preserved in MIMIC-IV as well"。**残差**：日期是虚构的，夏令时切换点落在假日期上，"本地→UTC→本地"往返只在假的春季跳变小时内失真，实测 798,059,515 条事件中 45,967 条（0.006%）往返后差 1 小时。记录在案，不为此改设计 |
 | 2026-09-16 | MIMIC 重发 omop 阶段 9 分钟只写了 7 MB 的 WAL：进程处于 D 状态、卡在 `jbd2_log_wait_commit`，sda 87% 忙但无人读写 | 停掉重来。两项修复：① `omop.py` 的 `_connect` 把 DuckDB `checkpoint_threshold` 从默认 16 MB 提到 8 GB（`4e5a11e`），30 GB 的库不再 checkpoint 数千次；② 把 `ehr2cdm_work_v07/mimiciv/omop/` 搬到 NVMe（`/home/baksoy/ehr2cdm_nvme/mimiciv/omop`）并在原处留符号链接，路径不变，清单与工具都不受影响 | 工作根所在的盘是 Samsung 870 QVO 8 TB（QLC），实测 4 KB 同步写 **11.3 ms/次**；NVMe 系统盘 **0.68 ms/次**，快 17 倍，空闲 369 GB。上一版 MIMIC 的 omop.duckdb 为 30.7 GB。这也解释了上次 418 分钟的 omop 阶段：瓶颈是 fsync，不是 CPU、内存或并行度，所以"调大内存上限、加 worker"对这一段无效 |
 | 2026-09-16 | 搬到 NVMe 后 omop 阶段仍卡在 `jbd2_log_wait_commit`：NVMe 62% 忙，进程每秒约 1,000 次写调用，6 分钟只写 58 MB | 根因在发布器：六张查找表（term_map、dose_map、unit_map、discharge_map、attr_map、type_concept）用 `executemany` 逐行插入，每行一次 autocommit 加一次 WAL fsync。MIMIC 有 **5,030,040 个不同的剂量文本**，即 500 万次 fsync——NVMe 上约 84 分钟，QVO 上 11 ms/次要十几个小时，这才是上次 omop 阶段 418 分钟的主因。`998aab3` 改为把每张表的 payload 作为一个 Arrow 表、一条 `INSERT … SELECT` 写入 | 实测：`count(DISTINCT dose_source)` = 5,030,040，unit 478，discharge 20，term 68,150。checkpoint 阈值（`4e5a11e`）与 NVMe 链接仍保留，三者叠加 |
+| 2026-09-16 | MIMIC 按本地日历重发完成：omop 23 分钟（峰值 211.7 GB，上限 190）、校验 102 分钟（147.8 GB）、审计 11 分钟（142.9 GB），空机、0 个游离 worker | 校验 48 通过 / 1 失败（已接受的 `UNIT_HOMOGENEOUS_PER_CODE`）/ 6 跳过，visit_detail 2,368,167 发布、186,892 无父就诊，DEATH 38,300、person 364,627——与改日期前逐项相同，本地时钟改动对 MIMIC 是中性的。omop 阶段 418 → 23 分钟来自查找表批量装载（`998aab3`）、checkpoint 阈值（`4e5a11e`）与 NVMe 链接三者叠加；审计 71 → 11 分钟来自复用校验的合并比对（`ac642a6`） | 这三段耗时是空机单任务测得的，可作为论文运行时数字的参考点；ingest 与 canonical 未重跑，它们的干净计时仍待补 |
 
 ### 9.4 正式构建前半段：准备、ingest、identity（2026-09-14）
 
@@ -796,7 +797,7 @@ CU 与 JHU 的配置修正（`3eb3de5`、`57b8ddc`）提交后从 ingest 起整�
 | 死亡 | 28,149 人，OMOP 与 MEDS 各 28,149 行 |
 | ICU 住院的 OMOP 挂靠 | 18,804 个挂到就诊并发布（概念覆盖 100%）；20,521 个挂不上，不发布，记 `VISIT_DETAIL_UNPARENTED`，规范层与 MEDS 保留（见 9.3 待决） |
 
-#### 三个数据集的终版数字（2026-09-16，v07）
+#### 三个数据集的终版数字（2026-09-16，v07，三个数据集的 OMOP 均按本地日历发布）
 
 ### CU-CTPA（终版，`e9952c11`，审计 2026-09-16T06:14）
 
@@ -832,7 +833,7 @@ CU 与 JHU 的配置修正（`3eb3de5`、`57b8ddc`）提交后从 ingest 起整�
 | 未声明的交付列 / 文件 / 未读输入 | 0 / 0 / 0 |
 | 校验 | 55 项检查：54 通过、0 失败、1 跳过 |
 
-### MIMIC-IV（终版，`44e560b8`，审计 2026-09-16T03:19）
+### MIMIC-IV（终版，`ac642a66`，审计 2026-09-16T20:31）
 
 | 项 | 数值 |
 |---|---:|
@@ -949,7 +950,7 @@ CU 的 MEDS 与校验、JHU 的 OMOP、MEDS 与校验：内存耗尽后在上限
 **五项已由 Xinye 决定（2026-09-15，详见 9.3）**
 
 1. MIMIC `UNIT_HOMOGENEOUS_PER_CODE`：**接受并记录，不重建**。该项检查在 MIMIC 上保持失败，原因写在文档里。
-2. OMOP 日期：**改为数据集本地日历**（`ffc5aa0`，`*_date` 与 `*_datetime` 一并改）。CU 与 JHU 已重发 OMOP 并重跑校验；**MIMIC 暂缓**，等有整段空闲机器时再重发，在此之前它的 OMOP 仍是 UTC 日历。
+2. OMOP 日期：**改为数据集本地日历**（`ffc5aa0`，`*_date` 与 `*_datetime` 一并改）。三个数据集都已重发 OMOP 并重跑校验与审计；MIMIC 于 2026-09-16 完成，校验、父就诊与死亡发布数字与改动前完全一致。
 3. 阈值口径：**统一为按实测声明**，JHU 的 `visit_detail_concept_coverage_min` 声明为 0.02（`af73371`），与 MIMIC 的 0.35 同一口径。
 4. CU 的 20,521 个 ICU 停留：**维持现状**，不进 OMOP，规范层与 MEDS 保留全部 39,325 条。
 5. `mappings/` 中 12 行无支撑映射：**已补决定记录**（2026-09-16，见 9.3）。11 行 PFT 后缀行加 ETHNICITY，决定记录写入 `ehr2cdm_work/ctpe/review/decisions.csv`，概念不变；`mappings/` 按决定保持不动，其中这 12 行的 `decided_on` 仍是 2026-09-11。
