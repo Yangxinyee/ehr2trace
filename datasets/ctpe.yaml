@@ -763,13 +763,19 @@ execution:
   chunk_rows: 200000
 
 validation:
-  # Thresholds are the remediation plan's defaults. One of them is known to fail here and
-  # is left failing on purpose: a department stay's `visit_type` is one of 241 site-local
-  # ward names, and only the 14 whose name actually says ICU or INTENSIVE CARE are mapped
-  # (the other 8 flagged as ICU are named by building and floor, and are in the review
-  # queue). Lowering the number would hide a real gap; the queue is where it gets closed.
+  # Thresholds are the remediation plan's defaults but one. A department stay's
+  # `visit_type` is one of 241 site-local ward names, and only the 14 whose name actually
+  # says ICU or INTENSIVE CARE are mapped (the other 8 flagged as ICU are named by
+  # building and floor, and are in the review queue), so visit details carry a concept
+  # for 3.01% of their rows -- 3,782 of 125,769, measured 2026-09-15.
+  #
+  # That share is declared here rather than left failing at the 0.5 default, by Xinye's
+  # decision of 2026-09-15: the gap is stated with its measurement instead of a red check
+  # nobody can act on, and a regression still trips it. The gap itself closes in the
+  # review queue, not here, and raising this number is not a way to close it.
+  visit_detail_concept_coverage_min: 0.02
   note: >-
-    visit_detail_concept_coverage_min is expected to fail until the ADT department
+    visit_detail concept coverage is 3.01% and declared at 0.02 until the ADT department
     names are reviewed: 14 of 241 are mapped as of 2026-09-14.
 
 # Delivered tables this conversion deliberately does not read (D-R12, decided 2026-09-13).
