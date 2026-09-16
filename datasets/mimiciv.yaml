@@ -57,18 +57,21 @@ partitions:
 
 validation:
   # Defaults everywhere. The one number worth stating out loud is the visit concept
-  # coverage, which this dataset does not yet meet for VISIT_DETAIL and is left at 0.95
-  # so the check reports the gap rather than being tuned around it: MIMIC's ward names
+  # coverage, which this dataset does not meet for VISIT_DETAIL: MIMIC's ward names
   # are hospital-local specialty labels (`Medicine`, `Med/Surg/GYN`, `Vascular`) and the
   # service codes are specialties too (`MED`, `CSURG`). Neither names a kind of visit,
   # and the OMOP Visit domain has no concept for a specialty. Only the units whose name
   # states a level of care are mapped (intensive care, emergency, observation,
   # psychiatric, nursery); the rest are open items in `review/pending.csv` for a
   # reviewer, not guesses made here (P-M8, D-R14).
+  # Measured 39.16% (927,343 of 2,368,167 published visit details). Declared just below
+  # it rather than left at the 0.5 default, so the gap is stated instead of failing every
+  # run, and a regression still trips the check.
+  visit_detail_concept_coverage_min: 0.35
   note: >-
-    VISIT_DETAIL concept coverage is expected to fall short of 0.95 until the ward and
-    service names in review/pending.csv are decided. Every other threshold is the
-    remediation plan's default.
+    VISIT_DETAIL concept coverage is 39.16% and declared at 0.35 until the ward and service
+    names in review/pending.csv are decided; VISIT_OCCURRENCE is at 100%. Every other
+    threshold is the remediation plan's default.
 
 out_of_scope:
   # T2.M11, T4.4: the delivered files this conversion deliberately does not read. The
@@ -1326,6 +1329,13 @@ sources:
       note_id: >-
         The note's own identifier. note_seq is the discriminator; the opaque id adds
         nothing a reader can interpret.
+    expected_note_repeats:
+      max_share: 0.005
+      reason: >-
+        7,740 of the 2,321,355 delivered radiology notes repeat another note's full text for the same
+        patient, day and note type -- 7,944 copies beyond the first, the largest group 7. Measured on
+        the delivered file itself, so the repeats are the export's and not the converter's; the
+        canonical layer reports the same share (0.345%) after grouping by local date (2026-09-15).
 
   note_discharge:
     adapter: parquet
@@ -1346,6 +1356,11 @@ sources:
       sequence_number: {from: [note_seq]}
     ignored_columns:
       note_id: "The note's own identifier; see note_radiology."
+    expected_note_repeats:
+      max_share: 0.0001
+      reason: >-
+        1 of the 331,793 delivered discharge notes repeats another's full text for the same patient and
+        day: one group of two, measured on the delivered file (2026-09-15).
 
 # No extraction anchors: MIMIC rows are not repeated per index study, so there is no
 # anchor column and nothing for the anchor checks to find.

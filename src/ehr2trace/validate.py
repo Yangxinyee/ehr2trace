@@ -2924,6 +2924,7 @@ def raw_coverage(cfg: DatasetConfig, manifest: dict[str, Any] | None) -> dict[st
     found: list[dict[str, Any]] = []
     listed_total = 0
     undeclared_unread: list[str] = []
+    lookup_inputs = 0
     beside_inputs: list[str] = []
     declared_beside = 0
     directories_examined = 0
@@ -2936,6 +2937,13 @@ def raw_coverage(cfg: DatasetConfig, manifest: dict[str, Any] | None) -> dict[st
         bases = _manifest_bases(payload, manifest_path)
         for item in listed or []:
             name = str(item.get("path", "")) if isinstance(item, dict) else str(item)
+            # A dimension the step joined for its labels was read, not left unread: MIMIC-IV's
+            # d_labitems and d_items reach the output as the names beside their codes. The entry
+            # that says so, with its reason, is the declaration; an ``out_of_scope`` entry would
+            # be the wrong one, because it claims the conversion never read the file at all.
+            if isinstance(item, dict) and str(item.get("kind", "")) == "lookup" and str(item.get("reason", "")).strip():
+                lookup_inputs += 1
+                continue
             if name and not declared(_located(name, bases)):
                 undeclared_unread.append(reportable_path(name))
         if listed is not None:
@@ -2976,6 +2984,7 @@ def raw_coverage(cfg: DatasetConfig, manifest: dict[str, Any] | None) -> dict[st
         "manifests": len(manifests),
         "found": found,
         "unread_inputs_listed": listed_total,
+        "lookup_inputs": lookup_inputs,
         "undeclared_unread_inputs": sorted(undeclared_unread)[:200],
         "undeclared_unread_inputs_count": len(undeclared_unread),
         "directories_examined": directories_examined,
