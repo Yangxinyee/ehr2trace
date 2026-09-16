@@ -52,6 +52,28 @@ from a clean work root, with the then-current 34/34 validation checks passing:
 Wall time on 48 cores: ingest 136s at 0.8 GB peak, canonical 424s at 32.5 GB peak.
 No GPU is used anywhere in that path.
 
+The same delivery after the 2026-09 conversion remediation, with the now-current 55
+checks (53 pass, 1 skip, and `VISIT_CONCEPT_COVERAGE` left failing on purpose while the
+ADT department names are reviewed):
+
+| | |
+|---|---:|
+| Source rows read | 75,113,066 |
+| Canonical events | 33,396,779 |
+| Event ↔ source-row links | 101,522,252 |
+| Events built from more than one source row | 15,691,827 |
+| Subjects, resolved across all partitions | 22,982 |
+| Subjects appearing in more than one partition | 6,784 |
+| Extraction anchors (kept out of the event stream) | 35,247 |
+| Source rows quarantined rather than guessed at | 629,543 |
+| Rows that carried no fact at all | 240,789 |
+| Records dated after death, flagged and kept | 66,477 |
+
+The event count rises because the remediation stopped merging orders that differ in
+dose or status, published ICU transfers as visit details, and read sources the earlier
+run left unread. Wall times are deliberately omitted: the three datasets were rebuilt
+concurrently on one machine, so their clock times are not a benchmark.
+
 With an OMOP vocabulary installed and the age reference date approved, all three layers
 publish. Without either, the pipeline still runs and says exactly what it is missing —
 see the blocker table below.
