@@ -749,6 +749,7 @@
 | 2026-09-15 | MIMIC 的同类情况我做了相反处理：`44e560b` 把 `visit_detail_concept_coverage_min` 声明为 0.35（实测 39.16%），JHU 则维持默认值失败 | 两个数据集现在不一致，**待 Xinye 决定**：要么 MIMIC 也回退为默认值、让它照样失败，要么 JHU 也按实测声明。我没有自行统一 | 回退 MIMIC 需要重跑约 98 分钟的校验才能得到对应的 `validation.json`；两种状态都可恢复，且哪一种是对的取决于这类"已知且在评审中的缺口"应当报失败还是报声明，这是约定问题，不是测量问题 |
 | 2026-09-15 | Xinye 对 9.6 的五项待决事项逐一作出决定 | ① 单位混用：接受并记录，不重建。② OMOP 日期：改为数据集本地日历，CU 与 JHU 立即重发，MIMIC 暂缓。③ 阈值口径：统一为按实测声明，JHU 也声明阈值。④ CU 的 ICU 停留：维持现状，不进 OMOP。⑤ 12 行无支撑映射：补一条决定记录确认它们 | ① 实测三组混用写法的数值分布重合（51249 `g/dL` 中位 32.3 对 `%` 中位 33.3；51099 `mg/mg` 对 `{ratio}`；51228 两种写法量级一致；51229 的少数写法无数值），不是数值风险，而任一修法都要重建 13.5–15.5 小时。② 发布器原本每个日期列都是 `CAST(e.event_time AS DATE)`，而同一文件的死亡段已按本地时区判断，口径自相矛盾；JHU 有 8.9% 的事件因此落在错误日历日。③ 红灯长期挂着无人可处理，声明阈值仍能捕捉退步。④ CDM 5.4 规定 `visit_detail` 必须有父就诊，改按 `visit_occurrence` 发布会与再入院记录混为一类。⑤ 这 12 行已用于终版构建，删除会改变概念映射并需重发 OMOP |
 | 2026-09-15 | 按决定②改 OMOP 日期口径时发现：只改 `*_date` 会让同一行的 `*_datetime` 仍是 UTC，两列自相矛盾 | 经 Xinye 确认，`*_date` 与 `*_datetime` 一并改为本地时区（`ffc5aa0`）。canonical 层不变，仍存 naive UTC；MEDS 不受影响，它携带的是瞬时而非日历日 | OMOP 中这两列描述同一事件，混用两种口径会让下游按不同列算出不同结果。四个测试原本断言发布 UTC 瞬时，已随语义改为断言本地时钟 |
+| 2026-09-16 | 决定⑤落地：`mappings/` 中 12 行在任何工作根里都没有决定支撑 | 在 `ehr2cdm_work/ctpe/review/decisions.csv` 补了 12 条 2026-09-16 的 accept 记录，概念 id 与现行行完全一致；**`mappings/` 按 Xinye 的决定不动**。审计链恢复：replay 的 superseded 由 14 条降为 2 条（AGE、GENDER，本就有 mimiciv 根 2026-09-07 的支撑） | 清单由 main 中的修复版 compile（`0e8f178`，与分支上的 `581ee74` 同一改动，经 cherry-pick 进入，故原 SHA 不是 main 的祖先）只读 replay 得出：11 行 PFT 后缀行（FEV1-%PRED-PRE、FEV1-POST、FEV1_AFD、FEV1_APP、FEV1_ZBD、FEV1OFVC_AFD、FEV1OFVC_ZBD、FEF25_75_PPR、FVC-POST、FVC_AFD、FVC_APP）与 ETHNICITY（4271761）。**一处陷阱**：确认记录若用新写的 note，真跑 compile 会覆盖这些行原有的依据说明（PFT 行记着后缀含义如何对照叙述性报告确定，ETHNICITY 行记着原概念 44803968 已被词表删除），所以每条确认记录都保留原说明并在其后追加确认句 |
 
 ### 9.4 正式构建前半段：准备、ingest、identity（2026-09-14）
 
@@ -948,7 +949,7 @@ CU 的 MEDS 与校验、JHU 的 OMOP、MEDS 与校验：内存耗尽后在上限
 2. OMOP 日期：**改为数据集本地日历**（`ffc5aa0`，`*_date` 与 `*_datetime` 一并改）。CU 与 JHU 已重发 OMOP 并重跑校验；**MIMIC 暂缓**，等有整段空闲机器时再重发，在此之前它的 OMOP 仍是 UTC 日历。
 3. 阈值口径：**统一为按实测声明**，JHU 的 `visit_detail_concept_coverage_min` 声明为 0.02（`af73371`），与 MIMIC 的 0.35 同一口径。
 4. CU 的 20,521 个 ICU 停留：**维持现状**，不进 OMOP，规范层与 MEDS 保留全部 39,325 条。
-5. `mappings/` 中 12 行无支撑映射：**补一条决定记录确认它们**。清单需由带修复的 compile（`581ee74`，尚未并入 main）replay 得出，待补。
+5. `mappings/` 中 12 行无支撑映射：**已补决定记录**（2026-09-16，见 9.3）。11 行 PFT 后缀行加 ETHNICITY，决定记录写入 `ehr2cdm_work/ctpe/review/decisions.csv`，概念不变；`mappings/` 按决定保持不动，其中这 12 行的 `decided_on` 仍是 2026-09-11。
 
 **已记录、无需决定的遗留**
 
