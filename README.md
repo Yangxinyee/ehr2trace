@@ -395,22 +395,28 @@ concept ids anywhere in `src/`.
 It is also tested against two more real datasets. `datasets/mimiciv.yaml` converts
 MIMIC-IV v3.1 and v2.2 notes with no MIMIC-specific conversion code. Since the 2026-09
 remediation it reads the `icu` module beside `hosp` and `ed`, 33 sources in all. The
-figures below are from the build before that remediation, which read `hosp` and `ed`:
+figures below are from that remediated build:
 
 | | |
 |---|---:|
-| Source rows | 346,007,482 |
-| Canonical events | 304,811,180 |
-| Event ↔ source-row links | 309,972,630 |
+| Source rows | 836,795,494 |
+| Canonical events | 799,153,396 |
+| Event ↔ source-row links | 801,049,552 |
 | Subjects | 364,673 |
 | Persons published to OMOP | 364,627 |
 | MEDS shards | 364,673 |
-| Rows quarantined rather than guessed at | 8,021,058 |
-| Validation | 35 passed, 5 skipped, 0 failed |
+| Rows quarantined rather than guessed at | 1,074,435 |
+| Validation | 48 passed, 6 skipped, 1 failed |
 
-The five skips are honest ones: MIMIC has no extraction anchors and no cohort
-partitions, so four checks have nothing to examine, and its birth years come from the
-data rather than from an age, so the fifth has nothing to recompute. Because MIMIC is a normalized relational database and a
+The six skips are honest ones: MIMIC has no extraction anchors and no cohort
+partitions, so four checks have nothing to examine; its birth years come from the data
+rather than from an age, so the fifth has nothing to recompute; and no source declares
+which of its statuses are excluded, so the sixth has nothing to judge. The one failure
+is left failing on purpose: twelve laboratory codes mix unit families, six of them
+genuinely — international units beside arbitrary units, `g/dL` beside `%` — and every
+repair needs either a reference table the whole canonical layer is addressed by or a
+configuration change that re-ingests the dataset, so the finding is reported rather
+than tuned away. Because MIMIC is a normalized relational database and a
 hospital extract is not, `tools/prepare_mimiciv.py` denormalizes it first, using
 projections and lookup joins, asserting that no join changes cardinality, and
 writing a manifest of input and output hashes so lineage is unbroken across that step.
@@ -434,22 +440,23 @@ redistributed. The YAML is a recipe, not data.
 
 `datasets/cu_ctpa.yaml` converts the University of Colorado CT pulmonary angiography
 extract: nine tables exported for a study rather than a database, 127,955 patients,
-again with no site-specific conversion code. The figures below are from the build before
-the 2026-09 remediation:
+again with no site-specific conversion code. The figures below are from the remediated
+build:
 
 | | |
 |---|---:|
 | Source rows | 16,682,059 |
-| Canonical events | 13,701,522 |
-| Event ↔ source-row links | 16,385,424 |
+| Canonical events | 13,880,372 |
+| Event ↔ source-row links | 16,385,410 |
 | Subjects | 127,955 |
 | Persons published to OMOP | 127,955 |
 | MEDS shards | 127,955 |
-| Rows quarantined rather than guessed at | 224,173 |
-| Validation | 36 passed, 4 skipped, 0 failed |
+| Rows quarantined rather than guessed at | 135,200 |
+| Validation | 50 passed, 5 skipped, 0 failed |
 
-The skips are of the same kind: no cohort labels, no source that says which of its
-statuses mean administered, no approximated birth years to recompute. The export dates
+The five skips are of the same kind: no cohort labels, so two checks have nothing to
+examine; no source that says which of its statuses mean administered; no source that
+declares an excluded status; and no approximated birth years to recompute. The export dates
 each patient's age by the CT it was current at, so the year of birth is derived exactly;
 three patients have an age and no CT time, and under `person_birth_policy: strict` no
 year was invented for them: they were withheld from PERSON, and with them every clinical

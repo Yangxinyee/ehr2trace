@@ -52,9 +52,9 @@ above or beside the target schema.
 
 Detection is also not the same as being able to act on it. Comparing each mutated clone
 against the tree it was cloned from establishes which artifacts a fault actually damaged;
-a firing check localises the fault if it names one of them. Fifteen of the first
-nineteen did; the figure has not been re-measured for the nine the audit added, though
-each of those names the source, the code or the table it fired on in its detail string.
+a firing check localises the fault if it names one of them. Twenty-one of the
+twenty-eight did; the rest name the source, the code or the table they fired on in the
+detail string without naming a damaged artifact.
 
 The honest caveat, stated up front: a detector written in response to a specific fault
 is guaranteed to catch that fault. 28/28 is not evidence that the suite is complete. The
