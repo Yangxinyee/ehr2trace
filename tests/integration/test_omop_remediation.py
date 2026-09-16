@@ -115,7 +115,7 @@ def test_two_deaths_on_the_same_local_date_publish_one_row_with_the_timed_one(pu
         "SELECT d.death_date, d.death_datetime FROM death d JOIN pmap p ON p.person_id = d.person_id "
         "WHERE p.subject_id = ?", [SAME_DAY],
     )
-    assert death_datetime == T(2020, 1, 2, 2, 30), "the time of day beats local midnight"
+    assert death_datetime == T(2020, 1, 1, 21, 30), "the time of day beats local midnight, on the site's clock"
     assert lineage_of(layout, "death", "death-timed") and not lineage_of(layout, "death", "death-date-only")
     assert not query(layout, "SELECT 1 FROM etl_audit.quality_issue "
                              "WHERE issue_type = 'DEATH_DATE_CONFLICT' AND subject_id = ?", [SAME_DAY])
@@ -208,7 +208,7 @@ def test_a_detail_carries_what_the_source_said(published):
     row = one(layout, "SELECT visit_detail_concept_id, visit_detail_source_value, discharged_to_source_value, "
                       "discharged_to_concept_id, visit_detail_start_datetime, visit_detail_end_date, "
                       "parent_visit_detail_id FROM visit_detail WHERE visit_detail_id = ?", [pk])
-    assert row == (0, "WARD_A", "ICU", 0, T(2020, 3, 1, 12), T(2020, 3, 2).date(), None)
+    assert row == (0, "WARD_A", "ICU", 0, T(2020, 3, 1, 7), T(2020, 3, 1).date(), None)
 
 
 def test_a_visit_records_where_it_discharged_to(published):

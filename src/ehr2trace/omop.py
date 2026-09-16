@@ -441,6 +441,9 @@ STAGE_EXTRA = "event_id"
 
 
 def _publish_all(con, cfg: DatasetConfig, layout: WorkLayout, vocabulary, mappings: MappingRegistry) -> BuildStats:
+    # Every OMOP *_date column is the calendar date in the dataset's own zone: a date is
+    # the day of care, not the day the naive-UTC instant happens to fall on (D-R19).
+    zone = cfg.time.timezone_assumption
     distinct, resolved, unmapped = _build_term_map(
         con, vocabulary, mappings, cfg.terminology.drug_name_noise,
         cfg.terminology.drug_name_truncated_at,
@@ -455,7 +458,7 @@ def _publish_all(con, cfg: DatasetConfig, layout: WorkLayout, vocabulary, mappin
     blocked = _publish_person(con, cfg)
     counts["person"] = _count(con, "person")
 
-    counts["visit_occurrence"] = _stage_and_load(con, "visit_occurrence", "visit_occurrence_id", _visit_sql(con))
+    counts["visit_occurrence"] = _stage_and_load(con, "visit_occurrence", "visit_occurrence_id", _visit_sql(con, zone))
     con.execute(
         """
         CREATE TABLE visit_lookup AS
@@ -466,18 +469,18 @@ def _publish_all(con, cfg: DatasetConfig, layout: WorkLayout, vocabulary, mappin
     )
     # After the visits and their lookup: a detail is published under its parent visit
     # or not at all.
-    counts["visit_detail"] = _publish_visit_detail(con)
+    counts["visit_detail"] = _publish_visit_detail(con, zone)
 
     counts["condition_occurrence"] = _stage_and_load(
-        con, "condition_occurrence", "condition_occurrence_id", _condition_sql(con)
+        con, "condition_occurrence", "condition_occurrence_id", _condition_sql(con, zone)
     )
-    counts["drug_exposure"] = _stage_and_load(con, "drug_exposure", "drug_exposure_id", _drug_sql(con))
+    counts["drug_exposure"] = _stage_and_load(con, "drug_exposure", "drug_exposure_id", _drug_sql(con, zone))
     counts["procedure_occurrence"] = _stage_and_load(
-        con, "procedure_occurrence", "procedure_occurrence_id", _procedure_sql(con)
+        con, "procedure_occurrence", "procedure_occurrence_id", _procedure_sql(con, zone)
     )
     counts["measurement"] = _stage_and_load(con, "measurement", "measurement_id", _measurement_sql(con, cfg))
-    counts["observation"] = _stage_and_load(con, "observation", "observation_id", _observation_sql(con))
-    counts["note"] = _stage_and_load(con, "note", "note_id", _note_sql(con))
+    counts["observation"] = _stage_and_load(con, "observation", "observation_id", _observation_sql(con, zone))
+    counts["note"] = _stage_and_load(con, "note", "note_id", _note_sql(con, zone))
     counts["death"] = _publish_death(con, cfg)
     counts["observation_period"] = _publish_observation_periods(con)
     counts["cdm_source"] = _publish_cdm_source(con, cfg, vocabulary)
@@ -727,16 +730,17 @@ def _routes_here(table: str, kinds: tuple[str, ...]) -> str:
     )
 
 
-def _visit_sql(con) -> str:
+def _visit_sql(con, zone: str | None) -> str:
+    start, end = _local_time("e.event_time", zone), _local_time("coalesce(e.end_time, e.event_time)", zone)
     discharged_to = _optional(_evt_columns(con), "discharged_to", "VARCHAR")
     return f"""
         SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS visit_occurrence_id,
                p.person_id,
                CAST(coalesce(m.concept_id, 0) AS INTEGER) AS visit_concept_id,
-               CAST(e.event_time AS DATE) AS visit_start_date,
-               e.event_time AS visit_start_datetime,
-               CAST(coalesce(e.end_time, e.event_time) AS DATE) AS visit_end_date,
-               coalesce(e.end_time, e.event_time) AS visit_end_datetime,
+               CAST({start} AS DATE) AS visit_start_date,
+               {start} AS visit_start_datetime,
+               CAST({end} AS DATE) AS visit_end_date,
+               {end} AS visit_end_datetime,
                {_type_id(con, 'visit')} AS visit_type_concept_id,
                CAST(NULL AS INTEGER) AS provider_id,
                CAST(NULL AS INTEGER) AS care_site_id,
@@ -769,7 +773,7 @@ def _visit_sql(con) -> str:
 VISIT_DETAIL_PARENT_RULES = ("encounter", "containment")
 
 
-def _publish_visit_detail(con) -> int:
+def _publish_visit_detail(con, zone: str | None) -> int:
     """VISIT_DETAIL: transfers, service changes and ICU stays under their visit.
 
     Before this table existed every such record was published as a visit of its own,
@@ -835,13 +839,14 @@ def _publish_visit_detail(con) -> int:
         ORDER BY c.event_id
         """
     )
-    n = _stage_and_load(con, "visit_detail", "visit_detail_id", _visit_detail_sql(con))
+    n = _stage_and_load(con, "visit_detail", "visit_detail_id", _visit_detail_sql(con, zone))
     con.execute("DROP TABLE visit_detail_parent")
     con.execute("DROP TABLE visit_detail_candidates")
     return n
 
 
-def _visit_detail_sql(con) -> str:
+def _visit_detail_sql(con, zone: str | None) -> str:
+    start, end = _local_time("c.event_time", zone), _local_time("c.end_time", zone)
     # Its own type concept where the registry names one; otherwise the visit's, because
     # a detail is an encounter record of the same kind as the visit that holds it.
     type_concept = _type_id(con, "visit_detail") or _type_id(con, "visit")
@@ -849,10 +854,10 @@ def _visit_detail_sql(con) -> str:
         SELECT CAST(row_number() OVER (ORDER BY c.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS visit_detail_id,
                c.person_id,
                CAST(coalesce(m.concept_id, 0) AS INTEGER) AS visit_detail_concept_id,
-               CAST(c.event_time AS DATE) AS visit_detail_start_date,
-               c.event_time AS visit_detail_start_datetime,
-               CAST(c.end_time AS DATE) AS visit_detail_end_date,
-               c.end_time AS visit_detail_end_datetime,
+               CAST({start} AS DATE) AS visit_detail_start_date,
+               {start} AS visit_detail_start_datetime,
+               CAST({end} AS DATE) AS visit_detail_end_date,
+               {end} AS visit_detail_end_datetime,
                {type_concept} AS visit_detail_type_concept_id,
                CAST(NULL AS INTEGER) AS provider_id,
                CAST(NULL AS INTEGER) AS care_site_id,
@@ -874,15 +879,16 @@ def _visit_detail_sql(con) -> str:
     """
 
 
-def _condition_sql(con) -> str:
+def _condition_sql(con, zone: str | None) -> str:
+    start = _local_time("e.event_time", zone)
     # The source says when a problem was first noted. That is not an onset date, and
     # the type concept is what keeps this row from claiming one.
     return f"""
         SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS condition_occurrence_id,
                p.person_id,
                CAST(coalesce(m.concept_id, 0) AS INTEGER) AS condition_concept_id,
-               CAST(e.event_time AS DATE) AS condition_start_date,
-               e.event_time AS condition_start_datetime,
+               CAST({start} AS DATE) AS condition_start_date,
+               {start} AS condition_start_datetime,
                CAST(NULL AS DATE) AS condition_end_date,
                CAST(NULL AS TIMESTAMP) AS condition_end_datetime,
                {_type_id(con, 'condition_problem_list')} AS condition_type_concept_id,
@@ -926,7 +932,8 @@ SIG_RATE_PREFIX = "rate "
 SIG_RATE_FORMAT = f"<dose text>{SIG_RATE_SEPARATOR}{SIG_RATE_PREFIX}<rate> <rate unit>"
 
 
-def _drug_sql(con) -> str:
+def _drug_sql(con, zone: str | None) -> str:
+    start, end = _local_time("e.event_time", zone), _local_time("coalesce(e.end_time, e.event_time)", zone)
     """Orders and administrations share a table; the type concept keeps them apart.
 
     The source status of an order has no home in the OMOP core, so it stays on the
@@ -945,10 +952,10 @@ def _drug_sql(con) -> str:
         SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS drug_exposure_id,
                p.person_id,
                CAST(coalesce(m.concept_id, 0) AS INTEGER) AS drug_concept_id,
-               CAST(e.event_time AS DATE) AS drug_exposure_start_date,
-               e.event_time AS drug_exposure_start_datetime,
-               CAST(coalesce(e.end_time, e.event_time) AS DATE) AS drug_exposure_end_date,
-               coalesce(e.end_time, e.event_time) AS drug_exposure_end_datetime,
+               CAST({start} AS DATE) AS drug_exposure_start_date,
+               {start} AS drug_exposure_start_datetime,
+               CAST({end} AS DATE) AS drug_exposure_end_date,
+               {end} AS drug_exposure_end_datetime,
                CAST(NULL AS DATE) AS verbatim_end_date,
                CASE WHEN e.event_kind = '{EventKind.drug_order}'
                     THEN {_type_id(con, 'drug_order')} ELSE {_type_id(con, 'drug_admin')} END
@@ -993,13 +1000,14 @@ def _drug_sql(con) -> str:
     """
 
 
-def _procedure_sql(con) -> str:
+def _procedure_sql(con, zone: str | None) -> str:
+    start = _local_time("e.event_time", zone)
     return f"""
         SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS procedure_occurrence_id,
                p.person_id,
                CAST(coalesce(m.concept_id, 0) AS INTEGER) AS procedure_concept_id,
-               CAST(e.event_time AS DATE) AS procedure_date,
-               e.event_time AS procedure_datetime,
+               CAST({start} AS DATE) AS procedure_date,
+               {start} AS procedure_datetime,
                CAST(NULL AS DATE) AS procedure_end_date,
                CAST(NULL AS TIMESTAMP) AS procedure_end_datetime,
                {_type_id(con, 'procedure')} AS procedure_type_concept_id,
@@ -1034,6 +1042,7 @@ def _measurement_sql(con, cfg: DatasetConfig) -> str:
     with the result (canonical ``range_low``/``range_high``, schema 3), and where the
     source reported none, the range configured for the code.
     """
+    start = _local_time("e.event_time", cfg.time.timezone_assumption)
     ranges = cfg.reference_ranges
     if ranges:
         cases_low = " ".join(
@@ -1055,8 +1064,8 @@ def _measurement_sql(con, cfg: DatasetConfig) -> str:
         SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS measurement_id,
                p.person_id,
                CAST(coalesce(m.concept_id, 0) AS INTEGER) AS measurement_concept_id,
-               CAST(e.event_time AS DATE) AS measurement_date,
-               e.event_time AS measurement_datetime,
+               CAST({start} AS DATE) AS measurement_date,
+               {start} AS measurement_datetime,
                CAST(NULL AS VARCHAR) AS measurement_time,
                {_type_id(con, 'measurement')} AS measurement_type_concept_id,
                0 AS operator_concept_id,
@@ -1104,7 +1113,8 @@ def _unit_join(con) -> str:
     )
 
 
-def _observation_sql(con) -> str:
+def _observation_sql(con, zone: str | None) -> str:
+    start = _local_time("e.event_time", zone)
     """Facts that are not conditions, drugs, procedures or measurements.
 
     Almost everything that lands here is a Z code: a family history, a screening
@@ -1124,8 +1134,8 @@ def _observation_sql(con) -> str:
         SELECT CAST(row_number() OVER (ORDER BY e.event_id, coalesce(m.concept_id, 0)) AS INTEGER) AS observation_id,
                p.person_id,
                CAST(coalesce(m.concept_id, 0) AS INTEGER) AS observation_concept_id,
-               CAST(e.event_time AS DATE) AS observation_date,
-               e.event_time AS observation_datetime,
+               CAST({start} AS DATE) AS observation_date,
+               {start} AS observation_datetime,
                {_type_id(con, 'observation')} AS observation_type_concept_id,
                e.value_number AS value_as_number,
                substr(e.value_text, 1, 60) AS value_as_string,
@@ -1157,14 +1167,15 @@ def _observation_sql(con) -> str:
     """
 
 
-def _note_sql(con) -> str:
+def _note_sql(con, zone: str | None) -> str:
+    start = _local_time("e.event_time", zone)
     # note_text is verbatim. Any later extraction is a separate event with its own
     # lineage and never edits this text.
     return f"""
         SELECT CAST(row_number() OVER (ORDER BY e.event_id) AS INTEGER) AS note_id,
                p.person_id,
-               CAST(e.event_time AS DATE) AS note_date,
-               e.event_time AS note_datetime,
+               CAST({start} AS DATE) AS note_date,
+               {start} AS note_datetime,
                {_type_id(con, 'note')} AS note_type_concept_id,
                {_type_id(con, 'note_class')} AS note_class_concept_id,
                substr(e.source_name, 1, 250) AS note_title,
@@ -1246,8 +1257,8 @@ def _publish_death(con, cfg: DatasetConfig) -> int:
         f"""
         CREATE OR REPLACE TEMP TABLE stage AS
         SELECT p.person_id,
-               CAST(d.death_time AS DATE) AS death_date,
-               d.death_time AS death_datetime,
+               CAST({_local_time('d.death_time', cfg.time.timezone_assumption)} AS DATE) AS death_date,
+               {_local_time('d.death_time', cfg.time.timezone_assumption)} AS death_datetime,
                {_type_id(con, 'death')} AS death_type_concept_id,
                0 AS cause_concept_id,
                CAST(NULL AS VARCHAR) AS cause_source_value,

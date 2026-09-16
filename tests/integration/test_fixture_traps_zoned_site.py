@@ -45,6 +45,8 @@ CONFIG = Path(__file__).resolve().parents[2] / "datasets" / "zoned_site.yaml"
 SAME_DAY, TWO_DAYS, ALIVE = "ZS-1", "ZS-2", "ZS-3"
 #: 21:30 on 10 March 2021 in New York, which had not yet moved to daylight saving time
 TIMED_DEATH_UTC = datetime(2021, 3, 11, 2, 30)
+#: The same instant on the site's own clock, which is what OMOP publishes (D-R19).
+TIMED_DEATH_LOCAL = datetime(2021, 3, 10, 21, 30)
 
 
 @pytest.fixture(scope="module")
@@ -106,7 +108,7 @@ def test_a_date_and_an_evening_hour_on_one_local_day_are_one_death(after):
     links = after.canonical("event_source").filter(pl.col("event_id") == death["event_id"])
     assert set(links["source_row_id"].to_list()) == {registry_row, admission_row}
 
-    assert _death_rows(after, SAME_DAY) == [timed]
+    assert _death_rows(after, SAME_DAY) == [TIMED_DEATH_LOCAL], "OMOP publishes the local clock"
     assert _meds_deaths(after, SAME_DAY) == 1
 
 
@@ -199,6 +201,6 @@ def test_before_the_merge_the_publisher_needs_the_declared_zone(after, tmp_path,
     assert not result.passed and result.metrics["omop_subjects_missing_death"] == 1
 
     build_omop(after.cfg, layout, vocabulary_dir=None)
-    assert _death_rows(unmerged, SAME_DAY) == [TIMED_DEATH_UTC]
+    assert _death_rows(unmerged, SAME_DAY) == [TIMED_DEATH_LOCAL], "rebuilt with the zone, the merged death publishes on the site clock"
     result = run_named_checks(after.cfg, layout, "DEATH_PUBLISHED")["DEATH_PUBLISHED"]
     assert result.passed, result.detail
