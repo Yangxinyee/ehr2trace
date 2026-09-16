@@ -222,7 +222,7 @@ def _build_term_map(con, vocabulary, mappings: MappingRegistry,
                  int(match.source_concept_id or 0), domain or "", match.path)
             )
     if payload:
-        con.executemany("INSERT INTO term_map VALUES (?, ?, ?, ?, ?, ?)", payload)
+        _bulk_insert(con, "term_map", payload, ("code_system", "source_code", "concept_id", "source_concept_id", "domain_id", "path"))
     return len(terms), len(resolved), unresolved
 
 
@@ -295,7 +295,7 @@ def _build_dose_map(con) -> None:
             number = None
         payload.append((dose, number, unit))
     if payload:
-        con.executemany("INSERT INTO dose_map VALUES (?, ?, ?)", payload)
+        _bulk_insert(con, "dose_map", payload, ("dose_source", "quantity", "dose_unit"))
 
 
 def _build_unit_map(con, vocabulary, mappings: MappingRegistry) -> None:
@@ -332,7 +332,7 @@ def _build_unit_map(con, vocabulary, mappings: MappingRegistry) -> None:
             memo[key] = _unit_concept(vocabulary, mappings, unit_source, unit_normalized)
         payload.append((unit_source, unit_normalized, memo[key]))
     if payload:
-        con.executemany("INSERT INTO unit_map VALUES (?, ?, ?)", payload)
+        _bulk_insert(con, "unit_map", payload, ("unit_source", "unit_normalized", "concept_id"))
 
 
 def _unit_concept(vocabulary, mappings: MappingRegistry, unit_source: str | None,
@@ -372,7 +372,7 @@ def _build_discharge_map(con, vocabulary, mappings: MappingRegistry) -> None:
         )
         payload.append((value, concept))
     if payload:
-        con.executemany("INSERT INTO discharge_map VALUES (?, ?)", payload)
+        _bulk_insert(con, "discharge_map", payload, ("discharged_to", "concept_id"))
 
 
 def _build_attribute_map(con, vocabulary, mappings: MappingRegistry) -> None:
@@ -396,7 +396,7 @@ def _build_attribute_map(con, vocabulary, mappings: MappingRegistry) -> None:
         match = vocabulary.lookup_name(domains[attr], value)
         payload.append((attr, value, int(match.concept_id) if match else 0))
     if payload:
-        con.executemany("INSERT INTO attr_map VALUES (?, ?, ?)", payload)
+        _bulk_insert(con, "attr_map", payload, ("attr", "value_text", "concept_id"))
 
 
 def _type_concept_map(con, mappings: MappingRegistry) -> None:
@@ -420,9 +420,10 @@ def _type_concept_map(con, mappings: MappingRegistry) -> None:
         "visit_detail",
     )
     con.execute("CREATE TABLE type_concept (key VARCHAR, concept_id BIGINT)")
-    con.executemany(
-        "INSERT INTO type_concept VALUES (?, ?)",
+    _bulk_insert(
+        con, "type_concept",
         [(k, (mappings.get("TYPE_CONCEPT", k).concept_id if mappings.get("TYPE_CONCEPT", k) else 0)) for k in keys],
+        ("key", "concept_id"),
     )
 
 
@@ -1438,6 +1439,28 @@ def _connect(db_path: Path):
         # Only when an operator asked for one: otherwise the publisher keeps DuckDB's default.
         con.execute(f"SET memory_limit = '{cap}GB'")
     return con
+
+
+def _bulk_insert(con, table: str, rows: list[tuple], columns: tuple[str, ...]) -> None:
+    """Load ``rows`` into ``table`` as one statement.
+
+    Row-at-a-time inserts run one autocommitted INSERT per row, and DuckDB syncs its log
+    on every commit. MIMIC-IV's dose map is 5,030,040 distinct dose texts: row by row
+    that was 5 million fsyncs, about 84 minutes on an NVMe drive and most of a day on
+    the QLC drive the work root lives on, with the whole publish sitting in the kernel's
+    journal-commit wait. Handed over as one Arrow table it is one insert, one commit.
+    """
+    if not rows:
+        return
+    import pyarrow as pa
+
+    arrays = [pa.array(list(col)) for col in zip(*rows)]
+    view = f"_load_{table}"
+    con.register(view, pa.Table.from_arrays(arrays, names=list(columns)))
+    try:
+        con.execute(f"INSERT INTO {table} SELECT * FROM {view}")
+    finally:
+        con.unregister(view)
 
 
 def _evt_columns(con) -> frozenset[str]:
