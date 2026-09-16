@@ -40,6 +40,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from ehr2trace.analytics import HEAVY_THREADS, analytic_connection  # noqa: E402
+
+#: Threads for the audit's one DuckDB connection. The shared default is sized for several
+#: builds on one machine; an idle machine can be asked for more with --threads.
+THREADS = HEAVY_THREADS
 from ehr2trace.config import load_dataset_config  # noqa: E402
 from ehr2trace.paths import WorkLayout  # noqa: E402
 from ehr2trace.reference import load_reference  # noqa: E402
@@ -288,6 +292,30 @@ def _death(con, omop, zone: str | None, has_events: bool) -> dict[str, Any]:
     return out
 
 
+def _fresh_merge_report(layout: WorkLayout, events_path: Path, links_path: Path):
+    """The merge comparison DUPLICATES_AGREE already made on these very files, or None.
+
+    The comparison reads every merged event's source rows back from the staged files and
+    is the slowest thing either tool does -- three quarters of an hour on MIMIC-IV -- and
+    validation stores its whole per-source report. It is reused only when the validation
+    report is newer than both canonical files it compared, so a rebuilt layer is always
+    compared afresh; the audit records where the numbers came from.
+    """
+    import json
+
+    path = layout.runs_dir / "validation.json"
+    if not path.exists():
+        return None
+    if path.stat().st_mtime < max(events_path.stat().st_mtime, links_path.stat().st_mtime):
+        return None
+    for check in json.loads(path.read_text(encoding="utf-8")):
+        if check.get("check_id") == "DUPLICATES_AGREE" and not check.get("skipped"):
+            per_source = (check.get("metrics") or {}).get("per_source")
+            if isinstance(per_source, dict) and per_source:
+                return per_source
+    return None
+
+
 def audit(dataset_id: str, work_root: Path) -> dict[str, Any]:
     cfg, config_path = _load_config(dataset_id)
     layout = WorkLayout(root=work_root / dataset_id, dataset_id=dataset_id)
@@ -326,7 +354,7 @@ def audit(dataset_id: str, work_root: Path) -> dict[str, Any]:
         omop.execute("SET TimeZone='UTC'")
     scratch = work_root / SCRATCH_SUBDIR / dataset_id
     try:
-        with analytic_connection(scratch, threads=HEAVY_THREADS) as con:
+        with analytic_connection(scratch, threads=THREADS) as con:
             con.execute("SET TimeZone='UTC'")
             has_events = events_path.exists()
             if has_events:
@@ -345,7 +373,11 @@ def audit(dataset_id: str, work_root: Path) -> dict[str, Any]:
                 }
             report["sources"] = _sources(con, layout, manifest, has_events and links_path.exists())
             if manifest is not None and links_path.exists():
-                report["merge_disagreements"] = merge_disagreements(
+                reused = _fresh_merge_report(layout, events_path, links_path)
+                report["merge_disagreements_source"] = (
+                    "runs/validation.json, DUPLICATES_AGREE, newer than the canonical files" if reused is not None
+                    else "compared afresh by this audit")
+                report["merge_disagreements"] = reused if reused is not None else merge_disagreements(
                     cfg, manifest, links_path, con, per_partition=True, layout=layout)
             if has_events:
                 report["units"] = _units(con, omop, columns, dataset_id)
@@ -377,9 +409,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--dataset", required=True, help="dataset id, as in datasets/<id>.yaml")
     parser.add_argument("--work-root", type=Path, default=None, help="default: $EHR_WORK_ROOT")
+    parser.add_argument("--threads", type=int, default=HEAVY_THREADS,
+                        help=f"DuckDB threads for the audit's connection (default {HEAVY_THREADS}; an idle machine can take more)")
     parser.add_argument("--out", type=Path, default=None,
                         help="default: results/<dataset>/conversion_audit.json")
     args = parser.parse_args()
+    global THREADS
+    THREADS = args.threads
 
     work_root = args.work_root or _work_root()
     report = audit(args.dataset, work_root)
