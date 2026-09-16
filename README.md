@@ -53,8 +53,9 @@ Wall time on 48 cores: ingest 136s at 0.8 GB peak, canonical 424s at 32.5 GB pea
 No GPU is used anywhere in that path.
 
 The same delivery after the 2026-09 conversion remediation, with the now-current 55
-checks (53 pass, 1 skip, and `VISIT_CONCEPT_COVERAGE` left failing on purpose while the
-ADT department names are reviewed):
+checks passing (54 pass, 1 skip, 0 fail). Its visit-detail concept coverage is declared
+at its measured 3.01% while 227 of the 241 ADT department names are still in the review
+queue, so the gap is stated rather than hidden:
 
 | | |
 |---|---:|

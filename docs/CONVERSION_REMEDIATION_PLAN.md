@@ -792,9 +792,9 @@ CU 与 JHU 的配置修正（`3eb3de5`、`57b8ddc`）提交后从 ingest 起整�
 | 死亡 | 28,149 人，OMOP 与 MEDS 各 28,149 行 |
 | ICU 住院的 OMOP 挂靠 | 18,804 个挂到就诊并发布（概念覆盖 100%）；20,521 个挂不上，不发布，记 `VISIT_DETAIL_UNPARENTED`，规范层与 MEDS 保留（见 9.3 待决） |
 
-#### 三个数据集的终版数字（2026-09-15，v07）
+#### 三个数据集的终版数字（2026-09-16，v07）
 
-### CU-CTPA（终版，`a7117536`，审计 2026-09-15T02:37）
+### CU-CTPA（终版，`e9952c11`，审计 2026-09-16T06:14）
 
 | 项 | 数值 |
 |---|---:|
@@ -811,7 +811,7 @@ CU 与 JHU 的配置修正（`3eb3de5`、`57b8ddc`）提交后从 ingest 起整�
 | 未声明的交付列 / 文件 / 未读输入 | 0 / 0 / 0 |
 | 校验 | 55 项检查：50 通过、0 失败、5 跳过 |
 
-### JHU-CTPE（终版，`c066a41d`，审计 2026-09-15T02:30）
+### JHU-CTPE（终版，`e9952c11`，审计 2026-09-16T06:22）
 
 | 项 | 数值 |
 |---|---:|
@@ -826,7 +826,7 @@ CU 与 JHU 的配置修正（`3eb3de5`、`57b8ddc`）提交后从 ingest 起整�
 | visit_detail 行 / 带概念 / 因无父就诊withheld | 125,769 / 3,782 / 820,256 |
 | 带文本的笔记 / 同日重复组 / 多出的笔记 | 62,686 / 0 / 0 |
 | 未声明的交付列 / 文件 / 未读输入 | 0 / 0 / 0 |
-| 校验 | 55 项检查：53 通过、1 失败、1 跳过（VISIT_CONCEPT_COVERAGE） |
+| 校验 | 55 项检查：54 通过、0 失败、1 跳过 |
 
 ### MIMIC-IV（终版，`44e560b8`，审计 2026-09-16T03:19）
 
@@ -865,7 +865,7 @@ CU 与 JHU 的配置修正（`3eb3de5`、`57b8ddc`）提交后从 ingest 起整�
 | 数据集 | 计划目标 | 校验 | 说明 |
 |---|---|---|---|
 | CU-CTPA | 9 项达标、3 项为报告项 | 55 项检查：50 通过、0 失败、5 跳过 | 全部达标 |
-| JHU-CTPE | 6 项达标、4 项报告项、1 项未达标 | 53 通过、1 失败、1 跳过 | 未达标项是医嘱事件 9,308,574 对目标约 9,800,000，已查实为目标值把跨分区副本重复计数（见 9.3）；失败项 `VISIT_CONCEPT_COVERAGE` 按配置既定约定维持失败 |
+| JHU-CTPE | 6 项达标、4 项报告项、1 项未达标 | 54 通过、0 失败、1 跳过 | 未达标项是医嘱事件 9,308,574 对目标约 9,800,000，已查实为目标值把跨分区副本重复计数（见 9.3）。校验已无失败项：`VISIT_CONCEPT_COVERAGE` 的阈值按 Xinye 2026-09-15 的决定声明为实测值（见 9.3） |
 | MIMIC-IV | 7 项达标、6 项报告项、1 项未达标 | 48 通过、1 失败、6 跳过 | 未达标项是零时长就诊 58 条对目标 0 条 UNKNOWN：58 条全部带真实就诊概念、无一为 UNKNOWN，且交付文件本身就有这 58 条（见 9.3）；失败项 `UNIT_HOMOGENEOUS_PER_CODE` 待决定 |
 
 #### 每个问题的终验状态（T5.5）
@@ -883,7 +883,7 @@ CU 与 JHU 的配置修正（`3eb3de5`、`57b8ddc`）提交后从 ingest 起整�
 | P-C9 | T1.10 | `4820be6` | `CODE_DESCRIPTION_IS_REPRESENTATIVE` | — | 已通过终验 | |
 | P-C10 | T0.2、T1.11、T2.CU1、T2.J5、T2.M11、T4.4 | `81ae532`、`3042dde`、`f2e810a`、`1f48629`、`4063026` | `RAW_COVERAGE_DECLARED` | D-R12、D-R13 | 已通过终验 | |
 | P-C11 | T0.2、T0.3、T0.4 | `4063026` | 全部新检查 + 故障注入 | — | 已通过终验（无对应自动检查，见依据） | |
-| P-C12 | T1.13 | `4820be6`、`e8b2a70` | `VISIT_CONCEPT_COVERAGE` | D-R14 | JHU `VISIT_CONCEPT_COVERAGE` 仍失败，见 9.3 | |
+| P-C12 | T1.13 | `4820be6`、`e8b2a70` | `VISIT_CONCEPT_COVERAGE` | D-R14 | 已通过终验 | |
 | P-C13 | T1.4、T1.11、T2.M8 | `81ae532`、`4820be6`、`1f48629` | `RAW_COVERAGE_DECLARED` | D-R15 | 已通过终验 | |
 | P-CU1 | T1.1 | `377904e` | `DUPLICATES_AGREE` | — | 已通过终验 | |
 | P-CU2 | T1.6、T2.CU2 | `377904e`、`f1569b6`、`3042dde`、`c60c4d1`、`d734ae2` | `UNIT_VALUE_PLAUSIBLE` | D-R1 | 已通过终验 | |
@@ -901,7 +901,7 @@ CU 与 JHU 的配置修正（`3eb3de5`、`57b8ddc`）提交后从 ingest 起整�
 | P-J2 | T1.2、T2.J4 | `377904e`、`f2e810a`、`57b8ddc` | `DUPLICATES_AGREE` | D-R6 | 已通过终验 | |
 | P-J3 | T1.3、T2.J4 | `377904e`、`f2e810a` | `DUPLICATES_AGREE` | D-R5 | 已通过终验 | |
 | P-J4 | T2.J5、T2.J7 | `f2e810a` | `RAW_COVERAGE_DECLARED` | D-R12、D-R14 | 已通过终验 | |
-| P-J5 | T2.J1 | `f2e810a` | `VISIT_CONCEPT_COVERAGE` | — | JHU `VISIT_CONCEPT_COVERAGE` 仍失败，见 9.3 | |
+| P-J5 | T2.J1 | `f2e810a` | `VISIT_CONCEPT_COVERAGE` | — | 已通过终验 | |
 | P-J6 | T2.J2 | `f2e810a` | `RAW_COVERAGE_DECLARED` | — | 已通过终验 | |
 | P-J7 | T1.7、T2.J3 | `377904e`、`f2e810a` | `UNIT_CONCEPT_COVERAGE` | — | 已通过终验 | |
 | P-J8 | T1.9 | `377904e` | `UNIT_KNOWN` | — | 已通过终验 | |
