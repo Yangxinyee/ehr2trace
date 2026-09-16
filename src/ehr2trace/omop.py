@@ -788,8 +788,11 @@ def _publish_visit_detail(con, zone: str | None) -> int:
         f"""
         CREATE OR REPLACE TEMP TABLE visit_detail_candidates AS
         SELECT e.event_id, e.subject_id, p.person_id, e.source_id, e.encounter_id,
-               e.code_system, e.source_code, e.event_time,
-               coalesce(e.end_time, e.event_time) AS end_time,
+               e.code_system, e.source_code,
+               -- The local clock, once: VISIT_OCCURRENCE is published on it, and the
+               -- containment join below compares against those published columns.
+               {_local_time('e.event_time', zone)} AS event_time,
+               {_local_time('coalesce(e.end_time, e.event_time)', zone)} AS end_time,
                {discharged_to} AS discharged_to
         FROM evt e
         JOIN pmap p ON p.subject_id = e.subject_id
@@ -846,7 +849,8 @@ def _publish_visit_detail(con, zone: str | None) -> int:
 
 
 def _visit_detail_sql(con, zone: str | None) -> str:
-    start, end = _local_time("c.event_time", zone), _local_time("c.end_time", zone)
+    # c.event_time and c.end_time are already on the site clock (see _publish_visit_detail).
+    start, end = "c.event_time", "c.end_time"
     # Its own type concept where the registry names one; otherwise the visit's, because
     # a detail is an encounter record of the same kind as the visit that holds it.
     type_concept = _type_id(con, "visit_detail") or _type_id(con, "visit")
