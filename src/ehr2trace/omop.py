@@ -1425,6 +1425,12 @@ def _connect(db_path: Path):
 
     con = duckdb.connect(str(db_path))
     con.execute("SET TimeZone = 'UTC'")
+    # Checkpoint rarely. The default threshold is 16 MB, so loading a 30 GB database
+    # checkpoints thousands of times, and every checkpoint is a burst of fsyncs; on a
+    # drive that answers an fsync in 11 ms (a QLC SSD past its cache) MIMIC-IV's publish
+    # wrote 7 MB in nine minutes. The write-ahead log may grow to this size between
+    # checkpoints, on the same disk as the database.
+    con.execute("SET checkpoint_threshold = '8GB'")
     from ehr2trace.analytics import operator_memory_limit_gb
 
     cap = operator_memory_limit_gb()
