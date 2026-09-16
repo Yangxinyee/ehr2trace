@@ -790,6 +790,166 @@ CU 与 JHU 的配置修正（`3eb3de5`、`57b8ddc`）提交后从 ingest 起整�
 | 死亡 | 28,149 人，OMOP 与 MEDS 各 28,149 行 |
 | ICU 住院的 OMOP 挂靠 | 18,804 个挂到就诊并发布（概念覆盖 100%）；20,521 个挂不上，不发布，记 `VISIT_DETAIL_UNPARENTED`，规范层与 MEDS 保留（见 9.3 待决） |
 
+#### 三个数据集的终版数字（2026-09-15，v07）
+
+### CU-CTPA（终版，`a7117536`，审计 2026-09-15T02:37）
+
+| 项 | 数值 |
+|---|---:|
+| 规范层事件 | 13,880,372 |
+| 事件种类（前六） | condition 5,398,425、drug_order 4,206,761、note 1,724,808、measurement 957,305、procedure 719,423、demographic 619,827 |
+| OMOP person / death | 127,955 / 28,149 |
+| 死亡日期本地冲突的受试者 | 0 |
+| OMOP measurement 行 / 带单位概念 | 982,655 / 957,305 |
+| OMOP drug_exposure 行 / 无剂量单位 | 4,206,761 / 634,968 |
+| MEDS 药物行 / 无单位 / 裸剂量数 | 4,206,761 / 634,968 / 0 |
+| visit_occurrence 行 / 带概念 | 186,349 / 0 |
+| visit_detail 行 / 带概念 / 因无父就诊withheld | 18,804 / 18,804 / 20,521 |
+| 带文本的笔记 / 同日重复组 / 多出的笔记 | 1,724,589 / 0 / 0 |
+| 未声明的交付列 / 文件 / 未读输入 | 0 / 0 / 0 |
+| 校验 | 55 项检查：50 通过、0 失败、5 跳过 |
+
+### JHU-CTPE（终版，`c066a41d`，审计 2026-09-15T02:30）
+
+| 项 | 数值 |
+|---|---:|
+| 规范层事件 | 33,396,779 |
+| 事件种类（前六） | measurement 15,782,103、drug_order 9,308,574、condition 4,311,679、drug_admin 2,404,496、visit_detail 946,025、procedure 436,903 |
+| OMOP person / death | 22,980 / 4,710 |
+| 死亡日期本地冲突的受试者 | 0 |
+| OMOP measurement 行 / 带单位概念 | 15,911,634 / 8,840,598 |
+| OMOP drug_exposure 行 / 无剂量单位 | 11,713,070 / 1,583,854 |
+| MEDS 药物行 / 无单位 / 裸剂量数 | 11,713,070 / 11,713,070 / 10,353,490 |
+| visit_occurrence 行 / 带概念 | 25,573 / 25,276 |
+| visit_detail 行 / 带概念 / 因无父就诊withheld | 125,769 / 3,782 / 820,256 |
+| 带文本的笔记 / 同日重复组 / 多出的笔记 | 62,686 / 0 / 0 |
+| 未声明的交付列 / 文件 / 未读输入 | 0 / 0 / 0 |
+| 校验 | 55 项检查：53 通过、1 失败、1 跳过（VISIT_CONCEPT_COVERAGE） |
+
+### MIMIC-IV（终版，`44e560b8`，审计 2026-09-16T03:19）
+
+| 项 | 数值 |
+|---|---:|
+| 规范层事件 | 799,153,396 |
+| 事件种类（前六） | measurement 614,250,351、drug_admin 67,358,070、service_order 52,212,109、drug_order 19,716,099、drug_dispense 18,968,537、observation 10,404,826 |
+| OMOP person / death | 364,627 / 38,300 |
+| 死亡日期本地冲突的受试者 | 1 |
+| OMOP measurement 行 / 带单位概念 | 613,248,151 / 266,738,327 |
+| OMOP drug_exposure 行 / 无剂量单位 | 74,731,397 / 1,224,104 |
+| MEDS 药物行 / 无单位 / 裸剂量数 | 106,042,706 / 27,418,545 / 107,060 |
+| visit_occurrence 行 / 带概念 | 971,039 / 971,039 |
+| visit_detail 行 / 带概念 / 因无父就诊withheld | 2,368,167 / 927,343 / 186,892 |
+| 带文本的笔记 / 同日重复组 / 多出的笔记 | 2,653,148 / 7,813 / 8,017 |
+| 未声明的交付列 / 文件 / 未读输入 | 0 / 0 / 0 |
+| 校验 | 55 项检查：48 通过、1 失败、6 跳过（UNIT_HOMOGENEOUS_PER_CODE） |
+
+#### 数字旁必须一起读的两点
+
+**CU 的 visit_occurrence 概念覆盖为 0**：186,349 行全部概念为 0，而检查通过，是因为 `datasets/cu_ctpa.yaml`
+声明了 `visit_concept_coverage_min: 0.0`，理由写在配置里：CU 的 VISIT_OCCURRENCE 只有"再入院"记录，
+再入院日期本身不说明就诊类型，所以按该源的决定每行都是概念 0；ICU 停留作为 visit_detail，按默认阈值判定
+（18,804 行全部带概念）。数字与"0 失败"并列时必须带上这句。
+
+**JHU 的 MEDS 药物行全部没有剂量单位**：11,713,070 行 `unit` 全为空、其中 10,353,490 行是裸剂量数。
+原因不是转换丢失：JHU 规范层 `with_unit_source = 0`，`all_rx` 只映射 `dose: HV_Discrete_Dose`，交付里没有
+独立单位列，单位写在剂量文本内（如 "40 mg"）。MEDS 写出规则是 `e.unit_source AS unit`、`e.dose_source AS dose`，
+所以 MEDS 只能给出文本；OMOP 解析该文本取得单位，只有 1,583,854 行文本中无可解析单位。
+`DOSE_UNIT_CARRIED` 因此通过（它只在"既无单位又无剂量文本"时失败）。
+三个数据集的数字互相自洽：CU 4,206,761 − 3,571,793 = 634,968；MIMIC 106,042,706 − 78,624,161 = 27,418,545。
+→ 9.6 遗留事项：MEDS 使用者要拿到 JHU 的剂量单位，必须自行解析 `dose` 文本。
+
+#### 按第 5 节验收（T3.4）
+
+| 数据集 | 计划目标 | 校验 | 说明 |
+|---|---|---|---|
+| CU-CTPA | 9 项达标、3 项为报告项 | 55 项检查：50 通过、0 失败、5 跳过 | 全部达标 |
+| JHU-CTPE | 6 项达标、4 项报告项、1 项未达标 | 53 通过、1 失败、1 跳过 | 未达标项是医嘱事件 9,308,574 对目标约 9,800,000，已查实为目标值把跨分区副本重复计数（见 9.3）；失败项 `VISIT_CONCEPT_COVERAGE` 按配置既定约定维持失败 |
+| MIMIC-IV | 7 项达标、6 项报告项、1 项未达标 | 48 通过、1 失败、6 跳过 | 未达标项是零时长就诊 58 条对目标 0 条 UNKNOWN：58 条全部带真实就诊概念、无一为 UNKNOWN，且交付文件本身就有这 58 条（见 9.3）；失败项 `UNIT_HOMOGENEOUS_PER_CODE` 待决定 |
+
+#### 每个问题的终验状态（T5.5）
+
+| 问题 | 任务 | 提交 | 检查 | 决定 | 终验状态 | 依据 |
+|---|---|---|---|---|---|---|
+| P-C1 | T1.1、T2.M1 | `377904e`、`1f48629`、`d1c6d70` | `DUPLICATES_AGREE` | — | 已通过终验 | |
+| P-C2 | T1.2、T1.3、T2.CU3–5、T2.J4、T2.M12 | `377904e`、`3042dde`、`f2e810a`、`1f48629`、`3eb3de5` | `DUPLICATES_AGREE` | D-R2–D-R6 | 已通过终验 | |
+| P-C3 | T1.5、T2.J6 | `4820be6`、`f2e810a`、`c60c4d1`、`d734ae2` | `UNIT_CONCEPT_COVERAGE` | — | 已通过终验 | |
+| P-C4 | T1.6、T2.CU2、T2.M7 | `377904e`、`f1569b6`、`3042dde`、`c60c4d1`、`1f48629`、`d734ae2` | `UNIT_VALUE_PLAUSIBLE`、`UNIT_HOMOGENEOUS_PER_CODE` | D-R1、D-R10、D-R17 | MIMIC `UNIT_HOMOGENEOUS_PER_CODE` 仍失败，见 9.3 | |
+| P-C5 | T1.7、T2.J3、T2.M10 | `377904e`、`f2e810a`、`1f48629` | `UNIT_CONCEPT_COVERAGE` | — | 已通过终验 | |
+| P-C6 | T1.4、T2.CU1 | `4820be6`、`3042dde` | `DOSE_UNIT_CARRIED` | — | 已通过终验 | |
+| P-C7 | T1.8 | `4820be6`、`377904e` | `DEATH_PUBLISHED` | D-R11 | 已通过终验 | |
+| P-C8 | T1.9 | `377904e` | `UNIT_KNOWN` | — | 已通过终验 | |
+| P-C9 | T1.10 | `4820be6` | `CODE_DESCRIPTION_IS_REPRESENTATIVE` | — | 已通过终验 | |
+| P-C10 | T0.2、T1.11、T2.CU1、T2.J5、T2.M11、T4.4 | `81ae532`、`3042dde`、`f2e810a`、`1f48629`、`4063026` | `RAW_COVERAGE_DECLARED` | D-R12、D-R13 | 已通过终验 | |
+| P-C11 | T0.2、T0.3、T0.4 | `4063026` | 全部新检查 + 故障注入 | — | 已通过终验（无对应自动检查，见依据） | |
+| P-C12 | T1.13 | `4820be6`、`e8b2a70` | `VISIT_CONCEPT_COVERAGE` | D-R14 | JHU `VISIT_CONCEPT_COVERAGE` 仍失败，见 9.3 | |
+| P-C13 | T1.4、T1.11、T2.M8 | `81ae532`、`4820be6`、`1f48629` | `RAW_COVERAGE_DECLARED` | D-R15 | 已通过终验 | |
+| P-CU1 | T1.1 | `377904e` | `DUPLICATES_AGREE` | — | 已通过终验 | |
+| P-CU2 | T1.6、T2.CU2 | `377904e`、`f1569b6`、`3042dde`、`c60c4d1`、`d734ae2` | `UNIT_VALUE_PLAUSIBLE` | D-R1 | 已通过终验 | |
+| P-CU3 | T1.4、T2.CU1 | `4820be6`、`3042dde` | `DOSE_UNIT_CARRIED` | — | 已通过终验 | |
+| P-CU4 | T1.2、T1.11、T2.CU3 | `81ae532`、`377904e`、`3042dde`、`3eb3de5` | `NOTE_TEXT_UNIQUE` | D-R2 | 已通过终验 | |
+| P-CU5 | T2.CU7 | `3042dde`、`53ed6b9` | `RAW_COVERAGE_DECLARED` | D-R16 | 已通过终验 | |
+| P-CU6 | T1.1、T2.CU5 | `377904e`、`3042dde` | `DUPLICATES_AGREE` | D-R4 | 已通过终验 | |
+| P-CU7 | T1.2、T2.CU4 | `377904e`、`3042dde`、`3eb3de5` | `DUPLICATES_AGREE` | D-R3 | 已通过终验 | |
+| P-CU8 | T2.CU1 | `3042dde` | `RAW_COVERAGE_DECLARED` | — | 已通过终验 | |
+| P-CU9 | T2.CU6 | `3042dde` | `UNIT_VALUE_PLAUSIBLE` | — | 已通过终验 | |
+| P-CU10 | T1.6、T2.CU6 | `377904e`、`f1569b6`、`3042dde`、`c60c4d1`、`d734ae2` | `UNIT_VALUE_PLAUSIBLE` | D-R17 | 已通过终验 | |
+| P-CU11 | T2.CU2、T2.CU8 | `3042dde` | `INPUT_MANIFEST_COMPLETE`（扩展到准备步骤） | — | 已通过终验 | |
+| P-CU12 | T2.CU3 | `3042dde`、`3eb3de5` | `ENCOUNTER_RESOLVES`（声明预期可关联率） | D-R2 | 已通过终验 | |
+| P-J1 | T1.1 | `377904e` | `DUPLICATES_AGREE` | — | 已通过终验 | |
+| P-J2 | T1.2、T2.J4 | `377904e`、`f2e810a`、`57b8ddc` | `DUPLICATES_AGREE` | D-R6 | 已通过终验 | |
+| P-J3 | T1.3、T2.J4 | `377904e`、`f2e810a` | `DUPLICATES_AGREE` | D-R5 | 已通过终验 | |
+| P-J4 | T2.J5、T2.J7 | `f2e810a` | `RAW_COVERAGE_DECLARED` | D-R12、D-R14 | 已通过终验 | |
+| P-J5 | T2.J1 | `f2e810a` | `VISIT_CONCEPT_COVERAGE` | — | JHU `VISIT_CONCEPT_COVERAGE` 仍失败，见 9.3 | |
+| P-J6 | T2.J2 | `f2e810a` | `RAW_COVERAGE_DECLARED` | — | 已通过终验 | |
+| P-J7 | T1.7、T2.J3 | `377904e`、`f2e810a` | `UNIT_CONCEPT_COVERAGE` | — | 已通过终验 | |
+| P-J8 | T1.9 | `377904e` | `UNIT_KNOWN` | — | 已通过终验 | |
+| P-J9 | T1.5、T2.J6 | `4820be6`、`f2e810a`、`c60c4d1`、`d734ae2` | `UNIT_CONCEPT_COVERAGE` | — | 已通过终验 | |
+| P-J10 | T1.1 | `377904e` | `DUPLICATES_AGREE` | — | 已通过终验 | |
+| P-J11 | T1.11、T2.J4 | `81ae532`、`f2e810a` | `EXCLUDED_STATUS_NOT_PUBLISHED` | D-R6 | 已通过终验 | |
+| P-J12 | T2.J5 | `f2e810a` | `RAW_COVERAGE_DECLARED`（声明为不纳入并注明原因） | D-R12 | 已通过终验 | |
+| P-M1 | T1.1、T2.M1 | `377904e`、`1f48629`、`d1c6d70` | `DUPLICATES_AGREE` | — | 已通过终验 | |
+| P-M2 | T2.M2 | `1f48629` | `SOURCE_YIELDS_EVENTS`、`UNIT_VALUE_PLAUSIBLE` | D-R17 | 已通过终验 | |
+| P-M3 | T2.M3 | `1f48629` | `QUARANTINE_SHARE_DECLARED` | D-R7 | 已通过终验 | |
+| P-M4 | T4.1–T4.4 | `1f48629` | `RAW_COVERAGE_DECLARED` | D-R13 | 已通过终验 | |
+| P-M5 | T1.8 | `4820be6`、`377904e` | `DEATH_PUBLISHED` | D-R11 | 已通过终验 | |
+| P-M6 | T2.M4 | `1f48629` | `DUPLICATES_AGREE` | — | 已通过终验 | |
+| P-M7 | T2.M5 | `1f48629` | `VISIT_CONCEPT_COVERAGE` | D-R8 | 已通过终验 | |
+| P-M8 | T2.M6 | `1f48629`、`78386bb` | `VISIT_CONCEPT_COVERAGE` | D-R9、D-R14 | 已通过终验 | |
+| P-M9 | T1.6、T2.M7 | `377904e`、`f1569b6`、`c60c4d1`、`1f48629`、`d734ae2` | `UNIT_HOMOGENEOUS_PER_CODE` | D-R10 | MIMIC `UNIT_HOMOGENEOUS_PER_CODE` 仍失败，见 9.3 | |
+| P-M10 | T1.4 | `4820be6` | `DOSE_UNIT_CARRIED` | — | 已通过终验 | |
+| P-M11 | T1.4、T1.11、T2.M8 | `81ae532`、`4820be6`、`1f48629` | `RAW_COVERAGE_DECLARED` | D-R15 | 已通过终验 | |
+| P-M12 | T1.11、T2.M8 | `81ae532`、`1f48629` | `RAW_COVERAGE_DECLARED` | — | 已通过终验 | |
+| P-M13 | T1.11、T2.M8 | `81ae532`、`1f48629` | `RAW_COVERAGE_DECLARED` | — | 已通过终验 | |
+| P-M14 | T1.1、T2.M9 | `377904e`、`1f48629` | `DUPLICATES_AGREE`、`ENCOUNTER_RESOLVES` | — | 已通过终验 | |
+| P-M15 | T2.M9 | `1f48629` | `ENCOUNTER_RESOLVES` | — | 已通过终验 | |
+| P-M16 | T1.3、T2.M12 | `377904e`、`1f48629` | `DUPLICATES_AGREE` | D-R5 | 已通过终验 | |
+| P-M17 | T1.7、T2.M10 | `377904e`、`1f48629` | `UNIT_CONCEPT_COVERAGE` | — | 已通过终验 | |
+| P-M18 | T2.M11 | `1f48629` | `RAW_COVERAGE_DECLARED` | — | 已通过终验 | |
+| P-M19 | T1.2、T2.M12 | `377904e`、`1f48629`、`d1c6d70` | `DUPLICATES_AGREE` | D-R4 | 已通过终验 | |
+| P-M20 | T1.13、T2.M6 | `4820be6`、`e8b2a70`、`1f48629`、`78386bb` | `VISIT_CONCEPT_COVERAGE` | D-R14 | 已通过终验 | |
+| P-M21 | T2.M13 | `1f48629` | `QUARANTINE_SHARE_DECLARED` | D-R18 | 已通过终验 | |
+| W1、W2 | T0.2、T1.11 | `81ae532`、`4063026` | `QUARANTINE_SHARE_DECLARED`（声明为预期） | — | 已通过终验 | |
+| W4 | — | — | `END_TIME_NEVER_PRECEDES_START`（现有） | — | 已通过终验 | |
+| W5 | — | — | `MEDS_AVAILABILITY_PREVENTS_LEAKAGE`（现有） | — | 已通过终验 | |
+| W6 | T0.2 | `4063026` | `NOTE_TEXT_UNIQUE`（只报告） | — | 已通过终验 | |
+| W7 | T2.M11 | `1f48629` | `RAW_COVERAGE_DECLARED`（声明为忽略） | — | 已通过终验 | |
+
 ### 9.6 尚未完成
 
 CU 的 MEDS 与校验、JHU 的 OMOP、MEDS 与校验：内存耗尽后在上限下逐个重跑，并更新 9.5 中 CU 的数字、补上 JHU 的；MIMIC-IV 的规范层（进行中）、OMOP、MEDS，非哈希声明，以及校验；校验分支在最终提交上重跑旧构建基线；新旧对比文档（T3.3）与验收（T3.4）；README、故障目录与论文数字（T5.2–T5.4，文档分支 `remediation/docs`、论文分支 `remediation-2026-09`）；每个 `P-*` 的最终状态（T5.5）。待 Xinye 决定：OMOP 日期按 UTC 还是本地日历；CU 挂不上就诊的 ICU 住院在 OMOP 中如何发布；`mappings/` 中无决定支撑的 12 行。
+
+#### 2026-09-15 收尾后仍未了结的事项
+
+**等 Xinye 决定的五项**
+
+1. MIMIC `UNIT_HOMOGENEOUS_PER_CODE`：6 个化验代码真混用单位（51229 与 51228、51249、51099、227441、ED_PAIN），两种修法都会触发全量重建（见 9.3）。
+2. JHU `visit_detail` 概念覆盖 3.01% 维持失败，而 MIMIC 的同类情况在 `44e560b` 被声明为 0.35，两者不一致，需要统一（见 9.3）。
+3. CU 的 20,521 个 ICU 停留没有父就诊，目前不进 OMOP；规范层与 MEDS 保留全部 39,325 条。
+4. OMOP 日期按 UTC 日历计算，JHU 有 8.9% 的事件因此差一天。
+5. `mappings/` 中 12 行在任何工作根里都没有对应的决定记录。
+
+**已记录、无需决定的遗留**
+
+- JHU 的 MEDS 药物行没有剂量单位：交付里没有独立单位列，单位写在剂量文本内，MEDS 使用者需自行解析 `dose`（详见 9.5）。
+- 论文的运行时数字仍需一次干净的计时运行：v07 的三个构建是并行跑的，墙钟时间不能作为基准。
+- README、FAULT_CATALOGUE 与论文表格尚未按终版数字更新。
