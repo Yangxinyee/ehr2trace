@@ -173,6 +173,14 @@ for a reviewer (`--llm`); `ehr2trace measure` reports whether that ranking helps
 a set of confirmed decisions, and [docs/LLM_BENEFIT.md](docs/LLM_BENEFIT.md) records one
 such measurement.
 
+## Experiments
+
+The scripts behind the paper's measurements live in [`experiments/`](experiments/README.md)
+with the aggregate records they wrote: fault detection and reproducibility on the
+fixture, the OHDSI DQD comparison, the converter comparison on the MIMIC-IV
+demonstration subset, the temporal-leakage experiments, the stage timings, and the
+terminology-ranking measurements. Each script says what it needs and where it writes.
+
 ## Tests
 
 ```bash
@@ -197,6 +205,7 @@ conversion.
 | [`docs/LLM_BENEFIT.md`](docs/LLM_BENEFIT.md) | Whether model-assisted ranking helps, measured |
 | [`docs/standards/`](docs/standards/README.md) | Searchable copies of the OMOP CDM 5.4 field list and the MEDS schema |
 | [`mappings/README.md`](mappings/README.md) | The rules for the terminology registry |
+| [`experiments/README.md`](experiments/README.md) | The paper's experiments and their recorded results |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Adding an export, a check or a fault |
 
 ## Data sensitivity
