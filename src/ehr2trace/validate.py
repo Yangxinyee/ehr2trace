@@ -1171,7 +1171,7 @@ def _omop_concepts(l: Layers) -> CheckResult:
     if con is None:
         return _skip("OMOP not built or empty")
     try:
-        from ehr2trace.terminology import load_build_mappings, Vocabulary
+        from ehr2trace.terminology import Vocabulary
 
         import os
 
@@ -1915,7 +1915,7 @@ def _meds_availability(l: Layers) -> CheckResult:
 def _undecided_not_published(l: Layers) -> CheckResult:
     """A proposal nobody accepted must not have become a mapping."""
     from ehr2trace.review import read_decisions, read_pending
-    from ehr2trace.terminology import MappingRegistry, mappings_directory
+    from ehr2trace.terminology import load_build_mappings
 
     pending = read_pending(l.layout)
     if not pending:

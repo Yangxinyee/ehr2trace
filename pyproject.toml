@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "pyflakes>=3.2"]
 
 [project.scripts]
 ehr2trace = "ehr2trace.cli:app"
