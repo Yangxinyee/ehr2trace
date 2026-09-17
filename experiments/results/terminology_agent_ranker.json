@@ -1,0 +1,75 @@
+{
+  "dataset": "mimiciv",
+  "code_system": "LOINC",
+  "event_kind": "measurement",
+  "domain": "Measurement",
+  "term_source": "built_events",
+  "candidate_source": "retrieval_bge-m3_measurement.json",
+  "n_terms": 300,
+  "seed": 20260823,
+  "ranker": "claude-opus-5 subagent, blinded",
+  "note": "Same 300 items and the same retrieved candidates the medgemma and qwen3 arms ran on. The answer key was stripped from the input; the ranker was allowed to abstain when it judged no candidate correct, which the local-model arms were not.",
+  "arms": [
+    {
+      "k": 8,
+      "recall_at_k_pct": 56.7,
+      "top1_pct_overall": 55.7,
+      "top1_pct_when_recalled": 98.2,
+      "committed": 176,
+      "precision_when_committed_pct": 94.9,
+      "abstained": 124,
+      "abstention_correct": 122,
+      "abstention_precision_pct": 98.4,
+      "by_confidence": {
+        "high": {
+          "n": 154,
+          "correct": 151,
+          "precision_pct": 98.1
+        },
+        "medium": {
+          "n": 15,
+          "correct": 13,
+          "precision_pct": 86.7
+        },
+        "low": {
+          "n": 7,
+          "correct": 3,
+          "precision_pct": 42.9
+        }
+      }
+    },
+    {
+      "k": 32,
+      "recall_at_k_pct": 66.3,
+      "top1_pct_overall": 65.0,
+      "top1_pct_when_recalled": 98.0,
+      "committed": 203,
+      "precision_when_committed_pct": 96.1,
+      "abstained": 97,
+      "abstention_correct": 95,
+      "abstention_precision_pct": 97.9,
+      "by_confidence": {
+        "high": {
+          "n": 177,
+          "correct": 173,
+          "precision_pct": 97.7
+        },
+        "medium": {
+          "n": 23,
+          "correct": 21,
+          "precision_pct": 91.3
+        },
+        "low": {
+          "n": 3,
+          "correct": 1,
+          "precision_pct": 33.3
+        }
+      }
+    }
+  ],
+  "baselines_same_items": {
+    "lexical_top1_pct": 33.7,
+    "qwen3-32b_top1_pct": 40.3,
+    "medgemma-27b_top1_pct": 43.0
+  }
+}

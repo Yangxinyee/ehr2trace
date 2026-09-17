@@ -1,0 +1,47 @@
+{
+ "scope": "Defects surfaced by rebuilding and comparing digests: two in the OMOP publisher on 2026-09-07, and a MEDS layer built without its vocabulary on 2026-09-10. Counts are from the affected build and its reports; each fix is verified by rebuild.",
+ "collected_utc": "2026-09-07T09:11:00+00:00",
+ "routing_precedence": {
+  "defect": "the routing disjunction was returned unparenthesised, so a caller's AND NOT bound to one branch",
+  "not_administered_in_drug_exposure": 8483405,
+  "of_which_flushes": 3350325,
+  "drug_exposure_before_fix": 78879577,
+  "drug_exposure_after_fix": 70396172,
+  "found_by": "ONLY_ADMINISTRATIONS_BECOME_DRUG_EXPOSURE",
+  "independently_confirmed": true
+ },
+ "dose_overflow": {
+  "defect": "a parsed dose exceeding the target column's range failed the load",
+  "distinct_source_values": 16,
+  "canonical_rows": 16,
+  "published_with_null_quantity_and_source_string_in_sig": 15
+ },
+ "surrogate_key_ties": {
+  "defect": "surrogate keys were numbered by row_number over event_id, which is not a total order when one event fans out to several concepts",
+  "fanout_drug_events": 83016,
+  "fanout_condition_events": 33,
+  "tables_without_fanout_that_reproduced": [
+   "procedure_occurrence",
+   "measurement",
+   "observation"
+  ],
+  "found_by": "digest comparison of a full rebuild",
+  "rows_affected_in_content": 0
+ },
+ "meds_without_vocabulary": {
+  "defect": "the MEDS stage resolves its term map through OMOP_VOCAB_DIR and, with the variable unset, published every code as SOURCE/ with no concept and no warning; all 39 checks passed on the result",
+  "found_utc": "2026-09-11T02:05:00+00:00",
+  "dataset": "mimiciv",
+  "codes_in_saved_layer": 83562,
+  "mapped_codes_in_saved_layer": 0,
+  "distinct_terms": 82355,
+  "resolved_terms_in_saved_layer": 0,
+  "resolved_terms_after_rebuild": 47972,
+  "codes_after_rebuild": 63557,
+  "mapped_codes_after_rebuild": 29446,
+  "rebuilds_agreeing_with_each_other": 2,
+  "found_by": "digest comparison of a full rebuild",
+  "caught_by_a_check": false,
+  "how_it_happened": "the meds stage was rerun by hand after an out-of-memory kill, with EHR_WORK_ROOT set and OMOP_VOCAB_DIR not"
+ }
+}

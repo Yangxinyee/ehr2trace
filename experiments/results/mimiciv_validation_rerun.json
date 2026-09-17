@@ -1,0 +1,280 @@
+{
+  "checks": [
+    {
+      "check_id": "INPUT_MANIFEST_COMPLETE",
+      "elapsed_seconds": 0.0,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "RECONCILIATION_ROWS",
+      "elapsed_seconds": 0.0,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "SOURCE_COVERAGE_REPORTED",
+      "elapsed_seconds": 0.015,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "EVENT_LINEAGE_COMPLETE",
+      "elapsed_seconds": 24.344,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "LINK_TARGETS_EXIST",
+      "elapsed_seconds": 24.36,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "FAN_OUT_AND_DEDUP",
+      "elapsed_seconds": 24.505,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "SOURCE_ROWS_ACCOUNTED",
+      "elapsed_seconds": 8.118,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "ANCHOR_NEVER_AN_EVENT_TIME",
+      "elapsed_seconds": 0.0,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "CANONICAL_SCHEMA_AS_DECLARED",
+      "elapsed_seconds": 0.03,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "EVENT_SUBJECTS_WERE_ISSUED_BY_IDENTITY",
+      "elapsed_seconds": 0.834,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "ANCHOR_TIMES_ARE_NOT_THE_EVENT_CLOCK",
+      "elapsed_seconds": 0.0,
+      "passed": true,
+      "skipped": true
+    },
+    {
+      "check_id": "ANCHORS_ARE_NOT_EVENTS",
+      "elapsed_seconds": 0.0,
+      "passed": true,
+      "skipped": true
+    },
+    {
+      "check_id": "COHORT_LABEL_NEVER_A_CLINICAL_FACT",
+      "elapsed_seconds": 0.0,
+      "passed": true,
+      "skipped": true
+    },
+    {
+      "check_id": "MEMBERSHIP_KEPT_PER_PARTITION",
+      "elapsed_seconds": 0.0,
+      "passed": true,
+      "skipped": true
+    },
+    {
+      "check_id": "NO_UNTIMED_CLINICAL_EVENTS",
+      "elapsed_seconds": 0.084,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "ORDERS_AND_ADMINISTRATIONS_STAY_SEPARATE",
+      "elapsed_seconds": 1.517,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "EVENT_KIND_IS_ONE_ITS_SOURCE_DECLARES",
+      "elapsed_seconds": 0.47,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "TEXT_SOURCES_PUBLISH_THEIR_TEXT",
+      "elapsed_seconds": 0.191,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "ONLY_ADMINISTRATIONS_BECOME_DRUG_EXPOSURE",
+      "elapsed_seconds": 4.14,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "POST_DEATH_RECORDS_FLAGGED_NOT_DELETED",
+      "elapsed_seconds": 0.072,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "END_TIME_NEVER_PRECEDES_START",
+      "elapsed_seconds": 0.088,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "QUARANTINE_IS_EXPLAINED",
+      "elapsed_seconds": 0.019,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "IDENTITY_RESOLVED_ACROSS_PARTITIONS",
+      "elapsed_seconds": 0.024,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "OMOP_EVERY_ROW_HAS_LINEAGE",
+      "elapsed_seconds": 3.723,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "OMOP_CONCEPTS_EXIST_AND_FIT_THEIR_DOMAIN",
+      "elapsed_seconds": 13.831,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "TERMINOLOGY_COVERAGE_PLAUSIBLE",
+      "elapsed_seconds": 5.02,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "OMOP_REFERENTIAL_INTEGRITY",
+      "elapsed_seconds": 2.683,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "OMOP_PRIMARY_KEYS_UNIQUE",
+      "elapsed_seconds": 0.664,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "OMOP_BIRTH_YEAR_IS_REPRODUCIBLE",
+      "elapsed_seconds": 0.02,
+      "passed": true,
+      "skipped": true
+    },
+    {
+      "check_id": "OMOP_BIRTH_POLICY_ENFORCED",
+      "elapsed_seconds": 0.018,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "OMOP_NO_FABRICATED_MEASUREMENT_DATES",
+      "elapsed_seconds": 0.654,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "MEDS_SCHEMA_VALID",
+      "elapsed_seconds": 430.727,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "MEDS_SHARDS_CONTIGUOUS_AND_SORTED",
+      "elapsed_seconds": 171.955,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "MEDS_LINEAGE_COMPLETE",
+      "elapsed_seconds": 19.108,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "MEDS_NO_LABEL_LEAKAGE",
+      "elapsed_seconds": 19.01,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "MEDS_CODES_METADATA_COMPLETE",
+      "elapsed_seconds": 18.91,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "MEDS_CONCEPTS_ARE_OMOPS",
+      "elapsed_seconds": 24.217,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "MEDS_SPLITS_DISJOINT_AND_COMPLETE",
+      "elapsed_seconds": 18.592,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "MEDS_AVAILABILITY_PREVENTS_LEAKAGE",
+      "elapsed_seconds": 24.606,
+      "passed": true,
+      "skipped": false
+    },
+    {
+      "check_id": "UNDECIDED_PROPOSALS_NEVER_PUBLISHED",
+      "elapsed_seconds": 0.175,
+      "passed": true,
+      "skipped": false
+    }
+  ],
+  "completed_utc": "2026-09-12T08:14:12.375830+00:00",
+  "config_sha256": "70c2b9f299ff4d4a38aed935408b58c2debcff276331de142e6d964eb9b3aa5b",
+  "dataset": "mimiciv",
+  "elapsed_seconds": 853.232,
+  "failed": 0,
+  "include_slow": true,
+  "passed": 35,
+  "previous_validation_sha256": "f427cb1f0a5a36c7280a7c2df2959a22ab2259025b59a356c32203935f9e50fc",
+  "repository_head": "515c603e8d20ec9d91e88eac227c0faa623a2538",
+  "runner_sha256": "1720eb8b6b8ef5cba6c88d440f09acabd7788846a1cdac93f9c0f7df4bf76b24",
+  "skipped": 5,
+  "started_utc": "2026-09-12T07:59:59.140401+00:00",
+  "target_reports_after": {
+    "meds": {
+      "modified_utc": "2026-09-12T07:59:58.402462+00:00",
+      "sha256": "adbbc9f627487fe3949a8a856c903c797b615315f5225a81fba58e50af762628"
+    },
+    "omop": {
+      "modified_utc": "2026-09-12T07:02:31.702864+00:00",
+      "sha256": "b39c238ec0b1e6dd313908787773a602462b746b847507a5c33f863a6ff69c05"
+    }
+  },
+  "target_reports_before": {
+    "meds": {
+      "modified_utc": "2026-09-12T07:59:58.402462+00:00",
+      "sha256": "adbbc9f627487fe3949a8a856c903c797b615315f5225a81fba58e50af762628"
+    },
+    "omop": {
+      "modified_utc": "2026-09-12T07:02:31.702864+00:00",
+      "sha256": "b39c238ec0b1e6dd313908787773a602462b746b847507a5c33f863a6ff69c05"
+    }
+  },
+  "target_reports_unchanged": true,
+  "total": 40,
+  "validation_sha256": "a69d4c34545f7f894e8abf57af4abf3172fafc8a3e6326b3e455ddc9ec04da4b",
+  "validator_sha256": "bd999574f2b6a291c0fc3fbd48a34a3f8993ec1436e521ad1ea8e33686647144"
+}

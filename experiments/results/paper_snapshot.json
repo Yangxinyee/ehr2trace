@@ -1,0 +1,860 @@
+{
+  "collected_utc": "2026-09-16T20:43:29.809383+00:00",
+  "repository_head_at_collection": "db03bb3441b2b5b35ef62c56ef22f36f1b3c0b55",
+  "code_version": "0.7.0",
+  "registered_check_ids": [
+    "INPUT_MANIFEST_COMPLETE",
+    "RECONCILIATION_ROWS",
+    "SOURCE_COVERAGE_REPORTED",
+    "EVENT_LINEAGE_COMPLETE",
+    "LINK_TARGETS_EXIST",
+    "FAN_OUT_AND_DEDUP",
+    "SOURCE_ROWS_ACCOUNTED",
+    "ANCHOR_NEVER_AN_EVENT_TIME",
+    "CANONICAL_SCHEMA_AS_DECLARED",
+    "EVENT_SUBJECTS_WERE_ISSUED_BY_IDENTITY",
+    "ANCHOR_TIMES_ARE_NOT_THE_EVENT_CLOCK",
+    "ANCHORS_ARE_NOT_EVENTS",
+    "COHORT_LABEL_NEVER_A_CLINICAL_FACT",
+    "MEMBERSHIP_KEPT_PER_PARTITION",
+    "NO_UNTIMED_CLINICAL_EVENTS",
+    "ORDERS_AND_ADMINISTRATIONS_STAY_SEPARATE",
+    "EVENT_KIND_IS_ONE_ITS_SOURCE_DECLARES",
+    "TEXT_SOURCES_PUBLISH_THEIR_TEXT",
+    "ONLY_ADMINISTRATIONS_BECOME_DRUG_EXPOSURE",
+    "POST_DEATH_RECORDS_FLAGGED_NOT_DELETED",
+    "END_TIME_NEVER_PRECEDES_START",
+    "QUARANTINE_IS_EXPLAINED",
+    "IDENTITY_RESOLVED_ACROSS_PARTITIONS",
+    "OMOP_EVERY_ROW_HAS_LINEAGE",
+    "OMOP_CONCEPTS_EXIST_AND_FIT_THEIR_DOMAIN",
+    "TERMINOLOGY_COVERAGE_PLAUSIBLE",
+    "OMOP_REFERENTIAL_INTEGRITY",
+    "OMOP_PRIMARY_KEYS_UNIQUE",
+    "OMOP_BIRTH_YEAR_IS_REPRODUCIBLE",
+    "OMOP_BIRTH_POLICY_ENFORCED",
+    "OMOP_NO_FABRICATED_MEASUREMENT_DATES",
+    "MEDS_SCHEMA_VALID",
+    "MEDS_SHARDS_CONTIGUOUS_AND_SORTED",
+    "MEDS_LINEAGE_COMPLETE",
+    "MEDS_NO_LABEL_LEAKAGE",
+    "MEDS_CODES_METADATA_COMPLETE",
+    "MEDS_CONCEPTS_ARE_OMOPS",
+    "MEDS_SPLITS_DISJOINT_AND_COMPLETE",
+    "MEDS_AVAILABILITY_PREVENTS_LEAKAGE",
+    "UNDECIDED_PROPOSALS_NEVER_PUBLISHED",
+    "DUPLICATES_AGREE",
+    "SOURCE_YIELDS_EVENTS",
+    "QUARANTINE_SHARE_DECLARED",
+    "DEATH_PUBLISHED",
+    "UNIT_CONCEPT_COVERAGE",
+    "UNIT_KNOWN",
+    "UNIT_VALUE_PLAUSIBLE",
+    "UNIT_HOMOGENEOUS_PER_CODE",
+    "DOSE_UNIT_CARRIED",
+    "VISIT_CONCEPT_COVERAGE",
+    "NOTE_TEXT_UNIQUE",
+    "ENCOUNTER_RESOLVES",
+    "CODE_DESCRIPTION_IS_REPRESENTATIVE",
+    "RAW_COVERAGE_DECLARED",
+    "EXCLUDED_STATUS_NOT_PUBLISHED"
+  ],
+  "scope": "Read-only aggregate inventory of the current artifacts and saved validation reports. Validation rerun provenance, when available, is recorded separately. Existing benchmark JSON files remain historical snapshots.",
+  "datasets": {
+    "ctpe": {
+      "source_rows": 75113066,
+      "identity_subjects": 22982,
+      "canonical_subjects": 22980,
+      "canonical": {
+        "events": 33396779,
+        "event_source": 101522252,
+        "anchors": 35247,
+        "quarantine": 750121
+      },
+      "canonical_quarantine_by_reason": {
+        "MISSING_EVENT_TIME": 545637,
+        "UNTIMED_CLINICAL_VALUE": 92005,
+        "UNTIMED_VITAL_STATUS": 23979,
+        "VALUE_CONFLICT": 88500
+      },
+      "source_accounting_recorded": {
+        "became_events": 74326640,
+        "both": 83906,
+        "carried_no_fact": 240789,
+        "parsed": 75113066,
+        "quarantined": 629543
+      },
+      "omop_persons": 22980,
+      "omop_lineage_rows": 100574558,
+      "omop_tables": {
+        "condition_occurrence": {
+          "rows": 3637437,
+          "mapped_rows": 3631681,
+          "mapped_pct": 99.8418
+        },
+        "drug_exposure": {
+          "rows": 11713070,
+          "mapped_rows": 10151929,
+          "mapped_pct": 86.6718
+        },
+        "measurement": {
+          "rows": 15911634,
+          "mapped_rows": 15449586,
+          "mapped_pct": 97.0962
+        },
+        "procedure_occurrence": {
+          "rows": 572119,
+          "mapped_rows": 572119,
+          "mapped_pct": 100.0
+        },
+        "observation": {
+          "rows": 678871,
+          "mapped_rows": 655892,
+          "mapped_pct": 96.6151
+        }
+      },
+      "vocabulary": "v5.0 29-AUG-26",
+      "unmapped_without_concept": {
+        "place_of_occurrence_rows": 5482,
+        "atrial_rate_rows": 450357
+      },
+      "meds": {
+        "events": 33396779,
+        "subjects": 22980,
+        "shards": 22980,
+        "codes": 35999,
+        "mapped_codes": 16278
+      },
+      "meds_splits_from_metadata": {
+        "train": 18346,
+        "held_out": 2309,
+        "tuning": 2325
+      },
+      "age_reference_source": null,
+      "validation_recorded": {
+        "total": 55,
+        "passed": 54,
+        "skipped": 1,
+        "failed": 0,
+        "check_ids": [
+          "INPUT_MANIFEST_COMPLETE",
+          "RECONCILIATION_ROWS",
+          "SOURCE_COVERAGE_REPORTED",
+          "EVENT_LINEAGE_COMPLETE",
+          "LINK_TARGETS_EXIST",
+          "FAN_OUT_AND_DEDUP",
+          "SOURCE_ROWS_ACCOUNTED",
+          "ANCHOR_NEVER_AN_EVENT_TIME",
+          "CANONICAL_SCHEMA_AS_DECLARED",
+          "EVENT_SUBJECTS_WERE_ISSUED_BY_IDENTITY",
+          "ANCHOR_TIMES_ARE_NOT_THE_EVENT_CLOCK",
+          "ANCHORS_ARE_NOT_EVENTS",
+          "COHORT_LABEL_NEVER_A_CLINICAL_FACT",
+          "MEMBERSHIP_KEPT_PER_PARTITION",
+          "NO_UNTIMED_CLINICAL_EVENTS",
+          "ORDERS_AND_ADMINISTRATIONS_STAY_SEPARATE",
+          "EVENT_KIND_IS_ONE_ITS_SOURCE_DECLARES",
+          "TEXT_SOURCES_PUBLISH_THEIR_TEXT",
+          "ONLY_ADMINISTRATIONS_BECOME_DRUG_EXPOSURE",
+          "POST_DEATH_RECORDS_FLAGGED_NOT_DELETED",
+          "END_TIME_NEVER_PRECEDES_START",
+          "QUARANTINE_IS_EXPLAINED",
+          "IDENTITY_RESOLVED_ACROSS_PARTITIONS",
+          "OMOP_EVERY_ROW_HAS_LINEAGE",
+          "OMOP_CONCEPTS_EXIST_AND_FIT_THEIR_DOMAIN",
+          "TERMINOLOGY_COVERAGE_PLAUSIBLE",
+          "OMOP_REFERENTIAL_INTEGRITY",
+          "OMOP_PRIMARY_KEYS_UNIQUE",
+          "OMOP_BIRTH_YEAR_IS_REPRODUCIBLE",
+          "OMOP_BIRTH_POLICY_ENFORCED",
+          "OMOP_NO_FABRICATED_MEASUREMENT_DATES",
+          "MEDS_SCHEMA_VALID",
+          "MEDS_SHARDS_CONTIGUOUS_AND_SORTED",
+          "MEDS_LINEAGE_COMPLETE",
+          "MEDS_NO_LABEL_LEAKAGE",
+          "MEDS_CODES_METADATA_COMPLETE",
+          "MEDS_CONCEPTS_ARE_OMOPS",
+          "MEDS_SPLITS_DISJOINT_AND_COMPLETE",
+          "MEDS_AVAILABILITY_PREVENTS_LEAKAGE",
+          "UNDECIDED_PROPOSALS_NEVER_PUBLISHED",
+          "DUPLICATES_AGREE",
+          "SOURCE_YIELDS_EVENTS",
+          "QUARANTINE_SHARE_DECLARED",
+          "DEATH_PUBLISHED",
+          "UNIT_CONCEPT_COVERAGE",
+          "UNIT_KNOWN",
+          "UNIT_VALUE_PLAUSIBLE",
+          "UNIT_HOMOGENEOUS_PER_CODE",
+          "DOSE_UNIT_CARRIED",
+          "VISIT_CONCEPT_COVERAGE",
+          "NOTE_TEXT_UNIQUE",
+          "ENCOUNTER_RESOLVES",
+          "CODE_DESCRIPTION_IS_REPRESENTATIVE",
+          "RAW_COVERAGE_DECLARED",
+          "EXCLUDED_STATUS_NOT_PUBLISHED"
+        ],
+        "nonpassing_checks": [
+          {
+            "check_id": "ONLY_ADMINISTRATIONS_BECOME_DRUG_EXPOSURE",
+            "skipped": true,
+            "detail": "skipped: no source declares which of its statuses mean administered"
+          }
+        ],
+        "interval_ordering": {
+          "end_before_start": 0,
+          "unflagged": 0
+        },
+        "birth_policy": {
+          "approximated": 22980,
+          "person": 22980
+        },
+        "predates_target_reports": false
+      },
+      "report_modified_utc": {
+        "omop": "2026-09-16T06:20:29.479593+00:00",
+        "meds": "2026-09-15T02:27:22.970798+00:00",
+        "validation": "2026-09-16T06:22:55.429490+00:00"
+      },
+      "report_sha256": {
+        "omop": "cb81d8f69ee2e94fcfae4c642d215f3229143aa0cdba579f8f21d901879e71e5",
+        "meds": "275cfb18210f869602b989bc819989d07330f7c36780601c54beadbe32a4a593",
+        "validation": "762557b4695c705a0a649f6503ab7169abba926e9307c3ad8713fdafb19f42fb"
+      },
+      "canonical_files": {
+        "events": {
+          "bytes": 1661439318,
+          "modified_utc": "2026-09-15T01:49:00.913293+00:00"
+        },
+        "event_source": {
+          "bytes": 4808112313,
+          "modified_utc": "2026-09-15T01:49:28.394853+00:00"
+        },
+        "anchors": {
+          "bytes": 2788988,
+          "modified_utc": "2026-09-15T01:50:20.171908+00:00"
+        },
+        "quarantine": {
+          "bytes": 26033239,
+          "modified_utc": "2026-09-15T01:50:22.813962+00:00"
+        }
+      }
+    },
+    "mimiciv": {
+      "source_rows": 836795494,
+      "identity_subjects": 364673,
+      "canonical_subjects": 364673,
+      "canonical": {
+        "events": 799153396,
+        "event_source": 801049552,
+        "anchors": 0,
+        "quarantine": 1074435
+      },
+      "canonical_quarantine_by_reason": {
+        "MISSING_EVENT_TIME": 21889,
+        "UNPARSEABLE_VALUE": 726168,
+        "UNTIMED_VITAL_STATUS": 326326,
+        "VALUE_CONFLICT": 52
+      },
+      "source_accounting_recorded": {
+        "became_events": 800270207,
+        "both": 326378,
+        "carried_no_fact": 35777230,
+        "parsed": 836795494,
+        "quarantined": 1074435
+      },
+      "omop_persons": 364627,
+      "omop_lineage_rows": 716296756,
+      "omop_tables": {
+        "condition_occurrence": {
+          "rows": 6451372,
+          "mapped_rows": 6381523,
+          "mapped_pct": 98.9173
+        },
+        "drug_exposure": {
+          "rows": 74731397,
+          "mapped_rows": 55690325,
+          "mapped_pct": 74.5207
+        },
+        "measurement": {
+          "rows": 613248151,
+          "mapped_rows": 157905672,
+          "mapped_pct": 25.7491
+        },
+        "procedure_occurrence": {
+          "rows": 1710192,
+          "mapped_rows": 900286,
+          "mapped_pct": 52.6424
+        },
+        "observation": {
+          "rows": 11531859,
+          "mapped_rows": 1127109,
+          "mapped_pct": 9.7739
+        }
+      },
+      "vocabulary": "v5.0 29-AUG-26",
+      "unmapped_without_concept": {
+        "place_of_occurrence_rows": 69843,
+        "atrial_rate_rows": 0
+      },
+      "meds": {
+        "events": 799153396,
+        "subjects": 364673,
+        "shards": 364673,
+        "codes": 48030,
+        "mapped_codes": 32941
+      },
+      "meds_splits_from_metadata": {
+        "tuning": 36308,
+        "train": 291818,
+        "held_out": 36547
+      },
+      "age_reference_source": null,
+      "validation_recorded": {
+        "total": 55,
+        "passed": 48,
+        "skipped": 6,
+        "failed": 1,
+        "check_ids": [
+          "INPUT_MANIFEST_COMPLETE",
+          "RECONCILIATION_ROWS",
+          "SOURCE_COVERAGE_REPORTED",
+          "EVENT_LINEAGE_COMPLETE",
+          "LINK_TARGETS_EXIST",
+          "FAN_OUT_AND_DEDUP",
+          "SOURCE_ROWS_ACCOUNTED",
+          "ANCHOR_NEVER_AN_EVENT_TIME",
+          "CANONICAL_SCHEMA_AS_DECLARED",
+          "EVENT_SUBJECTS_WERE_ISSUED_BY_IDENTITY",
+          "ANCHOR_TIMES_ARE_NOT_THE_EVENT_CLOCK",
+          "ANCHORS_ARE_NOT_EVENTS",
+          "COHORT_LABEL_NEVER_A_CLINICAL_FACT",
+          "MEMBERSHIP_KEPT_PER_PARTITION",
+          "NO_UNTIMED_CLINICAL_EVENTS",
+          "ORDERS_AND_ADMINISTRATIONS_STAY_SEPARATE",
+          "EVENT_KIND_IS_ONE_ITS_SOURCE_DECLARES",
+          "TEXT_SOURCES_PUBLISH_THEIR_TEXT",
+          "ONLY_ADMINISTRATIONS_BECOME_DRUG_EXPOSURE",
+          "POST_DEATH_RECORDS_FLAGGED_NOT_DELETED",
+          "END_TIME_NEVER_PRECEDES_START",
+          "QUARANTINE_IS_EXPLAINED",
+          "IDENTITY_RESOLVED_ACROSS_PARTITIONS",
+          "OMOP_EVERY_ROW_HAS_LINEAGE",
+          "OMOP_CONCEPTS_EXIST_AND_FIT_THEIR_DOMAIN",
+          "TERMINOLOGY_COVERAGE_PLAUSIBLE",
+          "OMOP_REFERENTIAL_INTEGRITY",
+          "OMOP_PRIMARY_KEYS_UNIQUE",
+          "OMOP_BIRTH_YEAR_IS_REPRODUCIBLE",
+          "OMOP_BIRTH_POLICY_ENFORCED",
+          "OMOP_NO_FABRICATED_MEASUREMENT_DATES",
+          "MEDS_SCHEMA_VALID",
+          "MEDS_SHARDS_CONTIGUOUS_AND_SORTED",
+          "MEDS_LINEAGE_COMPLETE",
+          "MEDS_NO_LABEL_LEAKAGE",
+          "MEDS_CODES_METADATA_COMPLETE",
+          "MEDS_CONCEPTS_ARE_OMOPS",
+          "MEDS_SPLITS_DISJOINT_AND_COMPLETE",
+          "MEDS_AVAILABILITY_PREVENTS_LEAKAGE",
+          "UNDECIDED_PROPOSALS_NEVER_PUBLISHED",
+          "DUPLICATES_AGREE",
+          "SOURCE_YIELDS_EVENTS",
+          "QUARANTINE_SHARE_DECLARED",
+          "DEATH_PUBLISHED",
+          "UNIT_CONCEPT_COVERAGE",
+          "UNIT_KNOWN",
+          "UNIT_VALUE_PLAUSIBLE",
+          "UNIT_HOMOGENEOUS_PER_CODE",
+          "DOSE_UNIT_CARRIED",
+          "VISIT_CONCEPT_COVERAGE",
+          "NOTE_TEXT_UNIQUE",
+          "ENCOUNTER_RESOLVES",
+          "CODE_DESCRIPTION_IS_REPRESENTATIVE",
+          "RAW_COVERAGE_DECLARED",
+          "EXCLUDED_STATUS_NOT_PUBLISHED"
+        ],
+        "nonpassing_checks": [
+          {
+            "check_id": "ANCHOR_TIMES_ARE_NOT_THE_EVENT_CLOCK",
+            "skipped": true,
+            "detail": "skipped: no anchors in this dataset"
+          },
+          {
+            "check_id": "ANCHORS_ARE_NOT_EVENTS",
+            "skipped": true,
+            "detail": "skipped: no anchors in this dataset"
+          },
+          {
+            "check_id": "COHORT_LABEL_NEVER_A_CLINICAL_FACT",
+            "skipped": true,
+            "detail": "skipped: dataset has no membership labels"
+          },
+          {
+            "check_id": "MEMBERSHIP_KEPT_PER_PARTITION",
+            "skipped": true,
+            "detail": "skipped: dataset has no cohort membership"
+          },
+          {
+            "check_id": "OMOP_BIRTH_YEAR_IS_REPRODUCIBLE",
+            "skipped": true,
+            "detail": "skipped: no age-derived birth years to reproduce"
+          },
+          {
+            "check_id": "UNIT_HOMOGENEOUS_PER_CODE",
+            "skipped": false,
+            "detail": "12 code(s) mix units no conversion links: 51229 ['[u]/l', 'u/l'] (49.5%); 51249 ['g/l', '%'] (45.8%); 51654 ['log10 cop/l', 'log10 copies/l'] (40.2%); 50918 ['[u]/l', 'n/a'] (38.1%); 51085 ['+/-', 'n/a'] (34.0%)"
+          },
+          {
+            "check_id": "EXCLUDED_STATUS_NOT_PUBLISHED",
+            "skipped": true,
+            "detail": "skipped: no source declares an excluded status; status distributions reported"
+          }
+        ],
+        "interval_ordering": {
+          "end_before_start": 1519856,
+          "unflagged": 0
+        },
+        "birth_policy": {
+          "blocked": 0,
+          "person": 364627
+        },
+        "predates_target_reports": false
+      },
+      "report_modified_utc": {
+        "omop": "2026-09-16T18:48:38.032428+00:00",
+        "meds": "2026-09-15T16:41:08.746340+00:00",
+        "validation": "2026-09-16T20:31:19.710769+00:00"
+      },
+      "report_sha256": {
+        "omop": "95a94fe311904064c96340afd6451049c28f8d3395a0a05e92a6c3d4cba9bc0c",
+        "meds": "76100f9e2937ea2bea37135c82fe4e7d1fd3b104a2c0e730aa09a610675347f7",
+        "validation": "9af23cab6dcc05889b4351d3029268c4d9fb447062981a8c5e2a548ae9324a50"
+      },
+      "canonical_files": {
+        "events": {
+          "bytes": 40050157750,
+          "modified_utc": "2026-09-15T04:31:41.490913+00:00"
+        },
+        "event_source": {
+          "bytes": 54720581285,
+          "modified_utc": "2026-09-15T04:50:18.159211+00:00"
+        },
+        "anchors": {
+          "bytes": 282,
+          "modified_utc": "2026-09-15T04:50:25.044349+00:00"
+        },
+        "quarantine": {
+          "bytes": 44797607,
+          "modified_utc": "2026-09-15T04:50:25.798364+00:00"
+        }
+      },
+      "validation_rerun": {
+        "artifact": "results/mimiciv_validation_rerun.json",
+        "superseded_by_rebuild": [
+          "the validation report changed after the recorded rerun",
+          "the omop report changed after the recorded rerun",
+          "the meds report changed after the recorded rerun"
+        ]
+      }
+    },
+    "cu_ctpa": {
+      "source_rows": 16682059,
+      "identity_subjects": 127955,
+      "canonical_subjects": 127955,
+      "canonical": {
+        "events": 13880372,
+        "event_source": 16385410,
+        "anchors": 127952,
+        "quarantine": 232123
+      },
+      "canonical_quarantine_by_reason": {
+        "UNTIMED_CLINICAL_VALUE": 124367,
+        "UNTIMED_VITAL_STATUS": 99806,
+        "VALUE_CONFLICT": 7950
+      },
+      "source_accounting_recorded": {
+        "became_events": 15865389,
+        "both": 135200,
+        "carried_no_fact": 816670,
+        "parsed": 16682059,
+        "quarantined": 135200
+      },
+      "omop_persons": 127955,
+      "omop_lineage_rows": 16853602,
+      "omop_tables": {
+        "condition_occurrence": {
+          "rows": 5861753,
+          "mapped_rows": 5861753,
+          "mapped_pct": 100.0
+        },
+        "drug_exposure": {
+          "rows": 4206761,
+          "mapped_rows": 4169928,
+          "mapped_pct": 99.1244
+        },
+        "measurement": {
+          "rows": 982655,
+          "mapped_rows": 982655,
+          "mapped_pct": 100.0
+        },
+        "procedure_occurrence": {
+          "rows": 719423,
+          "mapped_rows": 719423,
+          "mapped_pct": 100.0
+        },
+        "observation": {
+          "rows": 35,
+          "mapped_rows": 35,
+          "mapped_pct": 100.0
+        }
+      },
+      "vocabulary": "v5.0 29-AUG-26",
+      "unmapped_without_concept": {
+        "place_of_occurrence_rows": 0,
+        "atrial_rate_rows": 0
+      },
+      "meds": {
+        "events": 13880372,
+        "subjects": 127955,
+        "shards": 127955,
+        "codes": 882,
+        "mapped_codes": 776
+      },
+      "meds_splits_from_metadata": {
+        "tuning": 12781,
+        "train": 102320,
+        "held_out": 12854
+      },
+      "age_reference_source": {
+        "cta_timestamp": 127952,
+        "earliest_flowsheet_day": 3
+      },
+      "validation_recorded": {
+        "total": 55,
+        "passed": 50,
+        "skipped": 5,
+        "failed": 0,
+        "check_ids": [
+          "INPUT_MANIFEST_COMPLETE",
+          "RECONCILIATION_ROWS",
+          "SOURCE_COVERAGE_REPORTED",
+          "EVENT_LINEAGE_COMPLETE",
+          "LINK_TARGETS_EXIST",
+          "FAN_OUT_AND_DEDUP",
+          "SOURCE_ROWS_ACCOUNTED",
+          "ANCHOR_NEVER_AN_EVENT_TIME",
+          "CANONICAL_SCHEMA_AS_DECLARED",
+          "EVENT_SUBJECTS_WERE_ISSUED_BY_IDENTITY",
+          "ANCHOR_TIMES_ARE_NOT_THE_EVENT_CLOCK",
+          "ANCHORS_ARE_NOT_EVENTS",
+          "COHORT_LABEL_NEVER_A_CLINICAL_FACT",
+          "MEMBERSHIP_KEPT_PER_PARTITION",
+          "NO_UNTIMED_CLINICAL_EVENTS",
+          "ORDERS_AND_ADMINISTRATIONS_STAY_SEPARATE",
+          "EVENT_KIND_IS_ONE_ITS_SOURCE_DECLARES",
+          "TEXT_SOURCES_PUBLISH_THEIR_TEXT",
+          "ONLY_ADMINISTRATIONS_BECOME_DRUG_EXPOSURE",
+          "POST_DEATH_RECORDS_FLAGGED_NOT_DELETED",
+          "END_TIME_NEVER_PRECEDES_START",
+          "QUARANTINE_IS_EXPLAINED",
+          "IDENTITY_RESOLVED_ACROSS_PARTITIONS",
+          "OMOP_EVERY_ROW_HAS_LINEAGE",
+          "OMOP_CONCEPTS_EXIST_AND_FIT_THEIR_DOMAIN",
+          "TERMINOLOGY_COVERAGE_PLAUSIBLE",
+          "OMOP_REFERENTIAL_INTEGRITY",
+          "OMOP_PRIMARY_KEYS_UNIQUE",
+          "OMOP_BIRTH_YEAR_IS_REPRODUCIBLE",
+          "OMOP_BIRTH_POLICY_ENFORCED",
+          "OMOP_NO_FABRICATED_MEASUREMENT_DATES",
+          "MEDS_SCHEMA_VALID",
+          "MEDS_SHARDS_CONTIGUOUS_AND_SORTED",
+          "MEDS_LINEAGE_COMPLETE",
+          "MEDS_NO_LABEL_LEAKAGE",
+          "MEDS_CODES_METADATA_COMPLETE",
+          "MEDS_CONCEPTS_ARE_OMOPS",
+          "MEDS_SPLITS_DISJOINT_AND_COMPLETE",
+          "MEDS_AVAILABILITY_PREVENTS_LEAKAGE",
+          "UNDECIDED_PROPOSALS_NEVER_PUBLISHED",
+          "DUPLICATES_AGREE",
+          "SOURCE_YIELDS_EVENTS",
+          "QUARANTINE_SHARE_DECLARED",
+          "DEATH_PUBLISHED",
+          "UNIT_CONCEPT_COVERAGE",
+          "UNIT_KNOWN",
+          "UNIT_VALUE_PLAUSIBLE",
+          "UNIT_HOMOGENEOUS_PER_CODE",
+          "DOSE_UNIT_CARRIED",
+          "VISIT_CONCEPT_COVERAGE",
+          "NOTE_TEXT_UNIQUE",
+          "ENCOUNTER_RESOLVES",
+          "CODE_DESCRIPTION_IS_REPRESENTATIVE",
+          "RAW_COVERAGE_DECLARED",
+          "EXCLUDED_STATUS_NOT_PUBLISHED"
+        ],
+        "nonpassing_checks": [
+          {
+            "check_id": "COHORT_LABEL_NEVER_A_CLINICAL_FACT",
+            "skipped": true,
+            "detail": "skipped: dataset has no membership labels"
+          },
+          {
+            "check_id": "MEMBERSHIP_KEPT_PER_PARTITION",
+            "skipped": true,
+            "detail": "skipped: dataset has no cohort membership"
+          },
+          {
+            "check_id": "ONLY_ADMINISTRATIONS_BECOME_DRUG_EXPOSURE",
+            "skipped": true,
+            "detail": "skipped: no source declares which of its statuses mean administered"
+          },
+          {
+            "check_id": "OMOP_BIRTH_YEAR_IS_REPRODUCIBLE",
+            "skipped": true,
+            "detail": "skipped: no age-derived birth years to reproduce"
+          },
+          {
+            "check_id": "EXCLUDED_STATUS_NOT_PUBLISHED",
+            "skipped": true,
+            "detail": "skipped: no source declares an excluded status; status distributions reported"
+          }
+        ],
+        "interval_ordering": {
+          "end_before_start": 0,
+          "unflagged": 0
+        },
+        "birth_policy": {
+          "blocked": 0,
+          "person": 127955
+        },
+        "predates_target_reports": false
+      },
+      "report_modified_utc": {
+        "omop": "2026-09-16T06:09:53.476348+00:00",
+        "meds": "2026-09-15T02:05:52.622329+00:00",
+        "validation": "2026-09-16T06:14:27.561974+00:00"
+      },
+      "report_sha256": {
+        "omop": "0f316047262180c124db97522dd3e2c61cdff7960a6d482e1cfd6cc87b8d7fa5",
+        "meds": "9c2313dca1fcfee07146da6ea30340ca51c3357dbbe1af9a8c05d7c3229d5ab6",
+        "validation": "6227b4c80b97f248af64af1bbcdadee632f85a76234b65b2cd6cacf7037ac39a"
+      },
+      "canonical_files": {
+        "events": {
+          "bytes": 3315373433,
+          "modified_utc": "2026-09-15T01:33:06.632821+00:00"
+        },
+        "event_source": {
+          "bytes": 1054201457,
+          "modified_utc": "2026-09-15T01:33:44.878603+00:00"
+        },
+        "anchors": {
+          "bytes": 11157528,
+          "modified_utc": "2026-09-15T01:33:55.495820+00:00"
+        },
+        "quarantine": {
+          "bytes": 6700807,
+          "modified_utc": "2026-09-15T01:33:55.822826+00:00"
+        }
+      }
+    }
+  },
+  "mapping_provenance": {
+    "community_lab_items": 1397,
+    "community_lab_items_corrected": 4,
+    "community_lab_table": "MIT-LCP mimic-code mimic-iv/mapping/d_labitems_to_loinc.csv (SSSOM)"
+  },
+  "drug_match": {
+    "confirmed_mappings": 139,
+    "resolved": 129,
+    "outcome": {
+      "abstained_no_ingredient": 8,
+      "abstained_no_match": 1,
+      "abstained_unparsed_strength": 1,
+      "exact_agreement": 121,
+      "same_drug_other_spelling": 7,
+      "same_ingredient_other_strength_reading": 1
+    },
+    "share_of_resolved": {
+      "exact_agreement": 0.938,
+      "same_drug_other_spelling": 0.0543,
+      "same_ingredient_other_strength_reading": 0.0078
+    },
+    "name_audit": {
+      "comparable": 8403,
+      "disagreement_count": 0,
+      "name_agrees": 8403,
+      "routes": {
+        "as_written": 6686,
+        "as_written_via_brand": 1634,
+        "as_written_widened_form": 789,
+        "as_written_widened_form_via_brand": 75,
+        "ingredient": 285,
+        "ingredient_via_brand": 1,
+        "percent_by_weight": 134,
+        "percent_by_weight_via_brand": 39,
+        "total_amount": 171,
+        "total_amount_via_brand": 1,
+        "total_amount_widened_form": 34,
+        "total_amount_widened_form_via_brand": 1
+      },
+      "rows_settled": 8656606,
+      "settled": 9850,
+      "terms": 26629
+    },
+    "vocabulary_version": "v5.0 29-AUG-26",
+    "source_sha256": "4889784b687b98317f2fdd1b75578f45cc62c8b95e8478c4365eca928024e958",
+    "source_modified_utc": "2026-09-12T01:39:57.473465+00:00"
+  },
+  "evidence_files": {
+    "compose_dense_medgemma_k32.json": {
+      "sha256": "60ca15e1da6c668b16399c681ae39e53f8adf68bb7e944ac3b46ac29e6888e33",
+      "modified_utc": "2026-09-08T21:18:13.708000+00:00"
+    },
+    "compose_dense_medgemma_k8.json": {
+      "sha256": "e2c2d0057f4f03be57e318f5b6f9723453962c22da7ce772304f2f2919d284eb",
+      "modified_utc": "2026-09-08T21:18:13.709289+00:00"
+    },
+    "compose_dense_qwen3-32b_k8.json": {
+      "sha256": "8f596c10da94963b343bd5a635e6935befeae8af4e12d2fb421c7c26368b4721",
+      "modified_utc": "2026-09-08T21:18:13.709289+00:00"
+    },
+    "converter_comparison.json": {
+      "sha256": "2d181a6ade121a5f9a8675f69e0d8907a5e8674b1da0280ff1c27c974a3369e5",
+      "modified_utc": "2026-09-12T18:25:01.389875+00:00"
+    },
+    "cost.json": {
+      "sha256": "d7f511e77bcf3b8c3caeff740dfc9d3cf775f487122567220134ac3e0f13b75d",
+      "modified_utc": "2026-09-11T00:42:46.052247+00:00"
+    },
+    "dqd_baseline.json": {
+      "sha256": "098c5743746d47f2573a1088e8f8e2d9d6bc9688e311391961f476e90de021d1",
+      "modified_utc": "2026-09-08T21:18:13.709289+00:00"
+    },
+    "drug_match.json": {
+      "sha256": "4889784b687b98317f2fdd1b75578f45cc62c8b95e8478c4365eca928024e958",
+      "modified_utc": "2026-09-12T01:39:57.473465+00:00"
+    },
+    "faults_fixture.json": {
+      "sha256": "daf517587057d3c99efd9974a9a83400c98a4954825b655a13779ab600f5e422",
+      "modified_utc": "2026-09-16T04:41:31.886621+00:00"
+    },
+    "faults_fixture_before.json": {
+      "sha256": "074a7b50e72b5bc356c2ccdd4cee6fb9877e3a13b383ef9ebcd15441c96e7cf7",
+      "modified_utc": "2026-09-16T04:41:31.888527+00:00"
+    },
+    "leakage_downstream.json": {
+      "sha256": "4aa65ce2bae86214853ff4bd9fce8b5c1443538129bab4c21e5aa51f760ca321",
+      "modified_utc": "2026-09-12T06:33:10.922211+00:00"
+    },
+    "leakage_transfer.json": {
+      "sha256": "4e6d7decfd987e6a916a593cc57bb365bb782f6ae5d342d7dc804427558cba6e",
+      "modified_utc": "2026-09-16T19:10:46.933676+00:00"
+    },
+    "loinc_compose_dense_medgemma_k8.json": {
+      "sha256": "041a4efaf08755f58d43308620885102c36d993f75150a97d2fe89ee267a7d72",
+      "modified_utc": "2026-09-08T21:18:13.710001+00:00"
+    },
+    "loinc_compose_dense_qwen3-32b_k8.json": {
+      "sha256": "fbf80971d3197451707a206fbd05b119adea58acfb2408fc2a7674f453297c28",
+      "modified_utc": "2026-09-08T21:18:13.710001+00:00"
+    },
+    "loinc_lexical_k8.json": {
+      "sha256": "2925a7b8acfe2e83eae4880bd727e62482038f668a0f7243a664a7733a1c8eb2",
+      "modified_utc": "2026-09-08T21:18:13.710001+00:00"
+    },
+    "loinc_medgemma_k8.json": {
+      "sha256": "8bfea073daeb506ae1e38053dce1000c102e052018fc7c1faa1644a529b47279",
+      "modified_utc": "2026-09-08T21:18:13.710001+00:00"
+    },
+    "loinc_qwen3-32b_k8.json": {
+      "sha256": "d3cbdeab17979edea30fab5f278d11d01e6c11f20d75bd7651879a52f11247ec",
+      "modified_utc": "2026-09-08T21:18:13.710001+00:00"
+    },
+    "loinc_synonym_terms.json": {
+      "sha256": "6f82c00844f200dd9ce7455928fc771d3b0a190fcde9b663096ab0bcd99bc7b0",
+      "modified_utc": "2026-09-08T21:18:13.711000+00:00"
+    },
+    "mimiciv_validation_rerun.json": {
+      "sha256": "f6dbe1afcef14a623985f94412ea9a8b605b7e4bf2dca117c70a68e4112e1e89",
+      "modified_utc": "2026-09-12T08:14:12.376212+00:00"
+    },
+    "rebuild_defects.json": {
+      "sha256": "3721b070176859063d8b0548fa8563cc9fa1553ea8bde55c87ff238d5c2d594a",
+      "modified_utc": "2026-09-11T02:01:12.082154+00:00"
+    },
+    "reproducibility.json": {
+      "sha256": "ddd24ff623d968466c89d22986b6baca1a8ba5cc341b80b4f76fdbe5de73c5ee",
+      "modified_utc": "2026-09-16T04:41:31.889542+00:00"
+    },
+    "retrieval_bge-m3_condition.json": {
+      "sha256": "71c5f264fdfbece77b1e71a583ce910081168852c8acd5f742cc2269c5c32541",
+      "modified_utc": "2026-09-08T21:18:13.715001+00:00"
+    },
+    "retrieval_bge-m3_measurement.json": {
+      "sha256": "a942806c91df0c1d9d729ebd6c0311f137947a83807d51b7d6702961edbf7dfb",
+      "modified_utc": "2026-09-08T21:18:13.719001+00:00"
+    },
+    "terminology_agent_ranker.json": {
+      "sha256": "1f4de1286db44a10265dc763f11de94f181fddaa593daae65ba93e7fb8faf882",
+      "modified_utc": "2026-09-08T21:18:13.719001+00:00"
+    },
+    "terminology_lexical_k16.json": {
+      "sha256": "c7395ddd54e3fd6e6b0587d3d7bb852d389204b6778eeb95f403c9b0e8b71057",
+      "modified_utc": "2026-09-08T21:18:13.719001+00:00"
+    },
+    "terminology_lexical_k32.json": {
+      "sha256": "dfb3f3095d01bf68177d477ce157e24839edfa31c93161792b9a8d8329c7abcd",
+      "modified_utc": "2026-09-08T21:18:13.719001+00:00"
+    },
+    "terminology_lexical_k4.json": {
+      "sha256": "9d5bb9b6335bfc49d8e9eac572236fa7d8112d4d63138a9713543bbecfb68aff",
+      "modified_utc": "2026-09-08T21:18:13.719001+00:00"
+    },
+    "terminology_lexical_k64.json": {
+      "sha256": "b730379430c1956f1db17af7d33a70f6018c3cf49d05cba2fd36ed52b572a380",
+      "modified_utc": "2026-09-08T21:18:13.719001+00:00"
+    },
+    "terminology_lexical_k8.json": {
+      "sha256": "1cb7543fa9abfe773b3997dc46aa072b7bbcff79aafb2f408258f2940622b140",
+      "modified_utc": "2026-09-08T21:18:13.719001+00:00"
+    },
+    "terminology_medgemma_k32.json": {
+      "sha256": "299b7a34a9eadede87358427c4a7640b2d84cfd38b707a1ee16841286e87aa3c",
+      "modified_utc": "2026-09-08T21:18:13.719001+00:00"
+    },
+    "terminology_medgemma_k8.json": {
+      "sha256": "208b95950b62fa31fe60f60f2dbe68aed58ab917d8bd86ed723923ba34928e90",
+      "modified_utc": "2026-09-08T21:18:13.719001+00:00"
+    },
+    "terminology_qwen3-32b_k32.json": {
+      "sha256": "f1551fbb06ac10febdcb202f252906ff3145a8d35d23afad850f11d24f67b167",
+      "modified_utc": "2026-09-08T21:18:13.719001+00:00"
+    },
+    "terminology_qwen3-32b_k8.json": {
+      "sha256": "a6947cfe6f2af235c68a57cf4465def631a79a97ba1b844a91ffb4a47f03c10b",
+      "modified_utc": "2026-09-08T21:18:13.720001+00:00"
+    },
+    "world_model_readiness.json": {
+      "sha256": "f09cc0c24ea557aad4d1994f9c11e6c732bec0b94f488bdaf32f77bd709d5246",
+      "modified_utc": "2026-09-16T04:35:25.387303+00:00"
+    },
+    "world_model_readiness_before_rebuild.json": {
+      "sha256": "90a061a0470a907a3a8a458f6e18b55b1530e90ed466529a902fa8a7d63ae4e0",
+      "modified_utc": "2026-09-08T21:18:13.720001+00:00"
+    },
+    "world_model_visibility_probe.json": {
+      "sha256": "0c4bd2b9c45a1eb04c8e7ca47ccf0562fc92748bb4b2e73350327c391f2efe13",
+      "modified_utc": "2026-09-08T21:18:13.720001+00:00"
+    }
+  },
+  "implementation_files": {
+    "drug_match.py": "d934f115fc0425f2da875d8ba13e5cf1f9121b26bc14e84a0d4c66fc1571adea",
+    "drug_lexicon.py": "8d1a6102897d5149f0ff6385f6b5cc2f0941c6d0770e4622d0a4d83b191cf2b1",
+    "measure_drug_match.py": "1895e9eeb3228d98a7e7c25251bbaa784f0d5e5690e883f17ee3aa6e75997027",
+    "prepare_mimiciv.py": "434318ae5ae2f9269af1292bed30e699b916ea00ba147824f2655abe7691a7c0",
+    "prepare_cu.py": "f2671eb3f0b0fce119e861781318ed77fa30f917f96e8758fcbe05933c92b001",
+    "ctpe.yaml": "8920bbcda4e7b6716f3804f16ae702377038c35f938e986a1286165873647cbf",
+    "mimiciv.yaml": "0dce0e0e82bbddd33478830e814faff010c5d7d1617bdc37d93efa522bdc5e53",
+    "cu_ctpa.yaml": "9602440e893521e7b2e344d141605715112c2bd694a5949367491c5036b1f389",
+    "run_leakage_experiment.py": "a384ef1f9595863c762c8750a42051ac0057faea764d3cc44a746031cfe46265"
+  },
+  "software_head": "ac642a664a1b0293ef5ddd78d8c64a931291ed53"
+}

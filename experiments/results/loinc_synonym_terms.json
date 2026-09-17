@@ -1,0 +1,1219 @@
+{
+  "vocabulary_id": "LOINC",
+  "domain": "Measurement",
+  "eligible_synonyms": 155936,
+  "eligible_concepts": 67818,
+  "n_terms": 300,
+  "seed": 20260826,
+  "query_length_chars": {
+    "min": 10,
+    "median": 36,
+    "max": 782,
+    "at_most_24": 97
+  },
+  "answer_length_chars_median": 58,
+  "duplicate_texts": 0,
+  "rows": [
+    {
+      "source_code": "",
+      "true_concept_id": 42868325
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3032738
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 37020691
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3040027
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3028105
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3031645
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3036471
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3043342
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3016701
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40760640
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3014781
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40766207
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3020032
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40762363
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3020321
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3034343
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3037032
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40760634
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3000996
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3049835
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 46234876
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21494687
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3026831
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3966598
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3014230
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40757611
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3011372
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3008316
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40762801
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36305929
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3051564
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3021749
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21491521
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3005135
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36303481
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3016185
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3029056
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3006695
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3045886
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1259658
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40771499
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1988262
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3012299
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40761338
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3001753
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3040115
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36306185
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3001912
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3035798
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3019067
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3005506
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36031898
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3965346
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36203649
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3002076
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21491372
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 42528559
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3048165
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3049801
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3044594
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 43534186
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1176488
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40758496
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3014882
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3036131
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21491536
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3966431
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40759514
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3038921
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3000315
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40761077
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3010460
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3030837
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3013409
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3001931
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3021968
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3015238
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3040711
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40759470
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 43534150
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 46234915
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36660702
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40759300
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3007971
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3027708
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3045692
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3034165
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3037372
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3966453
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 42528783
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 44787095
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3018764
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3024268
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36032417
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3042185
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3037831
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40763885
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3037444
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3028654
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3035497
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21490777
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3041251
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3019330
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3018198
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36305453
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3052600
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3966257
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3021543
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3024379
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3037638
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3033236
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3030101
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1617442
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40762458
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3040541
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3010328
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40766095
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3966627
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21493044
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21494672
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3001618
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 37020776
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40769424
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3023060
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3035039
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36303763
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3019381
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3965802
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3013733
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3010990
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3010370
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3049363
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3006867
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40759252
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3024535
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3002089
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3038392
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3017336
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3020157
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3039092
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 46234944
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3037746
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21492934
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3040014
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1092176
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3965461
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40758917
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 37021190
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36032191
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 46236846
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3023086
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3036240
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3045090
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1092106
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3040286
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1761610
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21490903
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3018467
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3031674
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1002096
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21494543
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3051414
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3028462
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3010817
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3021923
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3037165
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3003250
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3008044
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 43533736
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36303935
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3019481
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3037203
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3052600
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3964798
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3009285
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 44816961
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 46235177
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1617451
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3027517
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3030090
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3008526
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 46235199
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1260078
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40762596
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21491704
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3031653
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 43055484
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3045257
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3019954
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3033214
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3015441
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3007727
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3002559
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3024242
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3008108
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 43055087
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3048875
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36304019
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3030431
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21490991
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3023878
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40763279
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3024785
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3030072
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40763975
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3010362
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1469740
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3018643
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3023297
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 37020690
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3965261
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3041754
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3029103
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3024778
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3021126
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 46234930
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3965958
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36305176
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40763710
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3052331
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3049932
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40760443
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3046754
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 42529070
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3023251
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21493620
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3966438
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3037959
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 42528670
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36304624
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3011153
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3025507
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3022865
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3015341
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3016376
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3046995
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1259604
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3964959
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3033959
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3020916
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3044879
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40757364
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1616519
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3008720
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21492387
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3018444
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21493973
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40763479
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3020892
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3029046
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36306034
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3045524
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3019670
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3021466
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3024237
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 43055368
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3013894
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3035933
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 42528988
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3025457
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3037598
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40759360
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1091124
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3032526
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3037880
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3035888
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3018720
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3041520
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1002364
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3966626
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3020192
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3034279
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 42868638
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40759799
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3045344
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3036066
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40761775
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3038303
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40758493
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 42868691
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40757465
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3050928
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1761806
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3025258
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3029966
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21494558
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3032123
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36031264
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40760989
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3011095
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 21493167
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3036209
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3050817
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1001886
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 43534309
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 1091344
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 40758458
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 36304914
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 43534131
+    },
+    {
+      "source_code": "",
+      "true_concept_id": 3011931
+    }
+  ],
+  "vocabulary_strings_removed": "Licensed vocabulary strings (SNOMED CT / LOINC / RxNorm concept names, and LOINC synonyms in the Measurement records) were removed before publication; see tools/strip_vocabulary_strings.py. Concept identifiers, ranks and all measured quantities are unchanged."
+}

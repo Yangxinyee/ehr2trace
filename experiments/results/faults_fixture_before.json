@@ -1,0 +1,924 @@
+{
+  "dataset": "ctpe_shape",
+  "excluded_checks": [
+    "ANCHOR_TIMES_ARE_NOT_THE_EVENT_CLOCK",
+    "CANONICAL_SCHEMA_AS_DECLARED",
+    "CODE_DESCRIPTION_IS_REPRESENTATIVE",
+    "DEATH_PUBLISHED",
+    "DOSE_UNIT_CARRIED",
+    "DUPLICATES_AGREE",
+    "ENCOUNTER_RESOLVES",
+    "EVENT_SUBJECTS_WERE_ISSUED_BY_IDENTITY",
+    "EXCLUDED_STATUS_NOT_PUBLISHED",
+    "MEDS_CONCEPTS_ARE_OMOPS",
+    "NOTE_TEXT_UNIQUE",
+    "OMOP_BIRTH_YEAR_IS_REPRODUCIBLE",
+    "QUARANTINE_SHARE_DECLARED",
+    "RAW_COVERAGE_DECLARED",
+    "SOURCE_YIELDS_EVENTS",
+    "TEXT_SOURCES_PUBLISH_THEIR_TEXT",
+    "UNIT_CONCEPT_COVERAGE",
+    "UNIT_HOMOGENEOUS_PER_CODE",
+    "UNIT_KNOWN",
+    "UNIT_VALUE_PLAUSIBLE",
+    "VISIT_CONCEPT_COVERAGE"
+  ],
+  "excluded_check_groups": {
+    "fault_experiment": [
+      "ANCHOR_TIMES_ARE_NOT_THE_EVENT_CLOCK",
+      "CANONICAL_SCHEMA_AS_DECLARED",
+      "EVENT_SUBJECTS_WERE_ISSUED_BY_IDENTITY",
+      "MEDS_CONCEPTS_ARE_OMOPS",
+      "OMOP_BIRTH_YEAR_IS_REPRODUCIBLE",
+      "TEXT_SOURCES_PUBLISH_THEIR_TEXT"
+    ],
+    "conversion_audit": [
+      "CODE_DESCRIPTION_IS_REPRESENTATIVE",
+      "DEATH_PUBLISHED",
+      "DOSE_UNIT_CARRIED",
+      "DUPLICATES_AGREE",
+      "ENCOUNTER_RESOLVES",
+      "EXCLUDED_STATUS_NOT_PUBLISHED",
+      "NOTE_TEXT_UNIQUE",
+      "QUARANTINE_SHARE_DECLARED",
+      "RAW_COVERAGE_DECLARED",
+      "SOURCE_YIELDS_EVENTS",
+      "UNIT_CONCEPT_COVERAGE",
+      "UNIT_HOMOGENEOUS_PER_CODE",
+      "UNIT_KNOWN",
+      "UNIT_VALUE_PLAUSIBLE",
+      "VISIT_CONCEPT_COVERAGE"
+    ]
+  },
+  "layers_run": [
+    "canonical",
+    "ingest",
+    "meds",
+    "omop"
+  ],
+  "software_commit": "00c95145a50bf59b06ab509b74334a028e23c03c",
+  "code_version": "0.7.0",
+  "checks_total": 34,
+  "baseline_passing": 34,
+  "baseline_failing": [],
+  "faults_total": 28,
+  "faults_run": 28,
+  "faults_skipped": 0,
+  "faults_injection_failed": [],
+  "faults_detected": 13,
+  "faults_missed": [
+    "ANCHOR_USED_AS_EVENT_TIME",
+    "BIRTH_YEAR_INVENTED_UNDER_STRICT_POLICY",
+    "DEATH_DATE_AND_TIME_TREATED_AS_A_CONFLICT",
+    "DIAGNOSIS_TEXT_READ_AS_A_UNIT",
+    "DOSE_UNIT_DROPPED_FROM_DRUG_ROWS",
+    "EXCLUDED_STATUS_PUBLISHED",
+    "IDENTITY_NOT_RESOLVED_ACROSS_PARTITIONS",
+    "MEDS_BUILT_WITHOUT_VOCABULARY",
+    "NOTE_TEXT_SILENTLY_DROPPED",
+    "ONE_NOTE_UNDER_TWO_ENCOUNTERS",
+    "ORDERS_WITH_DIFFERENT_DOSES_MERGED",
+    "PARTITION_COLUMN_LEAKED_INTO_CANONICAL",
+    "RAW_COLUMN_NEVER_DECLARED",
+    "SOURCE_PARSED_ROWS_AND_YIELDED_NOTHING",
+    "VALUE_IN_A_DIFFERENT_UNIT_THAN_ITS_LABEL"
+  ],
+  "detection_rate": 0.464,
+  "faults_localised": 10,
+  "faults_detected_but_not_localised": [
+    "LINEAGE_LINKS_DANGLE",
+    "POST_DEATH_RECORDS_DELETED",
+    "SHARD_NOT_TIME_SORTED"
+  ],
+  "results": [
+    {
+      "fault_id": "ANCHOR_USED_AS_EVENT_TIME",
+      "layer": "canonical",
+      "silent": "silent",
+      "description": "Overwrite each event's clinical time with the extraction anchor date.",
+      "origin": "An export that repeats each ancillary result once per index study carries the study's date on every repeated row. Reading that column as the result's own time is the easiest mistake such a layout invites.",
+      "effect": "120 events now carry an anchor date as their clinical time",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": false,
+      "detectors": [],
+      "n_detectors": 0,
+      "expected": [
+        "ANCHOR_NEVER_AN_EVENT_TIME"
+      ],
+      "expected_hit": [],
+      "expected_missed": [
+        "ANCHOR_NEVER_AN_EVENT_TIME"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "canonical/events"
+      ],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 37.8
+    },
+    {
+      "fault_id": "COHORT_LABEL_BECAME_A_DIAGNOSIS",
+      "layer": "canonical",
+      "silent": "silent",
+      "description": "Emit the cohort label as a condition event on every labelled subject.",
+      "origin": "Cohort partitions are named after the condition that defines them. Turning that name into a condition row is how a cohort definition becomes a clinical fact, and then a model's own target handed back to it as a feature.",
+      "effect": "5 condition events carrying the cohort label",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": true,
+      "detectors": [
+        "COHORT_LABEL_NEVER_A_CLINICAL_FACT",
+        "EVENT_LINEAGE_COMPLETE"
+      ],
+      "n_detectors": 2,
+      "expected": [
+        "COHORT_LABEL_NEVER_A_CLINICAL_FACT"
+      ],
+      "expected_hit": [
+        "COHORT_LABEL_NEVER_A_CLINICAL_FACT"
+      ],
+      "expected_missed": [],
+      "unexpected_detectors": [
+        "EVENT_LINEAGE_COMPLETE"
+      ],
+      "damaged_artifacts": [
+        "canonical/events"
+      ],
+      "detectors_naming_a_damaged_artifact": [
+        "COHORT_LABEL_NEVER_A_CLINICAL_FACT",
+        "EVENT_LINEAGE_COMPLETE"
+      ],
+      "localised": true,
+      "seconds": 38.0
+    },
+    {
+      "fault_id": "PARTITION_COLUMN_LEAKED_INTO_CANONICAL",
+      "layer": "canonical",
+      "silent": "silent",
+      "description": "Append the physical bucketing key as a column of the canonical event table.",
+      "origin": "Writing canonical tables with hive partitioning silently appended a `bucket` column to every one of them. Nothing failed; the schema simply grew a field that encodes how the data was sharded.",
+      "effect": "canonical events gained a `bucket` column",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": false,
+      "detectors": [],
+      "n_detectors": 0,
+      "expected": [],
+      "expected_hit": [],
+      "expected_missed": [],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "canonical/events"
+      ],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 38.5
+    },
+    {
+      "fault_id": "POST_DEATH_RECORDS_DELETED",
+      "layer": "canonical",
+      "silent": "silent",
+      "description": "Drop every event that falls after its subject's recorded death.",
+      "origin": "Real exports contain records dated after the patient's recorded death. Deleting them looks like data cleaning and is the destruction of evidence: either the death date or the record is wrong, and which one it is matters.",
+      "effect": "1 post-death events deleted",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": true,
+      "detectors": [
+        "LINK_TARGETS_EXIST"
+      ],
+      "n_detectors": 1,
+      "expected": [
+        "EVENT_LINEAGE_COMPLETE",
+        "POST_DEATH_RECORDS_FLAGGED_NOT_DELETED"
+      ],
+      "expected_hit": [],
+      "expected_missed": [
+        "EVENT_LINEAGE_COMPLETE",
+        "POST_DEATH_RECORDS_FLAGGED_NOT_DELETED"
+      ],
+      "unexpected_detectors": [
+        "LINK_TARGETS_EXIST"
+      ],
+      "damaged_artifacts": [
+        "canonical/events"
+      ],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 38.2
+    },
+    {
+      "fault_id": "QUARANTINE_REASON_ERASED",
+      "layer": "canonical",
+      "silent": "silent",
+      "description": "Blank out the reason on the quarantined rows.",
+      "origin": "A quarantine row without a reason is indistinguishable from data loss. A globbing bug once doubled the quarantine unnoticed, because the headline event counts were deduplicated and still looked correct.",
+      "effect": "32 quarantine rows lost their reason",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": true,
+      "detectors": [
+        "QUARANTINE_IS_EXPLAINED"
+      ],
+      "n_detectors": 1,
+      "expected": [
+        "QUARANTINE_IS_EXPLAINED"
+      ],
+      "expected_hit": [
+        "QUARANTINE_IS_EXPLAINED"
+      ],
+      "expected_missed": [],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "canonical/quarantine"
+      ],
+      "detectors_naming_a_damaged_artifact": [
+        "QUARANTINE_IS_EXPLAINED"
+      ],
+      "localised": true,
+      "seconds": 38.1
+    },
+    {
+      "fault_id": "LINEAGE_LINKS_DANGLE",
+      "layer": "canonical",
+      "silent": "silent",
+      "description": "Point a slice of the lineage links at event ids that do not exist.",
+      "origin": "Rebuilding one layer without the other leaves links pointing at events that no longer exist. The published tables still look complete.",
+      "effect": "4 lineage links now point at nothing",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": true,
+      "detectors": [
+        "LINK_TARGETS_EXIST"
+      ],
+      "n_detectors": 1,
+      "expected": [
+        "EVENT_LINEAGE_COMPLETE",
+        "LINK_TARGETS_EXIST"
+      ],
+      "expected_hit": [
+        "LINK_TARGETS_EXIST"
+      ],
+      "expected_missed": [
+        "EVENT_LINEAGE_COMPLETE"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "canonical/event_source"
+      ],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 38.1
+    },
+    {
+      "fault_id": "IDENTITY_NOT_RESOLVED_ACROSS_PARTITIONS",
+      "layer": "canonical",
+      "silent": "silent",
+      "description": "Give the same patient a different subject id in each partition.",
+      "origin": "Patients recur across partitions of a multi-cohort export. Hashing the partition into the subject key splits each of them into several people, which inflates the cohort and truncates every timeline.",
+      "effect": "subject ids now vary by partition for the same person",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": false,
+      "detectors": [],
+      "n_detectors": 0,
+      "expected": [
+        "IDENTITY_RESOLVED_ACROSS_PARTITIONS",
+        "MEDS_SHARDS_CONTIGUOUS_AND_SORTED"
+      ],
+      "expected_hit": [],
+      "expected_missed": [
+        "IDENTITY_RESOLVED_ACROSS_PARTITIONS",
+        "MEDS_SHARDS_CONTIGUOUS_AND_SORTED"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "canonical/events"
+      ],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 38.1
+    },
+    {
+      "fault_id": "WITHHELD_PATIENT_STILL_PUBLISHED",
+      "layer": "omop",
+      "silent": "silent",
+      "description": "Delete two people from PERSON while leaving their clinical rows in place.",
+      "origin": "A birth-year policy that withholds a patient from PERSON, while the clinical builders go on publishing that patient's rows, produces millions of dangling references in a database that reports a successful build.",
+      "effect": "persons [2, 4] removed, their clinical rows left behind",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": true,
+      "detectors": [
+        "OMOP_REFERENTIAL_INTEGRITY"
+      ],
+      "n_detectors": 1,
+      "expected": [
+        "OMOP_REFERENTIAL_INTEGRITY"
+      ],
+      "expected_hit": [
+        "OMOP_REFERENTIAL_INTEGRITY"
+      ],
+      "expected_missed": [],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "omop/person"
+      ],
+      "detectors_naming_a_damaged_artifact": [
+        "OMOP_REFERENTIAL_INTEGRITY"
+      ],
+      "localised": true,
+      "seconds": 37.9
+    },
+    {
+      "fault_id": "MEASUREMENT_DATE_FABRICATED",
+      "layer": "omop",
+      "silent": "silent",
+      "description": "Publish untimed values with an invented measurement date.",
+      "origin": "Some real measurements carry no time anywhere in the export. Giving them the run date, or the patient's first event date, makes them look like measurements that happened when they did not.",
+      "effect": "50 untimed values published with an invented date",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": true,
+      "detectors": [
+        "OMOP_EVERY_ROW_HAS_LINEAGE"
+      ],
+      "n_detectors": 1,
+      "expected": [
+        "OMOP_EVERY_ROW_HAS_LINEAGE",
+        "OMOP_NO_FABRICATED_MEASUREMENT_DATES"
+      ],
+      "expected_hit": [
+        "OMOP_EVERY_ROW_HAS_LINEAGE"
+      ],
+      "expected_missed": [
+        "OMOP_NO_FABRICATED_MEASUREMENT_DATES"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "omop/measurement"
+      ],
+      "detectors_naming_a_damaged_artifact": [
+        "OMOP_EVERY_ROW_HAS_LINEAGE"
+      ],
+      "localised": true,
+      "seconds": 38.4
+    },
+    {
+      "fault_id": "PRIMARY_KEY_COLLISION",
+      "layer": "omop",
+      "silent": "silent",
+      "description": "Duplicate a primary key in a clinical table.",
+      "origin": "Deriving a surrogate key from a hash prefix that is too short collides silently; the row count is right and one fact overwrites another downstream.",
+      "effect": "one condition_occurrence row duplicated, primary key reused",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": true,
+      "detectors": [
+        "OMOP_PRIMARY_KEYS_UNIQUE"
+      ],
+      "n_detectors": 1,
+      "expected": [
+        "OMOP_PRIMARY_KEYS_UNIQUE"
+      ],
+      "expected_hit": [
+        "OMOP_PRIMARY_KEYS_UNIQUE"
+      ],
+      "expected_missed": [],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "omop/condition_occurrence"
+      ],
+      "detectors_naming_a_damaged_artifact": [
+        "OMOP_PRIMARY_KEYS_UNIQUE"
+      ],
+      "localised": true,
+      "seconds": 38.1
+    },
+    {
+      "fault_id": "CONCEPT_PLACED_IN_THE_WRONG_DOMAIN",
+      "layer": "omop",
+      "silent": "silent",
+      "description": "Give a condition row a concept id from another domain.",
+      "origin": "A diagnosis code that maps to an Observation concept does not belong in CONDITION_OCCURRENCE. Thousands of real diagnosis codes map outside the Condition domain, so the gate is not hypothetical.",
+      "effect": "5 condition rows now carry concept 8532, published elsewhere as a gender",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": true,
+      "detectors": [
+        "OMOP_CONCEPTS_EXIST_AND_FIT_THEIR_DOMAIN"
+      ],
+      "n_detectors": 1,
+      "expected": [
+        "OMOP_CONCEPTS_EXIST_AND_FIT_THEIR_DOMAIN"
+      ],
+      "expected_hit": [
+        "OMOP_CONCEPTS_EXIST_AND_FIT_THEIR_DOMAIN"
+      ],
+      "expected_missed": [],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "omop/condition_occurrence"
+      ],
+      "detectors_naming_a_damaged_artifact": [
+        "OMOP_CONCEPTS_EXIST_AND_FIT_THEIR_DOMAIN"
+      ],
+      "localised": true,
+      "seconds": 38.0
+    },
+    {
+      "fault_id": "BIRTH_YEAR_INVENTED_UNDER_STRICT_POLICY",
+      "layer": "omop",
+      "silent": "silent",
+      "description": "Overwrite year_of_birth with a value derived from the run year.",
+      "origin": "When an export carries an age but no birth date and no as-of date, filling year_of_birth from the run year is the default a permissive ETL takes, and it shifts every patient's age by the gap between extraction and run.",
+      "effect": "3 birth years shifted by seven years",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": false,
+      "detectors": [],
+      "n_detectors": 0,
+      "expected": [
+        "OMOP_BIRTH_POLICY_ENFORCED"
+      ],
+      "expected_hit": [],
+      "expected_missed": [
+        "OMOP_BIRTH_POLICY_ENFORCED"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "omop/person"
+      ],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 38.3
+    },
+    {
+      "fault_id": "COHORT_LABEL_LEAKED_INTO_MEDS_EVENTS",
+      "layer": "meds",
+      "silent": "silent",
+      "description": "Add the partition id to every MEDS event row.",
+      "origin": "The partition a patient came from is perfectly correlated with the label. A partition column in the event stream is a free answer key, and it arrives looking like ordinary provenance.",
+      "effect": "partition_id='b2_has' added to 4 shards",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": true,
+      "detectors": [
+        "MEDS_NO_LABEL_LEAKAGE",
+        "MEDS_SCHEMA_VALID"
+      ],
+      "n_detectors": 2,
+      "expected": [
+        "MEDS_NO_LABEL_LEAKAGE",
+        "MEDS_SCHEMA_VALID"
+      ],
+      "expected_hit": [
+        "MEDS_NO_LABEL_LEAKAGE",
+        "MEDS_SCHEMA_VALID"
+      ],
+      "expected_missed": [],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "meds/data/000000",
+        "meds/data/000001"
+      ],
+      "detectors_naming_a_damaged_artifact": [
+        "MEDS_SCHEMA_VALID"
+      ],
+      "localised": true,
+      "seconds": 38.0
+    },
+    {
+      "fault_id": "AVAILABILITY_PRECEDES_OCCURRENCE",
+      "layer": "meds",
+      "silent": "silent",
+      "description": "Move availability earlier than the event it belongs to.",
+      "origin": "available_time is the field that stops a model reading a lab result before the lab reported it. Defaulting it to the event time -- the obvious thing to do when a result time is missing -- removes the protection while leaving the column populated and the schema valid.",
+      "effect": "availability moved six hours earlier in 4 shards",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": true,
+      "detectors": [
+        "MEDS_AVAILABILITY_PREVENTS_LEAKAGE",
+        "MEDS_SCHEMA_VALID"
+      ],
+      "n_detectors": 2,
+      "expected": [
+        "MEDS_AVAILABILITY_PREVENTS_LEAKAGE"
+      ],
+      "expected_hit": [
+        "MEDS_AVAILABILITY_PREVENTS_LEAKAGE"
+      ],
+      "expected_missed": [],
+      "unexpected_detectors": [
+        "MEDS_SCHEMA_VALID"
+      ],
+      "damaged_artifacts": [
+        "meds/data/000000",
+        "meds/data/000001"
+      ],
+      "detectors_naming_a_damaged_artifact": [
+        "MEDS_SCHEMA_VALID"
+      ],
+      "localised": true,
+      "seconds": 38.1
+    },
+    {
+      "fault_id": "SHARD_NOT_TIME_SORTED",
+      "layer": "meds",
+      "silent": "silent",
+      "description": "Reverse the row order inside the shards.",
+      "origin": "A shard whose rows are not in time order still validates against the schema. Every model that reads it as a sequence reads a shuffled history.",
+      "effect": "4 shards reversed",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": true,
+      "detectors": [
+        "MEDS_SCHEMA_VALID",
+        "MEDS_SHARDS_CONTIGUOUS_AND_SORTED"
+      ],
+      "n_detectors": 2,
+      "expected": [
+        "MEDS_SHARDS_CONTIGUOUS_AND_SORTED"
+      ],
+      "expected_hit": [
+        "MEDS_SHARDS_CONTIGUOUS_AND_SORTED"
+      ],
+      "expected_missed": [],
+      "unexpected_detectors": [
+        "MEDS_SCHEMA_VALID"
+      ],
+      "damaged_artifacts": [],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 38.3
+    },
+    {
+      "fault_id": "SUBJECT_IN_TWO_SPLITS",
+      "layer": "meds",
+      "silent": "silent",
+      "description": "Assign one subject to a second split.",
+      "origin": "A patient present in both train and test is the oldest leak there is, and bucketing by anything that is not the subject key reintroduces it.",
+      "effect": "one subject now appears in two splits",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": true,
+      "detectors": [
+        "MEDS_SPLITS_DISJOINT_AND_COMPLETE"
+      ],
+      "n_detectors": 1,
+      "expected": [
+        "MEDS_SPLITS_DISJOINT_AND_COMPLETE"
+      ],
+      "expected_hit": [
+        "MEDS_SPLITS_DISJOINT_AND_COMPLETE"
+      ],
+      "expected_missed": [],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "meds/metadata/subject_splits"
+      ],
+      "detectors_naming_a_damaged_artifact": [
+        "MEDS_SPLITS_DISJOINT_AND_COMPLETE"
+      ],
+      "localised": true,
+      "seconds": 38.3
+    },
+    {
+      "fault_id": "CODE_METADATA_INCOMPLETE",
+      "layer": "meds",
+      "silent": "silent",
+      "description": "Remove entries from the code metadata table.",
+      "origin": "codes.parquet is the only description a downstream consumer gets of what a code means. Silently dropping entries leaves events referring to codes nothing documents.",
+      "effect": "12 of 24 code descriptions removed",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": true,
+      "detectors": [
+        "MEDS_CODES_METADATA_COMPLETE",
+        "MEDS_SCHEMA_VALID"
+      ],
+      "n_detectors": 2,
+      "expected": [
+        "MEDS_CODES_METADATA_COMPLETE"
+      ],
+      "expected_hit": [
+        "MEDS_CODES_METADATA_COMPLETE"
+      ],
+      "expected_missed": [],
+      "unexpected_detectors": [
+        "MEDS_SCHEMA_VALID"
+      ],
+      "damaged_artifacts": [
+        "meds/metadata/codes"
+      ],
+      "detectors_naming_a_damaged_artifact": [
+        "MEDS_CODES_METADATA_COMPLETE",
+        "MEDS_SCHEMA_VALID"
+      ],
+      "localised": true,
+      "seconds": 38.0
+    },
+    {
+      "fault_id": "MEDS_BUILT_WITHOUT_VOCABULARY",
+      "layer": "meds",
+      "silent": "silent",
+      "description": "Strip every concept from the shards, rewrite each mapped code in the SOURCE/ form an unresolved term takes, and regenerate codes.parquet so it still documents exactly the codes in use.",
+      "origin": "The vocabulary reaches the MEDS stage through an environment variable. A stage rerun by hand without it -- after an out-of-memory kill, on 2026-09-10 -- published 311 million MIMIC-IV events with every code SOURCE/ and every concept null, beside an OMOP layer carrying 29,459 concepts, and thirty-nine checks passed on the pair.",
+      "effect": "8 rows lost their concept and their code became SOURCE/; codes.parquet regenerated to match",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": false,
+      "detectors": [],
+      "n_detectors": 0,
+      "expected": [
+        "MEDS_CONCEPTS_ARE_OMOPS"
+      ],
+      "expected_hit": [],
+      "expected_missed": [
+        "MEDS_CONCEPTS_ARE_OMOPS"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "meds/data/000000",
+        "meds/data/000001",
+        "meds/metadata/codes"
+      ],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 26.1
+    },
+    {
+      "fault_id": "NOTE_TEXT_SILENTLY_DROPPED",
+      "layer": "canonical",
+      "silent": "silent",
+      "description": "Blank the text on every note event, leaving the events themselves intact.",
+      "origin": "`text` was a declared field role that only one shape read. A source whose rows are each a whole note could map its text column, convert without a complaint, and publish notes with no content; MIMIC-IV shipped 2,652,887 of them that way, and the OMOP exporter's coalesce turned the absence into an empty string that counted as present.",
+      "effect": "8 note events keep their code, time and lineage and lose their text",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": false,
+      "detectors": [],
+      "n_detectors": 0,
+      "expected": [
+        "TEXT_SOURCES_PUBLISH_THEIR_TEXT"
+      ],
+      "expected_hit": [],
+      "expected_missed": [
+        "TEXT_SOURCES_PUBLISH_THEIR_TEXT"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "canonical/events"
+      ],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 38.1
+    },
+    {
+      "fault_id": "ORDERS_WITH_DIFFERENT_DOSES_MERGED",
+      "layer": "canonical",
+      "silent": "silent",
+      "description": "Give one row of an already merged drug event a different dose.",
+      "origin": "An event identity that omits the dose makes two orders of different strengths one event, and the merge keeps whichever row it met first. The audit counted 726,710 dose disagreements inside merged groups in one export, 1,118,171 collapsed drug rows in another, and 1,327,147 prescriptions in a third.",
+      "effect": "one of the 3 rows behind a merged drug event now carries a different dose; the event kept the other",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": false,
+      "detectors": [],
+      "n_detectors": 0,
+      "expected": [
+        "DUPLICATES_AGREE"
+      ],
+      "expected_hit": [],
+      "expected_missed": [
+        "DUPLICATES_AGREE"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 38.0
+    },
+    {
+      "fault_id": "SOURCE_PARSED_ROWS_AND_YIELDED_NOTHING",
+      "layer": "canonical",
+      "silent": "silent",
+      "description": "Delete every event of one source, and its lineage, leaving the manifest saying the source parsed its rows.",
+      "origin": "A wide table declared with a shape that cannot read it quarantines every row it parses and still counts as delivered: 1,564,610 emergency-department vital signs were reported present and published nothing, because presence was judged by the manifest and events by nobody.",
+      "effect": "5 events of one source deleted with their lineage",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": false,
+      "detectors": [],
+      "n_detectors": 0,
+      "expected": [
+        "SOURCE_YIELDS_EVENTS"
+      ],
+      "expected_hit": [],
+      "expected_missed": [
+        "SOURCE_YIELDS_EVENTS"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "canonical/event_source",
+        "canonical/events"
+      ],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 36.5
+    },
+    {
+      "fault_id": "VALUE_IN_A_DIFFERENT_UNIT_THAN_ITS_LABEL",
+      "layer": "canonical",
+      "silent": "silent",
+      "description": "Multiply measured values carrying a unit by a thousand, leaving the unit alone.",
+      "origin": "Values arrive in a unit their label contradicts: body temperatures with a median of 98 under a Celsius label, a respiratory rate of 196, a white cell count a thousand times its own unit. Nothing compared a value against what its unit makes possible, so all of them published as measurements.",
+      "effect": "8 measured values are now a thousand times what their unit says",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": false,
+      "detectors": [],
+      "n_detectors": 0,
+      "expected": [
+        "UNIT_VALUE_PLAUSIBLE"
+      ],
+      "expected_hit": [],
+      "expected_missed": [
+        "UNIT_VALUE_PLAUSIBLE"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "canonical/events"
+      ],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 38.1
+    },
+    {
+      "fault_id": "DOSE_UNIT_DROPPED_FROM_DRUG_ROWS",
+      "layer": "omop",
+      "silent": "silent",
+      "description": "Empty dose_unit_source_value on every drug exposure.",
+      "origin": "A publisher that reads the dose unit only out of the dose text loses it wherever the source keeps it in its own column: 3,088,590 drug rows with an empty dose unit in one export, 18,567,232 in another, while every one of their sources stated it.",
+      "effect": "14 drug exposures lost the dose unit their source stated",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": false,
+      "detectors": [],
+      "n_detectors": 0,
+      "expected": [
+        "DOSE_UNIT_CARRIED"
+      ],
+      "expected_hit": [],
+      "expected_missed": [
+        "DOSE_UNIT_CARRIED"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "omop/drug_exposure"
+      ],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 38.3
+    },
+    {
+      "fault_id": "DEATH_DATE_AND_TIME_TREATED_AS_A_CONFLICT",
+      "layer": "omop",
+      "silent": "silent",
+      "description": "Add a date-only death beside a timed one and withhold the person's DEATH row.",
+      "origin": "Two records of one death -- one with a date, one with a time -- were compared as timestamps, so they disagreed by construction and the publisher refused to choose. 11,402 subjects lost their DEATH row that way; read as local dates, all but one of them died on the same day in both records.",
+      "effect": "a death recorded as a date (2031-02-03 00:00 UTC, the same UTC day as the timed record, the same day in UTC) sits beside the timed one, and every DEATH row was withheld",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": false,
+      "detectors": [],
+      "n_detectors": 0,
+      "expected": [
+        "DEATH_PUBLISHED"
+      ],
+      "expected_hit": [],
+      "expected_missed": [
+        "DEATH_PUBLISHED"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "canonical/event_source",
+        "canonical/events",
+        "omop/death"
+      ],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 38.2
+    },
+    {
+      "fault_id": "ONE_NOTE_UNDER_TWO_ENCOUNTERS",
+      "layer": "canonical",
+      "silent": "silent",
+      "description": "Copy a note event under a second encounter id.",
+      "origin": "A note table whose encounter id matched no other table put the same text under several of them: 491,192 groups of notes identical in patient, day, type and full text, about 936,403 surplus events, each a copy of one report.",
+      "effect": "one note's text is now published twice under two encounter ids",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": false,
+      "detectors": [],
+      "n_detectors": 0,
+      "expected": [
+        "NOTE_TEXT_UNIQUE"
+      ],
+      "expected_hit": [],
+      "expected_missed": [
+        "NOTE_TEXT_UNIQUE"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "canonical/event_source",
+        "canonical/events"
+      ],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 38.3
+    },
+    {
+      "fault_id": "RAW_COLUMN_NEVER_DECLARED",
+      "layer": "ingest",
+      "silent": "silent",
+      "description": "Record an extra delivered column in the manifest that no role reads.",
+      "origin": "A delivered column nothing reads is invisible: three medication columns, a whole imaging table, an entire intensive-care module and eight other tables were never read by any conversion, and no check said so.",
+      "effect": "one source is recorded as delivering a column nothing reads (an_unmapped_delivered_column)",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": false,
+      "detectors": [],
+      "n_detectors": 0,
+      "expected": [
+        "RAW_COVERAGE_DECLARED"
+      ],
+      "expected_hit": [],
+      "expected_missed": [
+        "RAW_COVERAGE_DECLARED"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 38.6
+    },
+    {
+      "fault_id": "DIAGNOSIS_TEXT_READ_AS_A_UNIT",
+      "layer": "canonical",
+      "silent": "silent",
+      "description": "Store measured free text as a number whose unit is the text.",
+      "origin": "A value parser that takes any text after a number as its unit turned 26 electrocardiogram diagnoses into a number with a diagnosis for a unit. The reading is not wrong about the number; it is wrong that the rest was a unit at all.",
+      "effect": "20 free-text results are now a number with the text for a unit",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": false,
+      "detectors": [],
+      "n_detectors": 0,
+      "expected": [
+        "UNIT_KNOWN"
+      ],
+      "expected_hit": [],
+      "expected_missed": [
+        "UNIT_KNOWN"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "canonical/events"
+      ],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 38.4
+    },
+    {
+      "fault_id": "EXCLUDED_STATUS_PUBLISHED",
+      "layer": "canonical",
+      "silent": "silent",
+      "description": "Give published events the status their source declares excluded.",
+      "origin": "A problem list records what was entered and what was taken back. 30,069 rows whose status says the entry was deleted were published as diagnoses, because the status reached the event and nothing acted on it.",
+      "effect": "8 published events now carry a status their source excludes",
+      "skipped": false,
+      "injection_failed": false,
+      "detected": false,
+      "detectors": [],
+      "n_detectors": 0,
+      "expected": [
+        "EXCLUDED_STATUS_NOT_PUBLISHED"
+      ],
+      "expected_hit": [],
+      "expected_missed": [
+        "EXCLUDED_STATUS_NOT_PUBLISHED"
+      ],
+      "unexpected_detectors": [],
+      "damaged_artifacts": [
+        "canonical/events"
+      ],
+      "detectors_naming_a_damaged_artifact": [],
+      "localised": false,
+      "seconds": 38.3
+    }
+  ]
+}

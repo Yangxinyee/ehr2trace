@@ -1,0 +1,260 @@
+{
+  "meds_root": "mimiciv/meds",
+  "task": "in-hospital death, predicted at a fixed horizon after admission",
+  "cohort": {
+    "min_stay_hours": 72,
+    "n_subjects": 131007,
+    "n_positive": 4185,
+    "prevalence_pct": 3.19,
+    "n_train": 104858,
+    "n_held_out": 13052
+  },
+  "horizons": [
+    {
+      "horizon_hours": 6,
+      "subject_code_pairs": {
+        "ignores_availability": 20769413,
+        "respects_availability": 19832866,
+        "diagnoses_at_admission": 21382404
+      },
+      "arms": [
+        {
+          "arm": "respects_availability",
+          "n_features": 25354,
+          "n_train": 104858,
+          "n_held_out": 13052,
+          "held_out_auroc": 0.8294,
+          "held_out_auprc": 0.2223,
+          "held_out_auroc_ci": [
+            0.8061,
+            0.8516
+          ]
+        },
+        {
+          "arm": "ignores_availability",
+          "n_features": 25452,
+          "n_train": 104858,
+          "n_held_out": 13052,
+          "held_out_auroc": 0.8349,
+          "held_out_auprc": 0.2166,
+          "held_out_auroc_ci": [
+            0.8124,
+            0.8558
+          ]
+        },
+        {
+          "arm": "diagnoses_at_admission",
+          "n_features": 28497,
+          "n_train": 104858,
+          "n_held_out": 13052,
+          "held_out_auroc": 0.9651,
+          "held_out_auprc": 0.6545,
+          "held_out_auroc_ci": [
+            0.9544,
+            0.9739
+          ]
+        }
+      ],
+      "bootstrap_resamples": 2000,
+      "auroc_inflation": {
+        "ignores_availability": 0.0055,
+        "diagnoses_at_admission": 0.1357
+      },
+      "auroc_inflation_ci": {
+        "ignores_availability": [
+          -0.0011,
+          0.0117
+        ],
+        "diagnoses_at_admission": [
+          0.1157,
+          0.1572
+        ]
+      }
+    },
+    {
+      "horizon_hours": 12,
+      "subject_code_pairs": {
+        "ignores_availability": 23814998,
+        "respects_availability": 23083515,
+        "diagnoses_at_admission": 24632951
+      },
+      "arms": [
+        {
+          "arm": "respects_availability",
+          "n_features": 26214,
+          "n_train": 104858,
+          "n_held_out": 13052,
+          "held_out_auroc": 0.8389,
+          "held_out_auprc": 0.2395,
+          "held_out_auroc_ci": [
+            0.8162,
+            0.8605
+          ]
+        },
+        {
+          "arm": "ignores_availability",
+          "n_features": 26292,
+          "n_train": 104858,
+          "n_held_out": 13052,
+          "held_out_auroc": 0.8421,
+          "held_out_auprc": 0.2435,
+          "held_out_auroc_ci": [
+            0.819,
+            0.8635
+          ]
+        },
+        {
+          "arm": "diagnoses_at_admission",
+          "n_features": 29355,
+          "n_train": 104858,
+          "n_held_out": 13052,
+          "held_out_auroc": 0.9692,
+          "held_out_auprc": 0.6596,
+          "held_out_auroc_ci": [
+            0.9598,
+            0.9774
+          ]
+        }
+      ],
+      "bootstrap_resamples": 2000,
+      "auroc_inflation": {
+        "ignores_availability": 0.0032,
+        "diagnoses_at_admission": 0.1303
+      },
+      "auroc_inflation_ci": {
+        "ignores_availability": [
+          -0.0029,
+          0.0095
+        ],
+        "diagnoses_at_admission": [
+          0.1113,
+          0.1515
+        ]
+      }
+    },
+    {
+      "horizon_hours": 24,
+      "subject_code_pairs": {
+        "respects_availability": 26859768,
+        "ignores_availability": 27448736,
+        "diagnoses_at_admission": 28409168
+      },
+      "arms": [
+        {
+          "arm": "respects_availability",
+          "n_features": 27442,
+          "n_train": 104858,
+          "n_held_out": 13052,
+          "held_out_auroc": 0.8536,
+          "held_out_auprc": 0.2532,
+          "held_out_auroc_ci": [
+            0.8316,
+            0.8733
+          ]
+        },
+        {
+          "arm": "ignores_availability",
+          "n_features": 27503,
+          "n_train": 104858,
+          "n_held_out": 13052,
+          "held_out_auroc": 0.8537,
+          "held_out_auprc": 0.2494,
+          "held_out_auroc_ci": [
+            0.8318,
+            0.8734
+          ]
+        },
+        {
+          "arm": "diagnoses_at_admission",
+          "n_features": 30583,
+          "n_train": 104858,
+          "n_held_out": 13052,
+          "held_out_auroc": 0.9668,
+          "held_out_auprc": 0.6525,
+          "held_out_auroc_ci": [
+            0.9574,
+            0.9749
+          ]
+        }
+      ],
+      "bootstrap_resamples": 2000,
+      "auroc_inflation": {
+        "ignores_availability": 0.0001,
+        "diagnoses_at_admission": 0.1132
+      },
+      "auroc_inflation_ci": {
+        "ignores_availability": [
+          -0.0045,
+          0.0046
+        ],
+        "diagnoses_at_admission": [
+          0.0941,
+          0.1335
+        ]
+      }
+    },
+    {
+      "horizon_hours": 48,
+      "subject_code_pairs": {
+        "diagnoses_at_admission": 31937002,
+        "respects_availability": 30387692,
+        "ignores_availability": 30807990
+      },
+      "arms": [
+        {
+          "arm": "respects_availability",
+          "n_features": 28973,
+          "n_train": 104858,
+          "n_held_out": 13052,
+          "held_out_auroc": 0.8629,
+          "held_out_auprc": 0.3101,
+          "held_out_auroc_ci": [
+            0.8427,
+            0.8823
+          ]
+        },
+        {
+          "arm": "ignores_availability",
+          "n_features": 29008,
+          "n_train": 104858,
+          "n_held_out": 13052,
+          "held_out_auroc": 0.8636,
+          "held_out_auprc": 0.3068,
+          "held_out_auroc_ci": [
+            0.8431,
+            0.8827
+          ]
+        },
+        {
+          "arm": "diagnoses_at_admission",
+          "n_features": 32114,
+          "n_train": 104858,
+          "n_held_out": 13052,
+          "held_out_auroc": 0.9629,
+          "held_out_auprc": 0.6451,
+          "held_out_auroc_ci": [
+            0.9521,
+            0.9724
+          ]
+        }
+      ],
+      "bootstrap_resamples": 2000,
+      "auroc_inflation": {
+        "ignores_availability": 0.0007,
+        "diagnoses_at_admission": 0.1
+      },
+      "auroc_inflation_ci": {
+        "ignores_availability": [
+          -0.0031,
+          0.0044
+        ],
+        "diagnoses_at_admission": [
+          0.0825,
+          0.1182
+        ]
+      }
+    }
+  ],
+  "seed": 20260826,
+  "seconds": 1131.9
+}

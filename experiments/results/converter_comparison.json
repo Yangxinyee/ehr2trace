@@ -1,0 +1,245 @@
+{
+  "collected_utc": "2026-09-17T18:24:58Z",
+  "ehr2trace": {
+    "meds": {
+      "availability_column": "available_time",
+      "columns": [
+        "subject_id",
+        "time",
+        "code",
+        "numeric_value",
+        "text_value",
+        "event_id",
+        "encounter_id",
+        "available_time",
+        "end_time",
+        "source_table",
+        "source_row_ids",
+        "omop_concept_id",
+        "source_code",
+        "unit",
+        "event_kind",
+        "dose",
+        "route",
+        "status",
+        "caused_by_event_id",
+        "quality_flags",
+        "value_number_normalized",
+        "unit_normalized",
+        "rate_source",
+        "rate",
+        "rate_unit",
+        "action",
+        "discharged_to"
+      ],
+      "events": 971545,
+      "events_by_source_table": {
+        "admissions": 290,
+        "chartevents": 668844,
+        "datetimeevents": 15280,
+        "diagnoses_icd10": 2313,
+        "diagnoses_icd9": 2193,
+        "emar": 35506,
+        "icustays": 140,
+        "ingredientevents": 25728,
+        "inputevents": 20404,
+        "labevents": 103007,
+        "micro_organisms": 1989,
+        "micro_susceptibility": 1036,
+        "omr": 3836,
+        "outputevents": 9362,
+        "patients": 316,
+        "pharmacy": 15225,
+        "poe": 45154,
+        "prescriptions": 15456,
+        "prescriptions_named": 2042,
+        "procedureevents": 1468,
+        "procedures_icd10": 321,
+        "procedures_icd9": 401,
+        "services": 319,
+        "transfers": 915
+      },
+      "events_with_a_source_row": 971545,
+      "events_with_later_availability": 693360,
+      "medication_action_kinds": {
+        "drug_admin": 81638,
+        "drug_dispense": 15225,
+        "drug_order": 17498
+      },
+      "modules_read": [
+        "ICU",
+        "hospital"
+      ],
+      "source_row_columns": [
+        "source_row_ids"
+      ],
+      "source_table_named": true,
+      "standard_concept_events": 192163,
+      "subjects": 100,
+      "timed_events": 971245
+    },
+    "omop": {
+      "canonical_events": 971545,
+      "drug_type_concepts": {
+        "32818": 70297,
+        "32838": 17582
+      },
+      "lineage_rows": 972567,
+      "mapped_rows": 169717,
+      "rows": 897487,
+      "source_linked_events": 971545,
+      "tables": {
+        "condition_occurrence": {
+          "mapped_rows": 3904,
+          "rows": 3945
+        },
+        "drug_exposure": {
+          "mapped_rows": 57913,
+          "rows": 87879
+        },
+        "measurement": {
+          "mapped_rows": 106400,
+          "rows": 787414
+        },
+        "observation": {
+          "mapped_rows": 744,
+          "rows": 16024
+        },
+        "procedure_occurrence": {
+          "mapped_rows": 756,
+          "rows": 2225
+        }
+      }
+    },
+    "validation": {
+      "checks": 54,
+      "failed": 1,
+      "passed": 45,
+      "skipped": 8
+    }
+  },
+  "mimic_iv_demo_meds": {
+    "availability_column": null,
+    "columns": [
+      "subject_id",
+      "time",
+      "code",
+      "numeric_value",
+      "insurance",
+      "language",
+      "marital_status",
+      "race",
+      "hadm_id",
+      "drg_severity",
+      "drg_mortality",
+      "emar_id",
+      "emar_seq",
+      "text_value",
+      "priority",
+      "route",
+      "frequency",
+      "doses_per_24_hrs",
+      "poe_id",
+      "icustay_id",
+      "order_id",
+      "link_order_id",
+      "unit",
+      "ordercategorydescription",
+      "statusdescription"
+    ],
+    "events": 916166,
+    "events_whose_code_links_to_a_vocabulary": 123734,
+    "events_with_a_source_row": 872430,
+    "lab_events_by_module": {
+      "hosp": 107549,
+      "icu": 668862
+    },
+    "medication_action_kinds": {
+      "INFUSION_END": 20404,
+      "INFUSION_START": 20404,
+      "MEDICATION": 63696,
+      "SUBJECT_WEIGHT_AT_INFUSION": 11826
+    },
+    "medication_events": {
+      "total": 63696,
+      "with_an_administration_key": 35835,
+      "with_an_order_key": 27721,
+      "with_neither": 140
+    },
+    "metadata_json": {
+      "created_at": "2025-01-13T11:02:53.383398",
+      "dataset_name": "MIMIC-IV",
+      "dataset_version": "3.1:0.0.2",
+      "etl_name": "MEDS_transforms",
+      "etl_version": "0.0.9",
+      "meds_version": "0.3.3"
+    },
+    "modules_read": [
+      "ICU",
+      "hospital"
+    ],
+    "source_row_columns": [
+      "hadm_id",
+      "emar_id",
+      "poe_id",
+      "order_id",
+      "icustay_id"
+    ],
+    "source_table_named": false,
+    "standard_concept_events": 0,
+    "subjects": 100,
+    "subset_modules": [
+      "hosp",
+      "icu"
+    ]
+  },
+  "mimic_iv_demo_omop": {
+    "cdm_version": "5.3.1",
+    "drug_type_concepts": {
+      "32838": 18229
+    },
+    "mapped_rows": 415661,
+    "measurement_rows_by_module": {
+      "hosp": 104557,
+      "icu": 219494
+    },
+    "modules_read": [
+      "ICU",
+      "hospital"
+    ],
+    "rows": 423057,
+    "subset_modules": [
+      "hosp",
+      "icu"
+    ],
+    "tables": {
+      "condition_occurrence": {
+        "mapped_rows": 16441,
+        "rows": 16441
+      },
+      "drug_exposure": {
+        "mapped_rows": 17683,
+        "rows": 18229
+      },
+      "measurement": {
+        "mapped_rows": 331700,
+        "rows": 338550
+      },
+      "observation": {
+        "mapped_rows": 31390,
+        "rows": 31390
+      },
+      "procedure_occurrence": {
+        "mapped_rows": 18447,
+        "rows": 18447
+      }
+    },
+    "validation_reports": [
+      "results_MIMICIVdemo210426.json"
+    ],
+    "visit_detail_rows": 14479,
+    "vocabulary_version": "v5.0 10-SEP-20"
+  },
+  "seconds": 0.5,
+  "subset": "MIMIC-IV demonstration subset, 100 patients"
+}

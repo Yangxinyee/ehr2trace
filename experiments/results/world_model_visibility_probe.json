@@ -1,0 +1,7 @@
+{
+  "scope": "Synthetic two-row probe of the current as_of_view helper; no patient data and no population leakage estimate.",
+  "meds_implementation_sha256": "8cd9feea07a30e3e879233cc793f232b46b8e2767e37a0f62cbd990d493211b2",
+  "timeless_dynamic_status_is_visible": true,
+  "changing_retrospective_status_changes_observation": true,
+  "future_visit_end_is_visible": true
+}

@@ -1,0 +1,95 @@
+{
+  "confirmed_mappings": 139,
+  "examples": {
+    "same_drug_other_spelling": [
+      {
+        "clinician": "dexamethasone sodium phosphate 4 MG/ML Injectable Solution",
+        "matcher": "dexamethasone phosphate 4 MG/ML Injection",
+        "route": "as_written",
+        "source_string": "DEXAMETHASONE SODIUM PHOSPHATE 4 MG/ML INJECTION SOLUTION"
+      },
+      {
+        "clinician": "fentanyl 0.05 MG/ML Injection [Sublimaze]",
+        "matcher": "fentanyl 0.05 MG/ML Injection",
+        "route": "as_written",
+        "source_string": "fentaNYL (SUBLIMAZE) 50 mcg/mL injection"
+      },
+      {
+        "clinician": "fluticasone propionate 0.05 MG/ACTUAT Metered Dose Nasal Spray",
+        "matcher": "fluticasone 0.05 MG/ACTUAT Nasal Spray",
+        "route": "as_written",
+        "source_string": "FLUTICASONE PROPIONATE 50 MCG/ACTUATION NASAL SPRAY,SUSPENSION"
+      },
+      {
+        "clinician": "7.5 ML gadobutrol 1 MMOL/ML Injectable Solution",
+        "matcher": "gadobutrol 1 MMOL/ML Injectable Solution",
+        "route": "as_written_widened_form",
+        "source_string": "GADOBUTROL 7.5 MMOL/7.5 ML (1 MMOL/ML) INTRAVENOUS SOLUTION"
+      },
+      {
+        "clinician": "propofol lipid emulsion 10 MG/ML",
+        "matcher": "propofol lipid emulsion 10 MG/ML Injection",
+        "route": "as_written_widened_form",
+        "source_string": "PROPOFOL 10 MG/ML INTRAVENOUS EMULSION"
+      },
+      {
+        "clinician": "sodium chloride 9 MG/ML Injection",
+        "matcher": "sodium chloride 9 MG/ML Prefilled Syringe",
+        "route": "as_written",
+        "source_string": "SODIUM CHLORIDE 0.9 % (FLUSH) INJECTION SYRINGE"
+      },
+      {
+        "clinician": "sodium chloride 9 MG/ML Injection",
+        "matcher": "sodium chloride 9 MG/ML Prefilled Syringe",
+        "route": "as_written",
+        "source_string": "SODIUM CHLORIDE 0.9 % INJECTION SYRINGE"
+      }
+    ],
+    "same_ingredient_other_strength_reading": [
+      {
+        "clinician": "bevacizumab-awwb 25 MG/ML Injection",
+        "matcher": "bevacizumab Injection",
+        "route": "as_written",
+        "source_string": "BEVACIZUMAB-AWWB CHEMO IVPB"
+      }
+    ]
+  },
+  "name_audit": {
+    "comparable": 8403,
+    "disagreement_count": 0,
+    "disagreements": [],
+    "name_agrees": 8403,
+    "routes": {
+      "as_written": 6686,
+      "as_written_via_brand": 1634,
+      "as_written_widened_form": 789,
+      "as_written_widened_form_via_brand": 75,
+      "ingredient": 285,
+      "ingredient_via_brand": 1,
+      "percent_by_weight": 134,
+      "percent_by_weight_via_brand": 39,
+      "total_amount": 171,
+      "total_amount_via_brand": 1,
+      "total_amount_widened_form": 34,
+      "total_amount_widened_form_via_brand": 1
+    },
+    "rows_settled": 8656606,
+    "settled": 9850,
+    "terms": 26629
+  },
+  "outcome": {
+    "abstained_no_ingredient": 8,
+    "abstained_no_match": 1,
+    "abstained_unparsed_strength": 1,
+    "exact_agreement": 121,
+    "same_drug_other_spelling": 7,
+    "same_ingredient_other_strength_reading": 1
+  },
+  "resolved": 129,
+  "share_of_resolved": {
+    "exact_agreement": 0.938,
+    "same_drug_other_spelling": 0.0543,
+    "same_ingredient_other_strength_reading": 0.0078
+  },
+  "vocabulary_version": "v5.0 29-AUG-26"
+}

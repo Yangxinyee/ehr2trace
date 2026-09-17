@@ -12,7 +12,7 @@ docs/WORLD_MODEL_READINESS.md
 work/
 # Local experiment and audit output. The tools under tools/ write here; the
 # records are about one operator's build, not about the software.
-results/
+/results/
 __pycache__/
 *.pyc
 

@@ -1,0 +1,504 @@
+{
+  "dataset": "ctpe_shape.yaml",
+  "software_commit": "00c95145a50bf59b06ab509b74334a028e23c03c",
+  "code_version": "0.7.0",
+  "vocabulary_installed": true,
+  "configurations": 4,
+  "reference": "workers=1",
+  "identical_to_reference": 3,
+  "artifacts_compared": 60,
+  "false_positive_checks": [],
+  "false_positive_rate_pct": 0.0,
+  "checks_run": 55,
+  "builds": [
+    {
+      "label": "workers=1",
+      "workers": 1,
+      "chunk_rows": 1000,
+      "stages": [
+        {
+          "stage": "ingest",
+          "seconds": 0.31,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "identity",
+          "seconds": 0.23,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "canonical",
+          "seconds": 0.64,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "omop",
+          "seconds": 15.94,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "meds",
+          "seconds": 15.78,
+          "returncode": 0,
+          "stderr_tail": ""
+        }
+      ],
+      "build_failed": false,
+      "checks_run": 55,
+      "checks_failed": [],
+      "checks_skipped": [
+        "ONLY_ADMINISTRATIONS_BECOME_DRUG_EXPOSURE"
+      ],
+      "run_costs": [
+        {
+          "run_id": "canonical-20260915T061002Z-2304506",
+          "stage": "canonical",
+          "wall_seconds": 0.4,
+          "peak_rss_gb": 0.21,
+          "rows": 269
+        },
+        {
+          "run_id": "ingest-20260915T061002Z-2304456",
+          "stage": "ingest",
+          "wall_seconds": 0.1,
+          "peak_rss_gb": 0.1,
+          "rows": 0
+        }
+      ],
+      "fingerprint": {
+        "canonical/anchors": "13:572a35d07acccb2e09d539cfe18bfeea0c9808d38e95c96907a4f74615142fff",
+        "canonical/cohort_membership": "20:4c1fcde4acbb7d818dd327a9cda41b348aac220425bb90500e768c5451ae50be",
+        "canonical/event_source": "426:718de47e6c42f035b96f98741b2aadcdc1ed02df99b483a7bb59e76ad2f03a1e",
+        "canonical/events": "120:8d619c47639ea1d3e9d5a0436eb9481af7470ae3c6f946bb3f72a9aae2a363c7",
+        "canonical/quality_issue": "0:16421a7a2de06c52262c713fc6c15f081bb9e5aa4d03b8081cdf98235c9415ef",
+        "canonical/quarantine": "32:f2c334f3c3a66ce33aa6ec42dd4404c21cfa3098a83a7c6b7e5b84b8dc1e85d2",
+        "omop/attr_map": "4:42506474754597686167",
+        "omop/care_site": "0:0",
+        "omop/cdm_source": "1:2424008247067079760",
+        "omop/cohort": "0:0",
+        "omop/cohort_definition": "0:0",
+        "omop/concept": "0:0",
+        "omop/concept_ancestor": "0:0",
+        "omop/concept_class": "0:0",
+        "omop/concept_relationship": "0:0",
+        "omop/concept_synonym": "0:0",
+        "omop/condition_era": "0:0",
+        "omop/condition_occurrence": "6:52091537226318435349",
+        "omop/cost": "0:0",
+        "omop/death": "1:8679583007011733047",
+        "omop/device_exposure": "0:0",
+        "omop/discharge_map": "0:0",
+        "omop/domain": "0:0",
+        "omop/dose_era": "0:0",
+        "omop/dose_map": "2:25552408232491856878",
+        "omop/drug_era": "0:0",
+        "omop/drug_exposure": "14:151484465592717636097",
+        "omop/drug_strength": "0:0",
+        "omop/episode": "0:0",
+        "omop/episode_event": "0:0",
+        "omop/evt": "120:1184246403509543346044",
+        "omop/fact_relationship": "0:0",
+        "omop/lnk": "426:4126384585967755453736",
+        "omop/location": "0:0",
+        "omop/measurement": "35:340617457067680794765",
+        "omop/metadata": "0:0",
+        "omop/note": "6:52953200822682645353",
+        "omop/note_nlp": "0:0",
+        "omop/observation": "0:0",
+        "omop/observation_period": "3:32170054166347352249",
+        "omop/payer_plan_period": "0:0",
+        "omop/person": "3:28399896882873891687",
+        "omop/person_attrs": "4:32954853309497312885",
+        "omop/pmap": "4:35438615687178183988",
+        "omop/procedure_occurrence": "11:101760709187581776448",
+        "omop/provider": "0:0",
+        "omop/relationship": "0:0",
+        "omop/source_to_concept_map": "0:0",
+        "omop/specimen": "0:0",
+        "omop/term_map": "2:19903073140689683318",
+        "omop/type_concept": "12:132552864210806352693",
+        "omop/unit_map": "6:64574475558694512524",
+        "omop/visit_detail": "0:0",
+        "omop/visit_lookup": "3:35426663472779009007",
+        "omop/visit_occurrence": "3:16058118635493814510",
+        "omop/vocabulary": "0:0",
+        "meds/metadata/codes": "24:c4fd2bc446a5ae1b089ffff69e09259397f37bf84a1ebe6498eaba6fdd1dcb61",
+        "meds/metadata/subject_splits": "4:13aaedc1eb28045aef321045a4f87bb0e5ac406ca646b8328f8db63cb2e3ec50",
+        "meds/data/000000": "29:99971be6d211e3d9582ae0dd4501c1f1e78351e39b4cd384620dbb35c0565b2b",
+        "meds/data/000001": "31:1e42bd7dd7e439b43e92f482488bae72fd034270ec1f8bfb35a7d49b69ccc0bf"
+      },
+      "differs_from_reference": null
+    },
+    {
+      "label": "workers=2",
+      "workers": 2,
+      "chunk_rows": 1000,
+      "stages": [
+        {
+          "stage": "ingest",
+          "seconds": 0.49,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "identity",
+          "seconds": 0.22,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "canonical",
+          "seconds": 1.08,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "omop",
+          "seconds": 16.36,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "meds",
+          "seconds": 15.69,
+          "returncode": 0,
+          "stderr_tail": ""
+        }
+      ],
+      "build_failed": false,
+      "checks_run": 55,
+      "checks_failed": [],
+      "checks_skipped": [
+        "ONLY_ADMINISTRATIONS_BECOME_DRUG_EXPOSURE"
+      ],
+      "run_costs": [
+        {
+          "run_id": "canonical-20260915T061055Z-2307155",
+          "stage": "canonical",
+          "wall_seconds": 0.8,
+          "peak_rss_gb": 12.41,
+          "rows": 269
+        },
+        {
+          "run_id": "ingest-20260915T061054Z-2307085",
+          "stage": "ingest",
+          "wall_seconds": 0.2,
+          "peak_rss_gb": 12.41,
+          "rows": 0
+        }
+      ],
+      "fingerprint": {
+        "canonical/anchors": "13:572a35d07acccb2e09d539cfe18bfeea0c9808d38e95c96907a4f74615142fff",
+        "canonical/cohort_membership": "20:4c1fcde4acbb7d818dd327a9cda41b348aac220425bb90500e768c5451ae50be",
+        "canonical/event_source": "426:718de47e6c42f035b96f98741b2aadcdc1ed02df99b483a7bb59e76ad2f03a1e",
+        "canonical/events": "120:8d619c47639ea1d3e9d5a0436eb9481af7470ae3c6f946bb3f72a9aae2a363c7",
+        "canonical/quality_issue": "0:16421a7a2de06c52262c713fc6c15f081bb9e5aa4d03b8081cdf98235c9415ef",
+        "canonical/quarantine": "32:f2c334f3c3a66ce33aa6ec42dd4404c21cfa3098a83a7c6b7e5b84b8dc1e85d2",
+        "omop/attr_map": "4:42506474754597686167",
+        "omop/care_site": "0:0",
+        "omop/cdm_source": "1:2424008247067079760",
+        "omop/cohort": "0:0",
+        "omop/cohort_definition": "0:0",
+        "omop/concept": "0:0",
+        "omop/concept_ancestor": "0:0",
+        "omop/concept_class": "0:0",
+        "omop/concept_relationship": "0:0",
+        "omop/concept_synonym": "0:0",
+        "omop/condition_era": "0:0",
+        "omop/condition_occurrence": "6:52091537226318435349",
+        "omop/cost": "0:0",
+        "omop/death": "1:8679583007011733047",
+        "omop/device_exposure": "0:0",
+        "omop/discharge_map": "0:0",
+        "omop/domain": "0:0",
+        "omop/dose_era": "0:0",
+        "omop/dose_map": "2:25552408232491856878",
+        "omop/drug_era": "0:0",
+        "omop/drug_exposure": "14:151484465592717636097",
+        "omop/drug_strength": "0:0",
+        "omop/episode": "0:0",
+        "omop/episode_event": "0:0",
+        "omop/evt": "120:1184246403509543346044",
+        "omop/fact_relationship": "0:0",
+        "omop/lnk": "426:4126384585967755453736",
+        "omop/location": "0:0",
+        "omop/measurement": "35:340617457067680794765",
+        "omop/metadata": "0:0",
+        "omop/note": "6:52953200822682645353",
+        "omop/note_nlp": "0:0",
+        "omop/observation": "0:0",
+        "omop/observation_period": "3:32170054166347352249",
+        "omop/payer_plan_period": "0:0",
+        "omop/person": "3:28399896882873891687",
+        "omop/person_attrs": "4:32954853309497312885",
+        "omop/pmap": "4:35438615687178183988",
+        "omop/procedure_occurrence": "11:101760709187581776448",
+        "omop/provider": "0:0",
+        "omop/relationship": "0:0",
+        "omop/source_to_concept_map": "0:0",
+        "omop/specimen": "0:0",
+        "omop/term_map": "2:19903073140689683318",
+        "omop/type_concept": "12:132552864210806352693",
+        "omop/unit_map": "6:64574475558694512524",
+        "omop/visit_detail": "0:0",
+        "omop/visit_lookup": "3:35426663472779009007",
+        "omop/visit_occurrence": "3:16058118635493814510",
+        "omop/vocabulary": "0:0",
+        "meds/metadata/codes": "24:c4fd2bc446a5ae1b089ffff69e09259397f37bf84a1ebe6498eaba6fdd1dcb61",
+        "meds/metadata/subject_splits": "4:13aaedc1eb28045aef321045a4f87bb0e5ac406ca646b8328f8db63cb2e3ec50",
+        "meds/data/000000": "29:99971be6d211e3d9582ae0dd4501c1f1e78351e39b4cd384620dbb35c0565b2b",
+        "meds/data/000001": "31:1e42bd7dd7e439b43e92f482488bae72fd034270ec1f8bfb35a7d49b69ccc0bf"
+      },
+      "differs_from_reference": []
+    },
+    {
+      "label": "workers=8",
+      "workers": 8,
+      "chunk_rows": 1000,
+      "stages": [
+        {
+          "stage": "ingest",
+          "seconds": 0.72,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "identity",
+          "seconds": 0.27,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "canonical",
+          "seconds": 1.22,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "omop",
+          "seconds": 15.5,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "meds",
+          "seconds": 14.44,
+          "returncode": 0,
+          "stderr_tail": ""
+        }
+      ],
+      "build_failed": false,
+      "checks_run": 55,
+      "checks_failed": [],
+      "checks_skipped": [
+        "ONLY_ADMINISTRATIONS_BECOME_DRUG_EXPOSURE"
+      ],
+      "run_costs": [
+        {
+          "run_id": "canonical-20260915T061148Z-2309967",
+          "stage": "canonical",
+          "wall_seconds": 1.0,
+          "peak_rss_gb": 12.64,
+          "rows": 269
+        },
+        {
+          "run_id": "ingest-20260915T061147Z-2309841",
+          "stage": "ingest",
+          "wall_seconds": 0.4,
+          "peak_rss_gb": 12.64,
+          "rows": 0
+        }
+      ],
+      "fingerprint": {
+        "canonical/anchors": "13:572a35d07acccb2e09d539cfe18bfeea0c9808d38e95c96907a4f74615142fff",
+        "canonical/cohort_membership": "20:4c1fcde4acbb7d818dd327a9cda41b348aac220425bb90500e768c5451ae50be",
+        "canonical/event_source": "426:718de47e6c42f035b96f98741b2aadcdc1ed02df99b483a7bb59e76ad2f03a1e",
+        "canonical/events": "120:8d619c47639ea1d3e9d5a0436eb9481af7470ae3c6f946bb3f72a9aae2a363c7",
+        "canonical/quality_issue": "0:16421a7a2de06c52262c713fc6c15f081bb9e5aa4d03b8081cdf98235c9415ef",
+        "canonical/quarantine": "32:f2c334f3c3a66ce33aa6ec42dd4404c21cfa3098a83a7c6b7e5b84b8dc1e85d2",
+        "omop/attr_map": "4:42506474754597686167",
+        "omop/care_site": "0:0",
+        "omop/cdm_source": "1:2424008247067079760",
+        "omop/cohort": "0:0",
+        "omop/cohort_definition": "0:0",
+        "omop/concept": "0:0",
+        "omop/concept_ancestor": "0:0",
+        "omop/concept_class": "0:0",
+        "omop/concept_relationship": "0:0",
+        "omop/concept_synonym": "0:0",
+        "omop/condition_era": "0:0",
+        "omop/condition_occurrence": "6:52091537226318435349",
+        "omop/cost": "0:0",
+        "omop/death": "1:8679583007011733047",
+        "omop/device_exposure": "0:0",
+        "omop/discharge_map": "0:0",
+        "omop/domain": "0:0",
+        "omop/dose_era": "0:0",
+        "omop/dose_map": "2:25552408232491856878",
+        "omop/drug_era": "0:0",
+        "omop/drug_exposure": "14:151484465592717636097",
+        "omop/drug_strength": "0:0",
+        "omop/episode": "0:0",
+        "omop/episode_event": "0:0",
+        "omop/evt": "120:1184246403509543346044",
+        "omop/fact_relationship": "0:0",
+        "omop/lnk": "426:4126384585967755453736",
+        "omop/location": "0:0",
+        "omop/measurement": "35:340617457067680794765",
+        "omop/metadata": "0:0",
+        "omop/note": "6:52953200822682645353",
+        "omop/note_nlp": "0:0",
+        "omop/observation": "0:0",
+        "omop/observation_period": "3:32170054166347352249",
+        "omop/payer_plan_period": "0:0",
+        "omop/person": "3:28399896882873891687",
+        "omop/person_attrs": "4:32954853309497312885",
+        "omop/pmap": "4:35438615687178183988",
+        "omop/procedure_occurrence": "11:101760709187581776448",
+        "omop/provider": "0:0",
+        "omop/relationship": "0:0",
+        "omop/source_to_concept_map": "0:0",
+        "omop/specimen": "0:0",
+        "omop/term_map": "2:19903073140689683318",
+        "omop/type_concept": "12:132552864210806352693",
+        "omop/unit_map": "6:64574475558694512524",
+        "omop/visit_detail": "0:0",
+        "omop/visit_lookup": "3:35426663472779009007",
+        "omop/visit_occurrence": "3:16058118635493814510",
+        "omop/vocabulary": "0:0",
+        "meds/metadata/codes": "24:c4fd2bc446a5ae1b089ffff69e09259397f37bf84a1ebe6498eaba6fdd1dcb61",
+        "meds/metadata/subject_splits": "4:13aaedc1eb28045aef321045a4f87bb0e5ac406ca646b8328f8db63cb2e3ec50",
+        "meds/data/000000": "29:99971be6d211e3d9582ae0dd4501c1f1e78351e39b4cd384620dbb35c0565b2b",
+        "meds/data/000001": "31:1e42bd7dd7e439b43e92f482488bae72fd034270ec1f8bfb35a7d49b69ccc0bf"
+      },
+      "differs_from_reference": []
+    },
+    {
+      "label": "workers=4,chunk=97",
+      "workers": 4,
+      "chunk_rows": 97,
+      "stages": [
+        {
+          "stage": "ingest",
+          "seconds": 0.51,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "identity",
+          "seconds": 0.22,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "canonical",
+          "seconds": 1.02,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "omop",
+          "seconds": 15.65,
+          "returncode": 0,
+          "stderr_tail": ""
+        },
+        {
+          "stage": "meds",
+          "seconds": 15.71,
+          "returncode": 0,
+          "stderr_tail": ""
+        }
+      ],
+      "build_failed": false,
+      "checks_run": 55,
+      "checks_failed": [],
+      "checks_skipped": [
+        "ONLY_ADMINISTRATIONS_BECOME_DRUG_EXPOSURE"
+      ],
+      "run_costs": [
+        {
+          "run_id": "canonical-20260915T061238Z-2312973",
+          "stage": "canonical",
+          "wall_seconds": 0.8,
+          "peak_rss_gb": 12.8,
+          "rows": 269
+        },
+        {
+          "run_id": "ingest-20260915T061238Z-2312883",
+          "stage": "ingest",
+          "wall_seconds": 0.3,
+          "peak_rss_gb": 12.8,
+          "rows": 0
+        }
+      ],
+      "fingerprint": {
+        "canonical/anchors": "13:572a35d07acccb2e09d539cfe18bfeea0c9808d38e95c96907a4f74615142fff",
+        "canonical/cohort_membership": "20:4c1fcde4acbb7d818dd327a9cda41b348aac220425bb90500e768c5451ae50be",
+        "canonical/event_source": "426:718de47e6c42f035b96f98741b2aadcdc1ed02df99b483a7bb59e76ad2f03a1e",
+        "canonical/events": "120:8d619c47639ea1d3e9d5a0436eb9481af7470ae3c6f946bb3f72a9aae2a363c7",
+        "canonical/quality_issue": "0:16421a7a2de06c52262c713fc6c15f081bb9e5aa4d03b8081cdf98235c9415ef",
+        "canonical/quarantine": "32:f2c334f3c3a66ce33aa6ec42dd4404c21cfa3098a83a7c6b7e5b84b8dc1e85d2",
+        "omop/attr_map": "4:42506474754597686167",
+        "omop/care_site": "0:0",
+        "omop/cdm_source": "1:2424008247067079760",
+        "omop/cohort": "0:0",
+        "omop/cohort_definition": "0:0",
+        "omop/concept": "0:0",
+        "omop/concept_ancestor": "0:0",
+        "omop/concept_class": "0:0",
+        "omop/concept_relationship": "0:0",
+        "omop/concept_synonym": "0:0",
+        "omop/condition_era": "0:0",
+        "omop/condition_occurrence": "6:52091537226318435349",
+        "omop/cost": "0:0",
+        "omop/death": "1:8679583007011733047",
+        "omop/device_exposure": "0:0",
+        "omop/discharge_map": "0:0",
+        "omop/domain": "0:0",
+        "omop/dose_era": "0:0",
+        "omop/dose_map": "2:25552408232491856878",
+        "omop/drug_era": "0:0",
+        "omop/drug_exposure": "14:151484465592717636097",
+        "omop/drug_strength": "0:0",
+        "omop/episode": "0:0",
+        "omop/episode_event": "0:0",
+        "omop/evt": "120:1184246403509543346044",
+        "omop/fact_relationship": "0:0",
+        "omop/lnk": "426:4126384585967755453736",
+        "omop/location": "0:0",
+        "omop/measurement": "35:340617457067680794765",
+        "omop/metadata": "0:0",
+        "omop/note": "6:52953200822682645353",
+        "omop/note_nlp": "0:0",
+        "omop/observation": "0:0",
+        "omop/observation_period": "3:32170054166347352249",
+        "omop/payer_plan_period": "0:0",
+        "omop/person": "3:28399896882873891687",
+        "omop/person_attrs": "4:32954853309497312885",
+        "omop/pmap": "4:35438615687178183988",
+        "omop/procedure_occurrence": "11:101760709187581776448",
+        "omop/provider": "0:0",
+        "omop/relationship": "0:0",
+        "omop/source_to_concept_map": "0:0",
+        "omop/specimen": "0:0",
+        "omop/term_map": "2:19903073140689683318",
+        "omop/type_concept": "12:132552864210806352693",
+        "omop/unit_map": "6:64574475558694512524",
+        "omop/visit_detail": "0:0",
+        "omop/visit_lookup": "3:35426663472779009007",
+        "omop/visit_occurrence": "3:16058118635493814510",
+        "omop/vocabulary": "0:0",
+        "meds/metadata/codes": "24:c4fd2bc446a5ae1b089ffff69e09259397f37bf84a1ebe6498eaba6fdd1dcb61",
+        "meds/metadata/subject_splits": "4:13aaedc1eb28045aef321045a4f87bb0e5ac406ca646b8328f8db63cb2e3ec50",
+        "meds/data/000000": "29:99971be6d211e3d9582ae0dd4501c1f1e78351e39b4cd384620dbb35c0565b2b",
+        "meds/data/000001": "31:1e42bd7dd7e439b43e92f482488bae72fd034270ec1f8bfb35a7d49b69ccc0bf"
+      },
+      "differs_from_reference": []
+    }
+  ],
+  "seconds": 207.9
+}
