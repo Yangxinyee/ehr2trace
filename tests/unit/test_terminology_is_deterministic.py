@@ -159,3 +159,15 @@ def test_every_path_names_how_the_mapping_was_reached(both):
     for _key, (_concept_id, path) in one.items():
         base = path[: -len("_ambiguous")] if path.endswith("_ambiguous") else path
         assert base in known, f"unknown resolution path {path!r}"
+
+
+def test_a_build_refuses_a_missing_mapping_registry(tmp_path, monkeypatch):
+    from ehr2trace.errors import BlockerError
+    from ehr2trace.terminology import load_build_mappings
+
+    monkeypatch.setenv("EHR_MAPPINGS_DIR", str(tmp_path / "absent"))
+    with pytest.raises(BlockerError, match="EHR_MAPPINGS_DIR"):
+        load_build_mappings()
+    (tmp_path / "present").mkdir()
+    monkeypatch.setenv("EHR_MAPPINGS_DIR", str(tmp_path / "present"))
+    assert load_build_mappings().entries == {}

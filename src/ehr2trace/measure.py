@@ -36,8 +36,12 @@ from typing import Any
 
 from ehr2trace.config import DatasetConfig
 from ehr2trace.paths import WorkLayout
-from ehr2trace.terminology import (DOMAIN_FOR_KIND, Candidate, MappingRegistry, Vocabulary,
-                                 mappings_directory)
+from ehr2trace.terminology import (
+    Candidate,
+    DOMAIN_FOR_KIND,
+    load_build_mappings,
+    Vocabulary,
+)
 
 GOLD_FIELDS = ["code_system", "source_string", "event_kind", "concept_id", "concept_name", "note"]
 
@@ -151,7 +155,7 @@ def measure(
         raise ValueError(f"{gold_path} has no usable rows")
 
     vocabulary = Vocabulary.open(vocabulary_dir)
-    mappings = MappingRegistry.load(mappings_directory())
+    mappings = load_build_mappings()
 
     deterministic = ArmResult("deterministic_lookup")
     lexical = ArmResult("plus_lexical_recall")

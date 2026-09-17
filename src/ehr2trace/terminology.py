@@ -111,6 +111,29 @@ def mappings_directory() -> Path:
     return Path(raw) if raw else Path.cwd() / "mappings"
 
 
+def load_build_mappings() -> "MappingRegistry":
+    """The registry a build publishes with, or a refusal when there is none to load.
+
+    ``MappingRegistry.load`` answers a missing directory with an empty registry, which
+    is right for a test and wrong for a build: a publisher run from a directory with no
+    ``mappings/`` beside it writes every type concept as 0 and leaves every
+    human-confirmed term unresolved, and nothing in its output says so. The
+    2026-09-17 reproducibility rebuilds did exactly that from the paper checkout and
+    reported the difference as the converter's.
+    """
+    from ehr2trace.errors import BlockerError
+
+    directory = mappings_directory()
+    if not directory.is_dir():
+        raise BlockerError(
+            "MAPPINGS_DIR_MISSING",
+            f"no mapping registry at {directory}: run from the checkout that holds "
+            "mappings/, or set EHR_MAPPINGS_DIR to it",
+            needed_from="operator",
+        )
+    return MappingRegistry.load(directory)
+
+
 @dataclass
 class MappingRegistry:
     """Human-confirmed mappings, git-tracked and versioned (design section 8.4)."""

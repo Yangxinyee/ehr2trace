@@ -44,11 +44,12 @@ from ehr2trace.paths import WorkLayout
 from ehr2trace.schema import EventKind, QualityFlag
 from ehr2trace.terminology import (
     DOMAIN_FOR_KIND,
+    load_build_mappings,
     MappingRegistry,
     mappings_directory,
+    resolve_terms_batch,
     TermRequest,
     Vocabulary,
-    resolve_terms_batch,
 )
 from ehr2trace.version import CODE_VERSION, DEFAULT_MAPPING_VERSION
 
@@ -102,7 +103,7 @@ class BuildStats:
 
 def build_omop(cfg: DatasetConfig, layout: WorkLayout, vocabulary_dir: Path | None = None) -> dict[str, Any]:
     vocabulary = Vocabulary.open(vocabulary_dir or _env_vocabulary_dir())
-    mappings = MappingRegistry.load(mappings_directory())
+    mappings = load_build_mappings()
 
     db_path = layout.omop_dir / "omop.duckdb"
     if db_path.exists():
@@ -1393,9 +1394,16 @@ def _publish_audit(con, cfg: DatasetConfig, layout: WorkLayout, vocabulary, mapp
             now,
             now,
             str(layout.manifest_dir / "inputs.json"),
-            ""
-            if vocabulary.available
-            else "no vocabulary available: every concept_id is 0 and every term is in review",
+            "; ".join(
+                note
+                for note in (
+                    ""
+                    if vocabulary.available
+                    else "no vocabulary available: every concept_id is 0 and every term is in review",
+                    f"mappings: {len(mappings.entries)} entries from {mappings_directory()}",
+                )
+                if note
+            ),
         ],
     )
 

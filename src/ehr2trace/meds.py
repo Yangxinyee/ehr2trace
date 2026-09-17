@@ -40,12 +40,13 @@ from ehr2trace.hashing import split_of
 from ehr2trace.paths import WorkLayout, write_table_atomic
 from ehr2trace.schema import EventKind, QualityFlag
 from ehr2trace.terminology import (
+    load_build_mappings,
     MappingRegistry,
     mappings_directory,
-    TermRequest,
-    Vocabulary,
     normalize_term,
     resolve_terms_batch,
+    TermRequest,
+    Vocabulary,
 )
 from ehr2trace.version import CODE_VERSION
 
@@ -134,7 +135,7 @@ def build_meds(cfg: DatasetConfig, layout: WorkLayout, vocabulary_dir: Path | No
 
     vocabulary = Vocabulary.open(vocabulary_dir or _vocab_dir())
     _refuse_to_unmap_what_omop_mapped(layout, vocabulary)
-    mappings = MappingRegistry.load(mappings_directory())
+    mappings = load_build_mappings()
 
     # The work below collapses a link table of hundreds of millions of rows and orders
     # every event in the dataset. It needs somewhere to spill -- without it this was
@@ -193,6 +194,8 @@ def build_meds(cfg: DatasetConfig, layout: WorkLayout, vocabulary_dir: Path | No
         "mapped_codes": code_counts["mapped"],
         "distinct_terms": distinct,
         "resolved_terms": resolved,
+        "mapping_entries": len(mappings.entries),
+        "mappings_dir": str(mappings_directory()),
         "membership_label_included": cfg.meds.include_membership_label,
         "data_dir": str(layout.meds_dir / meds_spec.data_subdirectory),
     }

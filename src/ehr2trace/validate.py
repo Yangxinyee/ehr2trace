@@ -1171,7 +1171,7 @@ def _omop_concepts(l: Layers) -> CheckResult:
     if con is None:
         return _skip("OMOP not built or empty")
     try:
-        from ehr2trace.terminology import Vocabulary
+        from ehr2trace.terminology import load_build_mappings, Vocabulary
 
         import os
 
@@ -1924,7 +1924,7 @@ def _undecided_not_published(l: Layers) -> CheckResult:
     # decision either -- but only open ones are a backlog worth reporting.
     still_open = [r for r in pending if r["status"] == "open"]
     decisions = read_decisions(l.layout)
-    registry = MappingRegistry.load(mappings_directory())
+    registry = load_build_mappings()
     leaked = []
     for row in pending:
         decision = decisions.get(row["id"], {}).get("decision", "").strip().lower()
