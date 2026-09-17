@@ -46,6 +46,14 @@ def cell(train_arm: str, test_arm: str) -> str:
     return f"{train_arm}->{test_arm}"
 
 
+def read_baseline(path: Path) -> dict[int, dict[str, float]]:
+    """The single-rule record's held-out AUROC per horizon and arm, or {} if absent."""
+    if not path.exists():
+        return {}
+    return {h["horizon_hours"]: {a["arm"]: a["held_out_auroc"] for a in h["arms"]}
+            for h in json.loads(path.read_text())["horizons"]}
+
+
 def build_matrix(cohort, feats, arm: str, codes: list[str] | None = None):
     """The design matrix of one arm over a vocabulary, and the vocabulary used.
 
@@ -134,6 +142,9 @@ def main() -> None:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--baseline", type=Path, default=Path(__file__).resolve().parent / "results" / "leakage_downstream.json",
                     help="existing diagonal results to reproduce (acceptance check 1)")
+    ap.add_argument("--baseline-wait", type=int, default=0,
+                    help="seconds to wait at the end for --baseline to appear, when the single-rule "
+                         "experiment runs concurrently on the same build")
     args = ap.parse_args()
 
     import numpy as np
@@ -151,10 +162,7 @@ def main() -> None:
     print(f"cohort: {stats[0]:,} subjects, {stats[1]:,} deaths ({time.time() - t0:.0f}s)", flush=True)
     cohort = pl.read_parquet(cohort_path).sort("subject_id")
 
-    baseline = {}
-    if args.baseline.exists():
-        for h in json.loads(args.baseline.read_text())["horizons"]:
-            baseline[h["horizon_hours"]] = {a["arm"]: a["held_out_auroc"] for a in h["arms"]}
+    baseline = read_baseline(args.baseline)
 
     A, C = BASE_ARM, LEAKED_ARM
     horizons = []
@@ -230,6 +238,21 @@ def main() -> None:
               f"  diagonal reproduced: {[v['reproduced'] for v in diag_check.values()]}", flush=True)
         features_path.unlink(missing_ok=True)
     con.close()
+
+    # The single-rule record may be written by a run of run_leakage_experiment.py that
+    # started alongside this one; compare the diagonal against it once more now that it
+    # has had time to finish. The comparison is the same one made per horizon above.
+    deadline = time.time() + args.baseline_wait
+    while not args.baseline.exists() and time.time() < deadline:
+        time.sleep(15)
+    baseline = read_baseline(args.baseline)
+    for h in horizons:
+        for arm in ARMS:
+            v = h["acceptance"]["diagonal_reproduces_existing"][SHORT[arm]]
+            v["existing"] = baseline.get(h["horizon_hours"], {}).get(arm)
+            v["reproduced"] = (v["existing"] is not None and abs(v["here"] - v["existing"]) <= 0.001)
+        print(f"[{h['horizon_hours']}h] diagonal reproduced at end: "
+              f"{[v['reproduced'] for v in h['acceptance']['diagonal_reproduces_existing'].values()]}", flush=True)
 
     summary = {
         "meds_root": portable_work_path(args.meds),
