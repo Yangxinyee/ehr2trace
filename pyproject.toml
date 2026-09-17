@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 readme = "README.md"
-authors = [{name = "Xinye Yang", email = "yangxinye2001@gmail.com"}]
+authors = [{name = "Xinye Yang", email = "xinye_yang@alumni.brown.edu"}]
 keywords = ["OMOP", "MEDS", "EHR", "provenance", "ETL", "clinical"]
 classifiers = [
     "Development Status :: 4 - Beta",
