@@ -33,7 +33,7 @@ Design section 10.2                    Where it is checked
 =====================================  =========================================
 
 The remediation checks at the end of this module come from the conversion audit of
-2026-09-13 (``docs/CONVERSION_REMEDIATION_PLAN.md``, phase 0): each names the problem
+2026-09-13 (``docs/DECISIONS.md``): each names the problem
 ids it detects, and ``tools/audit_conversion.py`` reuses their summaries.
 """
 
@@ -1949,7 +1949,7 @@ def _undecided_not_published(l: Layers) -> CheckResult:
 
 
 # --------------------------------------------------------------------------------
-# remediation checks (docs/CONVERSION_REMEDIATION_PLAN.md, phase 0, T0.2)
+# remediation checks (docs/DECISIONS.md)
 # --------------------------------------------------------------------------------
 #
 # The audit of 2026-09-13 found a class of problems the checks above could not see:

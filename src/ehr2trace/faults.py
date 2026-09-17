@@ -692,7 +692,7 @@ def _note_text_dropped(layout: WorkLayout, cfg: DatasetConfig) -> str:
 # check then in the suite reported as a clean build. They are grouped here rather than
 # by layer because that is their common origin: each was a real published defect, and
 # each is injected the way the audit found it -- in the artifact, not in the code that
-# wrote it. `docs/CONVERSION_REMEDIATION_PLAN.md` records the incident behind each.
+# wrote it. `docs/FAULT_CATALOGUE.md` records the incident behind each.
 
 
 def _manifest(layout: WorkLayout) -> dict | None:

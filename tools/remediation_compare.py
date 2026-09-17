@@ -1,6 +1,6 @@
 """Put one dataset's conversion before and after the remediation side by side.
 
-The remediation plan (docs/CONVERSION_REMEDIATION_PLAN.md) is judged by whether its
+The 2026-09 remediation (docs/DECISIONS.md) is judged by whether its
 section 5 numbers move, and section 3 of phase 3 asks for one document per dataset that
 says so. Both sides are the output of ``tools/audit_conversion.py``: the "before" side is
 normally the 2026-09-13 baseline file, which wraps that audit together with the

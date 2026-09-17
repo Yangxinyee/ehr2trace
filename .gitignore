@@ -3,6 +3,10 @@ tools/baselines.local.json
 *.local.json
 *_mrn_map*
 
+# Internal working notes: operator logs with machine paths and names, not user documentation.
+docs/CONVERSION_REMEDIATION_PLAN.md
+docs/WORLD_MODEL_READINESS.md
+
 # Environment and outputs
 .env
 work/

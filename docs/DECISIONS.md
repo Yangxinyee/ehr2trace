@@ -426,7 +426,7 @@ that reading as its answer, marked as the study team's and put to the owner to c
 
 ## Eighteen decisions of 2026-09-13 close the conversion audit
 
-A read-only audit of the three built datasets on 2026-09-13 (`docs/CONVERSION_REMEDIATION_PLAN.md`)
+A read-only audit of the three built datasets on 2026-09-13 (its findings are recorded in this file and in `docs/FAULT_CATALOGUE.md`)
 found 58 problems: thirteen in the converter, the rest in what each dataset's config
 declared or failed to declare. Most of them turn on a judgement the data cannot make
 alone -- what a unit really is, which of two disagreeing values to keep, what a

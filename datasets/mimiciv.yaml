@@ -10,7 +10,7 @@
 # and lookup joins only and records a manifest of input and output hashes. Everything
 # downstream of that script is the ordinary pipeline with no MIMIC-specific code.
 #
-# Revised 2026-09-14 for the conversion remediation plan (docs/CONVERSION_REMEDIATION_PLAN.md):
+# Revised 2026-09-14 for the conversion remediation (decisions in docs/DECISIONS.md):
 # tasks T2.M1-T2.M13 and T4.1-T4.4, decisions D-R4, D-R5, D-R7, D-R8, D-R9, D-R10,
 # D-R13, D-R14, D-R15, D-R17, D-R18. Each declaration below names the problem (P-M*)
 # and the decision it carries out, so a reader can go from a published row back to the

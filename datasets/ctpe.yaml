@@ -769,8 +769,8 @@ validation:
   # building and floor, and are in the review queue), so visit details carry a concept
   # for 3.01% of their rows -- 3,782 of 125,769, measured 2026-09-15.
   #
-  # That share is declared here rather than left failing at the 0.5 default, by Xinye's
-  # decision of 2026-09-15: the gap is stated with its measurement instead of a red check
+  # That share is declared here rather than left failing at the 0.5 default, by the study
+  # team's decision of 2026-09-15: the gap is stated with its measurement instead of a red check
   # nobody can act on, and a regression still trips it. The gap itself closes in the
   # review queue, not here, and raising this number is not a way to close it.
   visit_detail_concept_coverage_min: 0.02
