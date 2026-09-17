@@ -33,6 +33,12 @@ jobs:
       - name: Generality guard
         run: pytest tests/test_no_hardcoded_dataset_strings.py -q
 
+      # The experiment records under experiments/results/ are published, and the
+      # concept names the terminology experiments rank come from SNOMED CT, LOINC and
+      # RxNorm, which cannot be redistributed. A rerun that writes them back fails here.
+      - name: Licensed vocabulary strings
+        run: python experiments/strip_vocabulary_strings.py --check
+
       # The paper's central experiment, as a gate: every catalogued fault must still be
       # detected by something.
       - name: Fault detection
