@@ -498,7 +498,14 @@ sources:
       available_time: {from: [storetime]}
       source_code:    {from: [itemid], required: true}
       source_name:    {from: [lab_name]}
-      value:          {from: [value]}
+      # MIMIC masks the display string of some results as `___` and leaves the number in
+      # `valuenum`. Measured over every row on 2026-09-21: 9,487,131 of 158,374,764 rows
+      # are masked and 9,036,009 of them carry a valuenum -- and they are the critical
+      # results (masked aPTT median 102.6 s against 32.7 for the rest; PaO2 42 against
+      # 109; pH 7.21 against 7.39; 87.5% of glucose). Reading `value` alone published
+      # them with no number. `value` is still preferred, so comparators and ranges keep
+      # their own parse; a masked row takes valuenum and carries VALUE_FALLBACK.
+      value:          {from: [value, valuenum], masked: ["___"]}
       unit:           {from: [valueuom]}
       value_low:      {from: [ref_range_lower]}
       value_high:     {from: [ref_range_upper]}
@@ -508,10 +515,6 @@ sources:
         The row's own identifier. Not a discriminator: two rows of one result that
         differ only in storetime are the same measurement, which is what the
         available_time merge rule above resolves.
-      valuenum: >-
-        MIMIC's own numeric parse of `value`. The converter parses `value` itself, with
-        its own record of comparators and ranges; trusting a second parse would mean
-        publishing a number whose derivation is not in this repository.
       fluid: >-
         The specimen the item is measured in (Blood, Urine). A property of the lab item
         rather than of the result, and it is already inside lab_name for the items where

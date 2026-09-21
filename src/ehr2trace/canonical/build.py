@@ -40,7 +40,7 @@ from ehr2trace.canonical.dedup import (
     sort_events,
 )
 from ehr2trace.canonical.normalize import (
-    Emission, Row, ShapeContext, build_role_map, filter_rows, get_shape, split_codes,
+    Emission, Row, ShapeContext, build_masked_map, build_role_map, filter_rows, get_shape, split_codes,
 )
 from ehr2trace.canonical.values import spec_from_config
 from ehr2trace.config import DatasetConfig
@@ -378,8 +378,9 @@ def run_canonical_task(task: CanonicalTask) -> CanonicalResult:
         shape = get_shape(spec.shape)
         df = pl.read_parquet(path)
         roles = build_role_map(spec, df.columns)
+        masked = build_masked_map(spec)
         for rows in _iter_subject_groups(df):
-            wrapped = [Row(r, roles) for r in rows]
+            wrapped = [Row(r, roles, masked) for r in rows]
             # Both are declared per source and both are no-ops unless declared. Order
             # matters: filtering first means a split never runs on a row that was never
             # part of this logical source.

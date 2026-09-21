@@ -85,6 +85,8 @@ class QualityFlag(StrEnum):
     RANGE_VALUE = "RANGE_VALUE"
     SIGNATURE_LINE = "SIGNATURE_LINE"
     TIME_FALLBACK = "TIME_FALLBACK"
+    #: the preferred value column was masked or empty and a declared alternative answered
+    VALUE_FALLBACK = "VALUE_FALLBACK"
     TZ_ASSUMED = "TZ_ASSUMED"
     ANCHOR_TIME_UNKNOWN = "ANCHOR_TIME_UNKNOWN"
     DERIVED_APPROXIMATE_BIRTH_YEAR = "DERIVED_APPROXIMATE_BIRTH_YEAR"

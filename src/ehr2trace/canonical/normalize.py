@@ -80,11 +80,17 @@ class Row:
     can be flagged instead of quietly pretending the preferred column was there.
     """
 
-    __slots__ = ("data", "roles")
+    __slots__ = ("data", "roles", "masked")
 
-    def __init__(self, data: dict[str, Any], roles: dict[str, list[str]]):
+    def __init__(
+        self,
+        data: dict[str, Any],
+        roles: dict[str, list[str]],
+        masked: dict[str, frozenset[str]] | None = None,
+    ):
         self.data = data
         self.roles = roles
+        self.masked = masked or {}
 
     def raw(self, role: str) -> Any:
         value, _ = self.raw_with_index(role)
@@ -92,14 +98,22 @@ class Row:
 
     def raw_with_index(self, role: str) -> tuple[Any, int]:
         """First alias of ``role`` carrying a value, with its position in the alias list."""
+        masked = self.masked.get(role)
+        held: tuple[Any, int] = (None, -1)
         for i, column in enumerate(self.roles.get(role, ())):
             value = self.data.get(column)
             if value is None:
                 continue
             if isinstance(value, str) and not value.strip():
                 continue
+            if masked and str(value).strip() in masked:
+                # The source masked this column. A later alias may still hold the
+                # content; the literal is what the row says if none does.
+                if held[1] < 0:
+                    held = (value, i)
+                continue
             return value, i
-        return None, -1
+        return held
 
     def alias_index(self, role: str) -> int:
         return self.raw_with_index(role)[1]
@@ -152,6 +166,11 @@ def build_role_map(spec: SourceSpec, columns: Iterable[str]) -> dict[str, list[s
         if matched:
             roles[role] = matched
     return roles
+
+
+def build_masked_map(spec: SourceSpec) -> dict[str, frozenset[str]]:
+    """Field role -> the literals that mean "masked" in its columns; empty for most sources."""
+    return {role: frozenset(m.strip() for m in fs.masked) for role, fs in spec.fields.items() if fs.masked}
 
 
 def filter_rows(spec: SourceSpec, rows: Sequence["Row"], columns: Iterable[str]) -> list["Row"]:
@@ -279,7 +298,7 @@ def split_codes(ctx: "ShapeContext", row: "Row") -> list["Row"]:
             if column is None:
                 continue
             data[column] = parts[i] if i < len(parts) else parts[-1]
-        out.append(Row(data, row.roles))
+        out.append(Row(data, row.roles, row.masked))
     return out
 
 
@@ -717,12 +736,13 @@ def shape_point_event(ctx: ShapeContext, rows: Sequence[Row]) -> Emission:
         kind = kind_of(row)
         try:
             event_time, available_time, end_time, flags = resolve_times(ctx, row)
-            value = parse_value(
-                row.raw("value"), row.raw("unit"), ctx.values, expect=_expect_for(ctx)
-            )
+            value_raw, value_alias = row.raw_with_index("value")
+            value = parse_value(value_raw, row.raw("unit"), ctx.values, expect=_expect_for(ctx))
         except QuarantineRow as q:
             out.quarantine_row(row, q.issue, q.detail, ctx.source_id)
             continue
+        if value_alias > 0:
+            flags.append(str(QualityFlag.VALUE_FALLBACK))
         flags = flags + flags_of(row)
 
         # A source may carry its content as free text rather than as a result value, and

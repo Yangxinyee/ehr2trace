@@ -37,6 +37,10 @@ class FieldSpec(BaseModel):
 
     from_: list[str] = Field(alias="from")
     required: bool = False
+    #: Literals a source writes where it masked the content of this column (MIMIC-IV's
+    #: `___`). An alias holding one is passed over in favour of a later alias that
+    #: carries a value; when none does, the literal is kept, so nothing is lost.
+    masked: list[str] = Field(default_factory=list)
 
     @field_validator("from_")
     @classmethod
