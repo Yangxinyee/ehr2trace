@@ -12,7 +12,7 @@ It is research software under the Apache-2.0 licence, built for preparing patien
 histories for patient world models, clinical agents and offline reinforcement learning.
 Episodes, rewards and models are downstream and not here. The companion paper is
 *EHR2Trace: Auditable EHR Data Infrastructure for Patient World Models and Clinical
-Agents*; see [CITATION.cff](CITATION.cff).
+Agents* ([arXiv:2609.38193](https://arxiv.org/abs/2609.38193)); see [Citation](#citation).
 
 The repository carries the software, dataset configurations and synthetic fixtures. It
 carries no patient data, no conversion output and no clinical vocabulary.
@@ -223,4 +223,16 @@ conversion.
 
 ## Citation
 
-See [CITATION.cff](CITATION.cff).
+If you use EHR2Trace, please cite the paper:
+
+```bibtex
+@article{yang2026ehr2trace,
+  title   = {{EHR2Trace}: Auditable {EHR} Data Infrastructure for Patient World Models and Clinical Agents},
+  author  = {Yang, Xinye and Wang, Yuli and Lin, Cheng Ting and Bai, Harrison},
+  journal = {arXiv preprint arXiv:2609.38193},
+  year    = {2026},
+  doi     = {10.48550/arXiv.2609.38193}
+}
+```
+
+To cite a specific software version, see [CITATION.cff](CITATION.cff).
