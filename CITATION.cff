@@ -37,3 +37,19 @@ keywords:
   - data provenance
   - ETL validation
   - clinical machine learning
+preferred-citation:
+  type: article
+  title: "EHR2Trace: Auditable EHR Data Infrastructure for Patient World Models and Clinical Agents"
+  authors:
+    - given-names: Xinye
+      family-names: Yang
+    - given-names: Yuli
+      family-names: Wang
+    - given-names: Cheng Ting
+      family-names: Lin
+    - given-names: Harrison
+      family-names: Bai
+  journal: arXiv preprint arXiv:2609.38193
+  year: 2026
+  doi: 10.48550/arXiv.2609.38193
+  url: https://arxiv.org/abs/2609.38193
