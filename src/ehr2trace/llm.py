@@ -28,15 +28,15 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Sequence
 
 from pydantic import BaseModel, Field, ValidationError
 
 from ehr2trace.hashing import sha256_hex
+from ehr2trace.resources import resource_dir
 from ehr2trace.terminology import Candidate
 
-PROMPT_DIR = Path(__file__).resolve().parents[2] / "prompts"
+PROMPT_DIR = resource_dir("prompts")
 MAX_RETRIES = 2
 
 #: Room for one ranked candidate: an id, a rank and a short rationale.
