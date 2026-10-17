@@ -21,6 +21,7 @@ authors:
 repository-code: https://github.com/Yangxinyee/ehr2trace
 license: Apache-2.0
 version: 0.7.0
+doi: 10.5281/zenodo.23430726
 abstract: >-
   EHR2Trace converts local hospital EHR extracts (delimited text and spreadsheets)
   into OMOP CDM 5.4 and MEDS. The two targets are derived independently from a
