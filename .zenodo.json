@@ -1,0 +1,42 @@
+{
+  "upload_type": "software",
+  "title": "EHR2Trace: a deterministic converter from local EHR exports to OMOP CDM 5.4 and MEDS, with row-level lineage",
+  "description": "<p>EHR2Trace converts local hospital EHR extracts (delimited text and spreadsheets) into OMOP CDM 5.4 and MEDS. The two targets are derived independently from a single canonical layer rather than one from the other, every published row carries a link back to the source rows it came from, and fifty-five checks encode the properties a conversion must satisfy before it can be used as training data, including the leakage failures that are invisible to schema validation. Where the data does not answer a question, the converter blocks and says so instead of substituting a default.</p><p>Companion paper: EHR2Trace: Auditable EHR Data Infrastructure for Patient World Models and Clinical Agents (arXiv:2609.38193).</p>",
+  "creators": [
+    {
+      "name": "Yang, Xinye",
+      "affiliation": "Department of Radiology, University of Colorado Anschutz School of Medicine",
+      "orcid": "0009-0004-3143-4263"
+    },
+    {
+      "name": "Wang, Yuli",
+      "affiliation": "Department of Radiology, Johns Hopkins University School of Medicine"
+    },
+    {
+      "name": "Lin, Cheng Ting",
+      "affiliation": "Department of Radiology, Johns Hopkins University School of Medicine"
+    },
+    {
+      "name": "Bai, Harrison",
+      "affiliation": "Department of Radiology, University of Colorado Anschutz School of Medicine"
+    }
+  ],
+  "license": "Apache-2.0",
+  "keywords": [
+    "OMOP CDM",
+    "MEDS",
+    "electronic health records",
+    "data provenance",
+    "ETL validation",
+    "clinical machine learning",
+    "MIMIC-IV"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "10.48550/arXiv.2609.38193",
+      "relation": "isSupplementTo",
+      "resource_type": "publication-preprint",
+      "scheme": "doi"
+    }
+  ]
+}
