@@ -41,6 +41,7 @@ from typing import Any, Sequence
 
 from ehr2trace.config import DatasetConfig
 from ehr2trace.paths import WorkLayout
+from ehr2trace.resources import resource_dir
 from ehr2trace.schema import EventKind, QualityFlag
 from ehr2trace.terminology import (
     DOMAIN_FOR_KIND,
@@ -53,7 +54,7 @@ from ehr2trace.terminology import (
 )
 from ehr2trace.version import CODE_VERSION, DEFAULT_MAPPING_VERSION
 
-DDL_DIR = Path(__file__).resolve().parents[2] / "sql" / "omop_5.4"
+DDL_DIR = resource_dir("sql") / "omop_5.4"
 CDM_SCHEMA = "main"
 
 ETL_AUDIT_DDL = """
