@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from ehr2trace.errors import BlockerError, ConfigError
 from ehr2trace.registry import FIELD_ROLES, adapter_names, shape_names
+from ehr2trace.resources import resource_dir
 from ehr2trace.schema import QualityFlag
 
 Strict = ConfigDict(extra="forbid", populate_by_name=True, frozen=True)
@@ -896,7 +897,7 @@ def find_dataset_config(dataset: str, search: list[Path] | None = None) -> Path:
     if p.suffix in {".yaml", ".yml"}:
         candidates.append(p)
     else:
-        roots = search or [Path.cwd() / "datasets", Path(__file__).resolve().parents[2] / "datasets"]
+        roots = search or [Path.cwd() / "datasets", resource_dir("datasets")]
         for root in roots:
             candidates.append(root / f"{dataset}.yaml")
             candidates.append(root / f"{dataset}.yml")
