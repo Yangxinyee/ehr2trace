@@ -1,5 +1,9 @@
 # EHR2Trace
 
+[![PyPI](https://img.shields.io/pypi/v/ehr2trace)](https://pypi.org/project/ehr2trace/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23430726.svg)](https://doi.org/10.5281/zenodo.23430726)
+[![arXiv](https://img.shields.io/badge/arXiv-2609.38193-b31b1b)](https://arxiv.org/abs/2609.38193)
+
 EHR2Trace converts hospital EHR exports into two standard formats, **OMOP CDM 5.4** and
 **MEDS 0.4**, from one canonical layer of patient events. Every published row links
 back to the source rows it came from; event time and information-availability time are
@@ -43,6 +47,15 @@ Four rules hold everywhere, each enforced by a test rather than promised:
 4. Same input, configuration and mapping version give the same output hash.
 
 ## Install
+
+```bash
+pip install ehr2trace
+```
+
+This installs the converter and the `ehr2trace` command. The package carries the OMOP DDL,
+the reference unit tables, the model prompts and the dataset configurations, so it runs
+outside a checkout. To run the MIMIC-IV demo below, change the code or reproduce the
+paper, install from source:
 
 ```bash
 python3 -m venv .venv
