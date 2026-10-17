@@ -31,14 +31,49 @@ dependencies = [
     "meds==0.4.1",
 ]
 
+[project.urls]
+Repository = "https://github.com/Yangxinyee/ehr2trace"
+Paper = "https://arxiv.org/abs/2609.38193"
+Issues = "https://github.com/Yangxinyee/ehr2trace/issues"
+
 [project.optional-dependencies]
 dev = ["pytest>=8", "pyflakes>=3.2"]
 
 [project.scripts]
 ehr2trace = "ehr2trace.cli:app"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+# The packages are listed rather than discovered so that the four resource directories at
+# the repository root can be mapped into the wheel as ehr2trace/_data/<name>; resources.py
+# reads them there when installed and from the repository root in a checkout. A new
+# subpackage under src/ehr2trace has to be added here, and the publish workflow's
+# installed-wheel test fails if one is missing.
+[tool.setuptools]
+packages = [
+    "ehr2trace",
+    "ehr2trace.adapters",
+    "ehr2trace.canonical",
+    "ehr2trace._data.datasets",
+    "ehr2trace._data.prompts",
+    "ehr2trace._data.reference",
+    "ehr2trace._data.reference.plausible_ranges",
+    "ehr2trace._data.reference.units",
+    "ehr2trace._data.sql",
+]
+
+[tool.setuptools.package-dir]
+"" = "src"
+"ehr2trace._data.datasets" = "datasets"
+"ehr2trace._data.prompts" = "prompts"
+"ehr2trace._data.reference" = "reference"
+"ehr2trace._data.sql" = "sql"
+
+[tool.setuptools.package-data]
+"ehr2trace._data.datasets" = ["*.yaml"]
+"ehr2trace._data.prompts" = ["*.md"]
+"ehr2trace._data.reference" = ["*.csv"]
+"ehr2trace._data.reference.plausible_ranges" = ["*.csv"]
+"ehr2trace._data.reference.units" = ["*.csv"]
+"ehr2trace._data.sql" = ["**/*.sql", "**/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
