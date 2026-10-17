@@ -44,8 +44,9 @@ from typing import Any, Mapping
 
 from ehr2trace.canonical.values import DEFAULT_SENTINELS, ValueParsingSpec
 from ehr2trace.errors import ConfigError
+from ehr2trace.resources import resource_dir
 
-DEFAULT_REFERENCE_DIR = Path(__file__).resolve().parents[2] / "reference"
+DEFAULT_REFERENCE_DIR = resource_dir("reference")
 UNITS_SUBDIR = "units"
 CONVERSIONS_FILE = "unit_conversions.csv"
 RANGES_SUBDIR = "plausible_ranges"
