@@ -84,5 +84,27 @@ jobs:
           for step in inspect ingest identity canonical omop meds; do
             ehr2trace "$step" -d datasets/mimiciv.yaml
           done
-          # Non-zero exit means a check failed, which is the point of the job.
-          ehr2trace validate -d datasets/mimiciv.yaml
+          ehr2trace validate --all -d datasets/mimiciv.yaml || true
+          ehr2trace validate --all --json -d datasets/mimiciv.yaml > validation.json || true
+
+      # MIMIC-IV mixes unit spellings within a few lab codes, and the converter reports
+      # that rather than tuning it away (README, "Try it on open data"), so that one
+      # failure is expected here. Any other failing check fails the job, as does the
+      # expected one going missing from the run.
+      - name: Only the expected checks fail
+        run: |
+          python - <<'PY'
+          import json, sys
+          expected = {"UNIT_HOMOGENEOUS_PER_CODE"}
+          results = json.load(open("validation.json"))
+          ids = {r["check_id"] for r in results}
+          failed = {r["check_id"] for r in results if not r["passed"]}
+          print(f"{len(results)} checks, failed: {sorted(failed) or 'none'}")
+          unexpected = failed - expected
+          if unexpected:
+              sys.exit(f"unexpected failures: {sorted(unexpected)}")
+          if not expected <= ids:
+              sys.exit(f"expected checks did not run: {sorted(expected - ids)}")
+          for check in sorted(expected - failed):
+              print(f"::notice::{check} now passes on MIMIC-IV; remove it from the expected failures")
+          PY
