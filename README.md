@@ -138,7 +138,8 @@ Under `EHR_WORK_ROOT/<dataset>/`:
 
 ## Validation
 
-The 55 checks cover source rows and links, patient identity and time, the OMOP and MEDS
+The 55 checks (54 by default; `ehr2trace validate --all` adds `DUPLICATES_AGREE`, which
+rereads every source file) cover source rows and links, patient identity and time, the OMOP and MEDS
 outputs, and the review records. Cross-layer checks compare what was published with
 information stored apart from it: merged rows against their source rows, values and
 units against reference tables, published deaths against the deaths the canonical layer
